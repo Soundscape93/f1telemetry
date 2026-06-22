@@ -1,0 +1,1 @@
+"""F1 Telemetry Protocol Layer: version-aware wire structs, packet dispatch, enums, reference data"""

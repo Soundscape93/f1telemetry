@@ -1,0 +1,1 @@
+"""Format 2025 structs for F1 telemetry packets."""
