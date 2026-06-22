@@ -7,7 +7,7 @@ uint16 packet format at offset 0, packet id at offset 6.
 
 Run::
 
-    python -m f1telemetry.test.WellFormedPacketsTest
+    python -m f1telemetry.test.well_formed_packets_tests
 """
 
 from __future__ import annotations
