@@ -208,13 +208,13 @@ class LapData(_Struct):
         ("last_lap_time_ms", ct.c_uint32),                       # Last lap time in milliseconds
         ("current_lap_time_ms", ct.c_uint32),                    # Current time around the lap in milliseconds
         ("sector1_time_ms_part", ct.c_uint16),                  # Sector 1 time in milliseconds part
-        ("sector1_time_minutes_whole", ct.c_uint8),             # Sector 1 whole minute part
+        ("sector1_time_minutes_part", ct.c_uint8),             # Sector 1 whole minute part
         ("sector2_time_ms_part", ct.c_uint16),                  # Sector 2 time in milliseconds part
-        ("sector2_time_minutes_whole", ct.c_uint8),             # Sector 2 whole minute part
+        ("sector2_time_minutes_part", ct.c_uint8),             # Sector 2 whole minute part
         ("delta_to_car_in_front_ms_part", ct.c_uint16),          # Time delta to car in front in milliseconds
-        ("delta_to_car_in_front_minutes_whole", ct.c_uint8),    # Time delta to car in front whole minute part
+        ("delta_to_car_in_front_minutes_part", ct.c_uint8),    # Time delta to car in front whole minute part
         ("delta_to_race_leader_ms_part", ct.c_uint16),           # Time delta to racelader in milliseconds part
-        ("delta_to_race_leader_minutes_whole", ct.c_uint8),     # Time delta to raceleader whole minute part
+        ("delta_to_race_leader_minutes_part", ct.c_uint8),     # Time delta to raceleader whole minute part
         ("lap_distance", ct.c_float),                           # Distance vehicle is around current lap in metres – could be negative if line hasn’t been crossed yet
         ("total_distance", ct.c_float),                         # Total distance travelled in session in metres – could be negative if line hasn’t been crossed yet
         ("safety_car_delta", ct.c_float),                       # Delta in seconds for safety car
