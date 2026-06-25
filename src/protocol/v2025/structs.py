@@ -561,7 +561,7 @@ class CarStatusData(_Struct):
         ("vehicle_fia_flags", ct.c_int8),         # -1 = invalid/unknown, 0 = none, 1 = green, 2 = blue, 3 = yellow
         ("engine_power_ice", ct.c_float),  # Engine power output of the ICE (W)
         ("engine_power_mguk", ct.c_float),  # Engine power output of the MGU-K (W)
-        ("ers_engine_store_energy", ct.c_float),  # ERS energy store in Joules
+        ("ers_store_energy", ct.c_float),  # ERS energy store in Joules
         ("ers_deploy_mode", ct.c_uint8),  # see enums.ERSDeployMode
         ("ers_harvested_this_lap_mguk", ct.c_float),  # ERS energy harvested this lap by MGU-K
         ("ers_harvested_this_lap_mguh", ct.c_float),  # ERS energy harvested this lap by MGU-H
