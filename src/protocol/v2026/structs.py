@@ -739,11 +739,11 @@ class LapHistoryData(_Struct):
 
     _fields_ = [
         ("lap_time_in_ms", ct.c_uint32),  # Lap time in milliseconds
-        ("sector1_time_in_ms_part", ct.c_uint16),  # Sector 1 time in milliseconds
+        ("sector1_time_ms_part", ct.c_uint16),  # Sector 1 time in milliseconds
         ("sector1_time_minutes_part", ct.c_uint8),  # Sector 1 whole minute part
-        ("sector2_time_in_ms_part", ct.c_uint16),  # Sector 2 time in milliseconds
+        ("sector2_time_ms_part", ct.c_uint16),  # Sector 2 time in milliseconds
         ("sector2_time_minutes_part", ct.c_uint8),  # Sector 2 whole minute part
-        ("sector3_time_in_ms_part", ct.c_uint16),  # Sector 3 time in milliseconds
+        ("sector3_time_ms_part", ct.c_uint16),  # Sector 3 time in milliseconds
         ("sector3_time_minutes_part", ct.c_uint8),  # Sector 3 whole minute part
         ("lap_valid_bit_flags", ct.c_uint8),  # 0x01 bit set = sector 1 valid, 0x02 bit set = sector 2 valid, 0x04 bit set = sector 3 valid, 0x08 bit set = lap valid
     ]
