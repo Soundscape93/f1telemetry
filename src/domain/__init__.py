@@ -1,0 +1,1 @@
+"""Domain layer: version-agnostic models and the normalizer that produces them."""
