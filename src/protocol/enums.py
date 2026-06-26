@@ -52,23 +52,23 @@ class SessionType(IntEnum):
     """Session types for a session, according to the F1 25 / F1 26 UDP appendices."""
 
     UNKNOWN = 0
-    PRACTICE1 = 1
-    PRACTICE2 = 2
-    PRACTICE3 = 3
+    PRACTICE_1 = 1
+    PRACTICE_2 = 2
+    PRACTICE_3 = 3
     SHORT_PRACTICE = 4
-    QUALIFYING1 = 5
-    QUALIFYING2 = 6
-    QUALIFYING3 = 7
+    QUALIFYING_1 = 5
+    QUALIFYING_2 = 6
+    QUALIFYING_3 = 7
     SHORT_QUALIFYING = 8
     ONE_SHOT_QUALIFYING = 9
-    SPRINT_SHOOTOUT1 = 10
-    SPRINT_SHOOTOUT2 = 11
-    SPRINT_SHOOTOUT3 = 12
+    SPRINT_SHOOTOUT_1 = 10
+    SPRINT_SHOOTOUT_2 = 11
+    SPRINT_SHOOTOUT_3 = 12
     SHORT_SPRINT_SHOOTOUT = 13
     ONE_SHOT_SPRINT_SHOOTOUT = 14
     RACE = 15
-    RACE2 = 16
-    RACE3 = 17
+    RACE_2 = 16
+    RACE_3 = 17
     TIME_TRIAL = 18
 
 
@@ -127,9 +127,9 @@ class PitStatus(IntEnum):
 class Sector(IntEnum):
     """session.m_sector"""
 
-    SECTOR1 = 0
-    SECTOR2 = 1
-    SECTOR3 = 2
+    SECTOR_1 = 0
+    SECTOR_2 = 1
+    SECTOR_3 = 2
 
 
 class ResultStatus(IntEnum):
