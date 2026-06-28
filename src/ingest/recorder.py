@@ -5,13 +5,15 @@ with its arrival time, to a capture file. Going through the same source seam as 
 the system means the socket handling lives in one place (``LiveUDPSource``) instead of being
 duplicated here.
 
-Usage::
+Usage (CLI)::
 
     python -m f1telemetry.src.ingest.recorder my_race.f1cap
     python -m f1telemetry.src.ingest.recorder my_race.f1cap --port 20777
 
-The output path must not already exist: the recorder refuses to overwrite an existing capture
-so a stray re-run can never destroy a recorded session.
+For programmatic / GUI use, call :meth: `SessionRecorder.record` with a status callback and
+drive the stop through the source's ``stop_event`` (see ``LiveUDPSource``). The output path
+must not already exist: the recorder refuses to overwrite an existing capture so a stray
+re-run can never destroy a recorded session.
 """
 
 from __future__ import annotations
@@ -20,9 +22,13 @@ import argparse
 import os
 import time
 from typing import BinaryIO
+from collections.abc import Callable
 
 from .recording import write_header, write_packet
 from .sources import LiveUDPSource, PacketSource
+
+# called with (packet_count, byte_count, elapsed_seconds)
+StatusCallback = Callable[[int, int, float], None]
 
 
 class SessionRecorder:
@@ -34,24 +40,23 @@ class SessionRecorder:
         self.packet_count = 0
         self.byte_count = 0
 
-    def record_forever(self, status_interval: float = 2.0) -> None:
-        """Capture until interrupted with Ctrl-C. Prints status every ``status_interval`` seconds.
+    def record(self, on_status: StatusCallback | None = None, status_interval: float = 2.0) -> int:
+        """Capture datagrams until the source stops yielding, returning the packet count.
 
-        Refuses to start if ``output_path`` already exists, and only creates the file once the
-        first datagram arrives - so a failed bind never leaves an empty capture behind, and a
-        re-run never clobbers an existing one.
+        The source decides when capture ends - exhaustion, Ctrl-C (which interrupts the socket),
+        or a ``stop_event`` being set. ``on_status`` is invoked periodically and once more at the
+        end with the final tally, so a GUI can show live progress. The file is created only once the first
+        datagram arrives, (so a failed bind never leaves an empty capture) and is never overwritten.
         """
         if os.path.exists(self.output_path):
             raise FileExistsError(
                 f"{self.output_path} already exists; refusing to overwrite a capture. "
                 "Choose another name or delete it first."
             )
-
-        print(f"Listening for telemetry, writing to {self.output_path}")
-        print("Drive a session, then press Ctrl-C to stop.\n")
-
+        
         file: BinaryIO | None = None
-        last_status = time.perf_counter()
+        start = time.perf_counter()
+        last_status = start
         try:
             for data in self.source:
                 if file is None:
@@ -62,21 +67,31 @@ class SessionRecorder:
                 self.byte_count += len(data)
 
                 now = time.perf_counter()
-                if now - last_status >= status_interval:
-                    self._print_status()
+                if on_status is not None and now - last_status >= status_interval:
+                    on_status(self.packet_count, self.byte_count, now - start)
                     last_status = now
-        except KeyboardInterrupt:
-            pass
         finally:
             if file is not None:
                 file.flush()
                 file.close()
-            self._print_status()
-            print(f"\nSaved {self.packet_count} packets to {self.output_path}")
+            if on_status is not None:
+                on_status(self.packet_count, self.byte_count, time.perf_counter() - start)
+            return self.packet_count
+        
+    def record_forever(self, status_interval: float = 2.0) -> None:
+        """CLI entry: capture until Ctrl-C, printing status on stdout."""
+        print(f"Listening for telemetry, writing to {self.output_path}")
+        print("Drive a session, then press Ctrl-c or stop.\n")
+        try:
+            self.record(on_status=self._print_status, status_interval=status_interval)
+        except KeyboardInterrupt:
+            pass
+        print(f"\nSaved {self.packet_count} packets to {self.output_path}")
 
-    def _print_status(self) -> None:
-        kb = self.byte_count / 1024
-        print(f"\r {self.packet_count:>7} packets, {kb:>9.1f} KB", end="", flush=True)
+    @staticmethod
+    def _print_status(packet_count: int, byte_count: int, _elapsed: float) -> None:
+        kb = byte_count / 1024
+        print(f"\r {packet_count:>7} packets, {kb:>9.1f} KB", end="", flush=True)
 
 
 def main() -> None:

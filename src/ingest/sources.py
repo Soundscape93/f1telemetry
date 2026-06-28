@@ -13,6 +13,7 @@ import socket
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+import threading
 
 from .recording import read_header, read_packet
 
@@ -30,12 +31,16 @@ class PacketSource(ABC):
 class LiveUDPSource(PacketSource):
     """Listens on the telemetry port and yields every datagram as it arrives.
 
-    Runs until the consumer stops iterating (e.g. Ctrl-C). The socket is closed when iteration ends.
+    Stops when the consumer stops iterating (Ctrl-C in the CLI) or, for programmatic
+    control, when ``stop_event`` is set. This event is checked once per socket-timeout cycle,
+    so a GUI stop button ends capture within ``_SOCKET_TIMEOUT`` even while the game is idle
+    and no datagrams are arriving. The socket is closed when iteration ends.
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 20777):
+    def __init__(self, host: str = "0.0.0.0", port: int = 20777, stop_event: threading.Event | None = None):
         self.host = host
         self.port = port
+        self._stop_event = stop_event
 
     def __iter__(self) -> Iterator[bytes]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -44,6 +49,10 @@ class LiveUDPSource(PacketSource):
         sock.settimeout(_SOCKET_TIMEOUT)
         try:
             while True:
+                # checked at the top of every cycle, so it catches both the idle case
+                # (after a timeout) and the active case (after yielding a datagram)
+                if self._stop_event is not None and self._stop_event.is_set():
+                    return
                 try:
                     data, _addr = sock.recvfrom(_RECV_BUFFER)
                 except socket.timeout:
