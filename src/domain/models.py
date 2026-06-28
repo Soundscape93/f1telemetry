@@ -213,7 +213,8 @@ class SessionResult:
         participants: tuple[Participant, ...] = ()
         laps: tuple[Lap, ...] = ()      # the player's completed laps (with traces)
         setup: Setup | None = None
-        classification: Classification | None = None        # capture time, for chronological ordering
+        classification: Classification | None = None
+        recorded_at: datetime | None = None     # capture time, for chronological ordering
 
 
         @property
