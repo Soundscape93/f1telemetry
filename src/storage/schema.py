@@ -40,6 +40,7 @@ class SessionRow(Base):
     formula: Mapped[int]              # raw enum value -> safe_enum on load
     weather: Mapped[int]             # raw enum value -> safe_enum on load
     total_laps: Mapped[int]           # total laps in the session
+    game_mode: Mapped[int]            # raw mode id -> reference.game_mode_name; buckets sessions into mode-based windows
     player_vehicle_index: Mapped[int]  # index of the player's vehicle in the participants list
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)  # timestamp of when the session was recorded
 

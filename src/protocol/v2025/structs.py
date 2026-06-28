@@ -125,7 +125,7 @@ class PacketSessionData(_Struct):
         ("DRS_assist", ct.c_uint8),                    # 0 = Off, 1 = On
         ("dynamic_racing_line", ct.c_uint8),           # 0 = Off, 1 = Corners only, 2 = Full
         ("dynamic_racing_line_type", ct.c_uint8),      # 0 = 2D, 1 = 3D
-        ("game_mode", ct.c_uint8),                    # see enums.GameMode
+        ("game_mode", ct.c_uint8),                    # see reference.GAME_MODE_NAMES
         ("rule_set", ct.c_uint8),                    # see enums.RuleSet
         ("time_of_day", ct.c_uint32),                # Local time of day - minutes since midnight
         ("session_length", ct.c_uint8),               # 0 = None, 2 = Very Short, 3 = Short, 4 = Medium, 5 = Medium Long, 6 = Long, 7 = Full

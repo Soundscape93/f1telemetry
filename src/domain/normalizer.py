@@ -96,6 +96,7 @@ def normalize_session(packet: "PacketSessionData") -> SessionResult:
         formula=safe_enum(Formula, packet.formula),
         weather=safe_enum(Weather, packet.weather),
         total_laps=packet.total_laps,
+        game_mode=packet.game_mode,
         player_vehicle_index=header.player_car_index,
     )
 

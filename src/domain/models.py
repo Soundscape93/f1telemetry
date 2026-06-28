@@ -206,6 +206,7 @@ class SessionResult:
         formula: Formula
         weather: Weather
         total_laps: int
+        game_mode: int          # raw mode id; see reference.game_mode_name (used to bucket sessions into mode-based windows)
         player_vehicle_index: int   # which car is in the roster is the player's
         
 

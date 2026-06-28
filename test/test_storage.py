@@ -33,7 +33,7 @@ def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=
     return SessionResult(
         session_uid=uid, season_link_id=111, weekend_link_id=222, session_link_id=333,
         game_format=2026, track_id=7, session_type=stype, formula=Formula.F1_MODERN,
-        weather=Weather.CLEAR, total_laps=5, player_vehicle_index=0,
+        weather=Weather.CLEAR, total_laps=5, game_mode=28, player_vehicle_index=0,
         classification=Classification(entries=entries)
     )
 
@@ -130,12 +130,13 @@ class NoClassificationTest(StorageTestBase):
             session_uid=555, season_link_id=1, weekend_link_id=2, session_link_id=3,
             game_format=2025, track_id=3, session_type=SessionType.PRACTICE_1,
             formula=Formula.F1_MODERN, weather=Weather.CLEAR, total_laps=0,
-            player_vehicle_index=0)     # classification defaults to None
+            game_mode=27, player_vehicle_index=0)     # classification defaults to None
         self.store.save(session)
         loaded = self.store.load(555)
         self.assertIsNotNone(loaded)
         self.assertIsNone(loaded.classification)
         self.assertEqual(loaded.session_type, SessionType.PRACTICE_1)
+        self.assertEqual(loaded.game_mode, 27)
 
 
 if __name__ == "__main__":
