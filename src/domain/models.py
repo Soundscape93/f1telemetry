@@ -140,14 +140,16 @@ class Participant:
 class ClassificationEntry:
     """One car's final result.
     
-    `driver_name` and `team_id` are denormalized from the participant roster 
-    so a results card renders self-contained without a join.
+    `driver_name` and `team_id`, and `race_number` are denormalized from the participant roster 
+    so a results card renders self-contained without a join and league standings can key on
+    the (stable per human) race number.
     """
 
     vehicle_index: int
     position: int
     driver_name: str
     team_id: int
+    race_number: int
     is_player: bool
     grid_position: int
     points: int

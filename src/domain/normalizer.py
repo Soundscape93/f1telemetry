@@ -188,6 +188,7 @@ def normalize_classification(packet, roster: tuple[Participant, ...]) -> Classif
                 position=car.position,
                 driver_name=participant.driver_name if participant else f"car_{i}",
                 team_id=participant.team_id if participant else -1,
+                race_number=participant.race_number if participant else 0,
                 is_player=(i == player_idx),
                 grid_position=car.grid_position,
                 points=car.points,

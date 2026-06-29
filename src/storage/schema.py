@@ -62,6 +62,7 @@ class ClassificationEntryRow(Base):
     position: Mapped[int]       # final position in the session (1-based)
     driver_name: Mapped[str]    # denormalized so a card renders self-contained
     team_id: Mapped[int]
+    race_number: Mapped[int] = mapped_column(default=0)  # denormalized so a card renders self-contained
     is_player: Mapped[bool]
     grid_position: Mapped[int]
     points: Mapped[int]

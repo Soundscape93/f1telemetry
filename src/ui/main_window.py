@@ -24,7 +24,7 @@ from .workers import IngestWorker, RecorderWorker
 
 # Defaults; these become user settings later.
 _CAPTURE_DIR = Path("captures")
-_DB_URL = "sqlite:///f1telemetry.db"
+_DB_URL = "sqlite:///f1league.db"
 _HOST = "0.0.0.0"
 _PORT = 20777
 

@@ -17,13 +17,13 @@ def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=
     """A session whose uid deliberatly has a high bit set (>2^63)."""
     entries = (
         ClassificationEntry(
-            vehicle_index=1, position=1, driver_name="Rival", team_id=0, is_player=False,
+            vehicle_index=1, position=1, driver_name="Rival", team_id=0, race_number=50, is_player=False,
             grid_position=1, points=25, num_laps=5, num_pit_stops=1, best_lap_time_ms=67000,
             total_race_time_s=280.1, penalties_time_s=0, num_penalties=0,
             result_status=ResultStatus.FINISHED, result_reason=safe_reason(),
             tyre_stints=(TyreStint(actual_compound="16", visual_compound="16", end_lap=5),)),
         ClassificationEntry(
-            vehicle_index=0, position=2, driver_name="Player", team_id=2, is_player=with_player,
+            vehicle_index=0, position=2, driver_name="Player", team_id=2, race_number=51, is_player=with_player,
             grid_position=3, points=18, num_laps=5, num_pit_stops=2, best_lap_time_ms=68000,
             total_race_time_s=282.4, penalties_time_s=5, num_penalties=1,
             result_status=ResultStatus.FINISHED, result_reason=safe_reason(),
@@ -80,6 +80,7 @@ class RoundTripTest(StorageTestBase):
         self.assertEqual(classification.winner.points, 25)
         self.assertEqual(classification.player.driver_name, "Player")
         self.assertTrue(classification.player.is_player)
+        self.assertEqual(classification.player.race_number, 51)
         self.assertEqual(classification.player.points, 18)
         self.assertEqual(classification.player.result_status, ResultStatus.FINISHED)
         self.assertEqual(classification.player.best_lap_time_ms, 68000)

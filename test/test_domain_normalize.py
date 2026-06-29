@@ -147,6 +147,8 @@ class NormalizeClassificationTest(unittest.TestCase):
         self.assertEqual(c.player.driver_name, "You")
         self.assertEqual(c.player.is_player, True)
         self.assertEqual(c.player.team_id, 2)
+        self.assertEqual(c.player.race_number, 16)
+        self.assertEqual(c.winner.race_number, 1)
 
     def test_tyre_stints_trimmed(self):
         """The tyre stint arrays are trimmed to the car's num_tyre_stints."""

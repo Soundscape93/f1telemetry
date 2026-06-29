@@ -69,6 +69,7 @@ class RecorderStopTest(unittest.TestCase):
         with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as sender:
             for _ in range(5):
                 sender.sendto(b"\x07" + b"x" * 1459, ("127.0.0.1", self.port))  # 1460 byte datagram
+                self.addClassCleanup(sender.close)
                 time.sleep(0.05)
         time.sleep(0.2)
 
