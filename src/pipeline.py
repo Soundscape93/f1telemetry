@@ -15,7 +15,7 @@ from .ingest.sources import FileReplaySource
 from .protocol.parser import PacketParser
 from .protocol.registry import build_registry
 from .session.assembler import assemble
-from .storage.repository import SessionStore
+from .storage.sessions import SessionStore
 
 
 def ingest_capture(capture_path: str, store: SessionStore) -> list[SessionResult]:

@@ -68,7 +68,7 @@ class IngestWorker(QThread):
         when a capture is actually processed.
         """
         from ..pipeline import ingest_capture
-        from ..storage.repository import SessionStore
+        from ..storage.sessions import SessionStore
 
         try:
             store = SessionStore(self._db_url)

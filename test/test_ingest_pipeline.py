@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 
 from f1telemetry.src.protocol.enums import SessionType
-from f1telemetry.src.storage.repository import SessionStore
+from f1telemetry.src.storage.sessions import SessionStore
 
 _DEFAULT_FIXTURES = ("captures/fixture.f1cap", "test/fixtures/sample.f1cap")
 

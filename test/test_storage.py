@@ -10,7 +10,7 @@ from f1telemetry.src.domain.models import (
 from f1telemetry.src.protocol.enums import (
     Formula, ResultReason, ResultStatus, SessionType, Weather,
 )
-from f1telemetry.src.storage.repository import SessionStore
+from f1telemetry.src.storage.sessions import SessionStore
 
 
 def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=True):
