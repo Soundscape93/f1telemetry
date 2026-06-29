@@ -88,6 +88,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 session_type=15,
                 formula=0,
                 weather=0,
+                game_mode=28,
                 total_laps=2,
             )
         )

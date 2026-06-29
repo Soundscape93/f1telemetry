@@ -61,7 +61,7 @@ class NormalizeSessionTest(unittest.TestCase):
             header=_header(session_uid=12345, packet_format=2026, player_car_index=3),
             season_link_identifier=100, weekend_link_identifier=200, session_link_identifier=300,
             track_id=7, session_type=int(SessionType.RACE), formula=int(Formula.F1_MODERN),
-            weather=int(Weather.CLEAR), total_laps=5)
+            weather=int(Weather.CLEAR), game_mode=28, total_laps=5)
     
     def test_metadata_and_keys(self):
         """The scaffold has the right metadata and hierarchy keys."""
