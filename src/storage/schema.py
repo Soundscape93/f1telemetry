@@ -76,3 +76,57 @@ class ClassificationEntryRow(Base):
     tyre_stints: Mapped[list] = mapped_column(JSON)  # list of tyre stint dicts, denormalized for simplicity
 
     session: Mapped[SessionRow] = relationship(back_populates="entries")
+
+
+class SeasonRow(Base):
+    """A user-authored season: mode, number, optional nickname, pinned game format."""
+
+    __tablename__ = "seasons"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    mode: Mapped[int]           # SeasonMode value
+    number: Mapped[int]
+    game_format: Mapped[int]
+    nickname: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime | None] = mapped_column(default=None)
+
+    rounds: Mapped[list["SeasonRoundRow"]] = relationship(
+        back_populates="season",
+        cascade="all, delete-orphan",
+        order_by="SeasonRoundRow.round_number",
+    )
+    assignments: Mapped[list["SeasonAssignmentRow"]] = relationship(
+        back_populates="season",
+        cascade="all, delete-orphan",
+    )
+
+
+class SeasonRoundRow(Base):
+    """One round of a season's calendar."""
+
+    __tablename__ = "season_rounds"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id")) 
+    round_number: Mapped[int]
+    track_id: Mapped[int]
+
+    season: Mapped[SeasonRow] = relationship(back_populates="rounds")
+
+
+class SeasonAssignmentRow(Base):
+    """Places a captured session into a season's round.
+    
+    ``session_uid``references a session by its uid but is deliberately NOT a foreign key to
+    ``sessions``: re-ingesting a capture replaces that session's row, and a FK would cascade
+    the delete and wipe the manual assignemnt. It cascades with its *season* instead.
+    """
+
+    __tablename__ = "season_assignments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"))
+    round_number: Mapped[int]
+    session_uid: Mapped[str]  = mapped_column(String, unique=True)  # FK to sessions intentionally omitted, see class docstring
+
+    season: Mapped[SeasonRow] = relationship(back_populates="assignments")
