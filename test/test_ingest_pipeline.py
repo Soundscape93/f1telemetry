@@ -1,0 +1,96 @@
+"""End-to-End ingest test against a real capture file. This is a regression test to ensure
+that the pipeline continues to work as expected.
+
+This runs the *actual* pipeline (parse -> assemble -> persist -> load) over a real .f1cap, so
+it exercises the full struct set against real game bytes and the real SQLite round trip -
+things a sandboc with synthetic structs cannot. It is skipped unless a fixture is provided.
+
+Point it at a capture by setting the F1_FIXTURE environment variable, eg::
+
+    F1_FIXTURE=my_race.f1cap python -m unittest f1telemetry.test.test_ingest_pipeline
+
+or drop a file at one of the default paths below. Keep both a 2025 and a 2026 capture around
+and run it against each; the assertions are invariants, so they hold for any real session.
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from f1telemetry.src.protocol.enums import SessionType
+from f1telemetry.src.storage.repository import SessionStore
+
+_DEFAULT_FIXTURES = ("captures/fixture.f1cap", "test/fixtures/sample.f1cap")
+
+
+def _find_fixture() -> str | None:
+    """Return a path to a capture file to use as a fixture, or None if none is found."""
+    env = os.environ.get("F1_FIXTURE")
+    if env and Path(env).is_file():
+        return env
+    for candidate in _DEFAULT_FIXTURES:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+_FIXTURE = _find_fixture()
+
+
+@unittest.skipUnless(_FIXTURE, "set F1_FIXTURE to a real capture file to run this test")
+class IngestPipelineTest(unittest.TestCase):
+    """Test the parse -> assemble -> persist pipeline against a real capture file."""
+    def setUp(self):
+        """Set up a temporary SQLite database for the test."""
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.store = SessionStore(f"sqlite:///{self.db_path}")
+
+    def tearDown(self):
+        """Clean up the temporary SQLite database."""
+        os.unlink(self.db_path)
+
+    def test_capture_ingest_and_round_trips(self):
+        """Test that a capture can be ingested and its sessions round-trip through the store."""
+        from f1telemetry.src.pipeline import ingest_capture
+        sessions = ingest_capture(_FIXTURE, self.store)
+        self.assertTrue(sessions, "The capture produced no sessions")
+
+        for original in sessions:
+            loaded = self.store.load(original.session_uid)
+            self.assertIsNotNone(loaded, f"Session {original.session_uid} not in the store")
+            self.assertEqual(loaded.session_uid, original.session_uid, "Loaded session does not match original")
+            self.assertEqual(loaded.game_format, original.game_format, "Loaded session game format does not match original")
+            self.assertEqual(loaded.session_type, original.session_type, "Loaded session type does not match original")
+            # Classification presence must survive the round trip.
+            self.assertEqual(loaded.classification is None, original.classification is None,
+                             "Loaded session classification does not match Original")
+            
+        # the pipeline should have produced some conteent: at least one session with laps,
+        # or a classification wiht a properly named winner.
+        produced_content = any(session.laps for session in sessions) or any(
+            session.classification and session.classification.winner and session.classification.winner.driver_name 
+            for session in sessions
+        )
+        self.assertTrue(produced_content, "no laps or classification were assembled")
+
+    def test_race_sessions_have_a_classification(self):
+        """Test that race sessions have a classification after ingest. This is a regression test for a bug where
+        the assembler would emit a race session without a classification if the capture was missing a
+        classification packet. The assembler should always produce a classification for a race session, even if
+        it is empty.
+        """
+        from f1telemetry.src.pipeline import ingest_capture
+        sessions = ingest_capture(_FIXTURE, self.store)
+        races = [s for s in sessions if s.session_type == SessionType.RACE]
+        for race in races:
+            loaded = self.store.load(race.session_uid)
+            self.assertIsNotNone(loaded.classification, "a race should persist a classification")
+            self.assertTrue(loaded.classification.entries, "race classification has no entries")
+
+
+if __name__ == "__main__":
+    unittest.main()
