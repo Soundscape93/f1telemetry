@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from ..domain.models import ClassificationEntry, SessionResult
 from ..domain.season import RoundResults
+from ..domain.roster import LeagueRoster
 
 
 @dataclass(frozen=True)
@@ -45,14 +46,18 @@ class _Accumulator:
 
 def compute_standings(
         sessions: Iterable[SessionResult],
-        key: Callable[[ClassificationEntry], Hashable] = by_driver_name) -> tuple[StandingRow, ...]:
+        key: Callable[[ClassificationEntry], Hashable] = by_driver_name,
+        display: Callable[[ClassificationEntry], str] | None = None) -> tuple[StandingRow, ...]:
     """Total points per driver across the given sessions, ranked.
     
     Points are summed across every classification; non-scoring sessions (practice, quali)
     carry zero point, so no session-type filtering is needed - a season's quali results can
-    be passed in alongside its races and simply contribute nothing. Ties break by points then
-    name (deterministic); full FIA countback on finishing positions is a later refinement.
+    be passed in alongside its races and simply contribute nothing. ``key`` groups drivers
+    across rounds; ``display`` chooses the shwon name (default: the entry's own driver name).
+    For a league both are the roster resolver, so rows group and label by canonical membler.
+    Ties break by points then name (deterministic); full FIA countback is a later refinement.
     """
+    name_of = display or (lambda entry: entry.driver_name)
     totals: dict[Hashable, _Accumulator] = {}
     for session in sessions:
         if session.classification is None:
@@ -61,12 +66,12 @@ def compute_standings(
             k = key(entry)
             acc = totals.get(k)
             if acc is None:
-                acc = _Accumulator(name=entry.driver_name, number=entry.race_number, points=0)
+                acc = _Accumulator(name=name_of(entry), number=entry.race_number, points=0)
                 totals[k] = acc
             acc.points += entry.points
             # keep the most recently seen name/number as the display identity; for a league
             # member whose shown name drifts between lobbies, the latest round wins.
-            acc.name = entry.driver_name
+            acc.name = name_of(entry)
             acc.number = entry.race_number
 
     ranked = sorted(totals.values(), key=lambda a: (-a.points, a.name))
@@ -78,8 +83,18 @@ def compute_standings(
 
 def standings_for_rounds(
     rounds: Iterable[RoundResults],
-    key: Callable[[ClassificationEntry], Hashable] = by_driver_name) -> tuple[StandingRow, ...]:
+    key: Callable[[ClassificationEntry], Hashable] = by_driver_name,
+    display: Callable[[ClassificationEntry], str] | None = None
+    ) -> tuple[StandingRow, ...]:
     """Convenience for the season view: flatten ``rounds_with_results`` output into its
     sessions and compute standings over them."""
     sessions = [session for round in rounds for session in round.sessions]
-    return compute_standings(sessions, key)
+    return compute_standings(sessions, key, display)
+
+
+def league_standings_for_rounds(
+    rounds: Iterable[RoundResults], roster: LeagueRoster) -> tuple[StandingRow, ...]:
+    """League standings across a season's rounds: drivers are grouped and labelled by their
+    resolved roster member (online name first, race number as fallback), so a member whose
+    shown name drifts between lobbies is still one row under their canonical name."""
+    return standings_for_rounds(rounds, key=roster.member_of, display=roster.member_of)
