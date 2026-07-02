@@ -11,12 +11,14 @@ from f1telemetry.src.ui.formatting import (
     is_race,
     non_race_result,
     race_result,
+    race_winner_summary,
 )
  
  
 def _entry(position=1, status=ResultStatus.FINISHED, total=0.0, penalties=0, laps=57, best=0):
     return SimpleNamespace(position=position, result_status=status, total_race_time_s=total,
-                           penalties_time_s=penalties, num_laps=laps, best_lap_time_ms=best)
+                           penalties_time_s=penalties, num_laps=laps, best_lap_time_ms=best,
+                           driver_name="Driver", team_id=1)
  
  
 class FormatTest(unittest.TestCase):
@@ -91,6 +93,24 @@ class NonRaceResultTest(unittest.TestCase):
         self.assertTrue(is_race(SessionType.RACE_2))
         self.assertFalse(is_race(SessionType.QUALIFYING_1))
         self.assertFalse(is_race(SessionType.PRACTICE_1))
+
+
+class RaceWinnerSummaryTest(unittest.TestCase):
+    def test_race_winner_uses_driver_and_team(self):
+        winner = _entry(position=1)
+        winner.driver_name = "Charles Leclerc"
+        session = SimpleNamespace(
+            session_type=SessionType.RACE,
+            classification=SimpleNamespace(winner=winner),
+        )
+        self.assertEqual(race_winner_summary(session), "Charles Leclerc / Ferrari")
+
+    def test_non_race_has_no_winner_summary(self):
+        session = SimpleNamespace(
+            session_type=SessionType.QUALIFYING_3,
+            classification=SimpleNamespace(winner=_entry(position=1)),
+        )
+        self.assertIsNone(race_winner_summary(session))
  
  
 if __name__ == "__main__":

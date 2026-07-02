@@ -16,6 +16,7 @@ so they line up with the classification order.
 from __future__ import annotations
 
 from ..protocol.enums import ResultStatus, SessionType
+from ..protocol.reference import team_name
 
 _RACE_TYPES = frozenset({SessionType.RACE, SessionType.RACE_2, SessionType.RACE_3})
 
@@ -110,4 +111,14 @@ def non_race_result(entry, session_type) -> str:
     if entry.best_lap_time_ms:
         return format_lap_time(entry.best_lap_time_ms)
     return "\u2014"
+
+
+def race_winner_summary(session) -> str | None:
+    """Return the race winner as ``Driver / Team`` for a race session, or None if unavailable."""
+    if not is_race(session.session_type) or session.classification is None:
+        return None
+    winner = session.classification.winner
+    if winner is None:
+        return None
+    return f"{winner.driver_name} / {team_name(winner.team_id)}"
     

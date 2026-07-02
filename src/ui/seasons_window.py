@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -43,7 +44,7 @@ from ..domain.calendars import official_calendar
 from ..domain.season import SeasonMode
 from ..protocol.reference import track_name, team_name
 from ..protocol.enums import SessionType
-from .formatting import is_race, non_race_result, race_result
+from .formatting import is_race, non_race_result, race_result, race_winner_summary
  
 _MODE_LABELS = {
     SeasonMode.MY_TEAM: "My Team",
@@ -92,6 +93,7 @@ class SeasonsView(QWidget):
         self._detail_rounds: list = []          # 
         self._weekend_track_id: int | None = None
         self._weekend_assigned_uids: set[int] = set()
+        self._collapsed_session_uids: set[int] = set()
  
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_overview())     # _OVERVIEW
@@ -316,26 +318,39 @@ class SeasonsView(QWidget):
         header.addStretch(1)
         outer.addLayout(header)
 
+        body = QHBoxLayout()
+        body.setSpacing(16)
+
+        calendar_panel = QWidget()
+        calendar_layout = QVBoxLayout(calendar_panel)
+        calendar_layout.setContentsMargins(0, 0, 0, 0)
         cal_caption = QLabel("Calendar")
         cal_caption.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        outer.addWidget(cal_caption)
+        calendar_layout.addWidget(cal_caption)
         hint = QLabel("Double-click a round to open its weekend and assign sessions.")
         hint.setStyleSheet("color: palette(mid);")
-        outer.addWidget(hint)
+        calendar_layout.addWidget(hint)
 
         self._calendar_table = QTableWidget(0, 3)
         self._calendar_table.setHorizontalHeaderLabels(["Round", "Track", "Results"])
         _tidy_table(self._calendar_table)
         self._calendar_table.cellDoubleClicked.connect(self._on_calendar_activated)
-        outer.addWidget(self._calendar_table, 3)
+        calendar_layout.addWidget(self._calendar_table)
+        calendar_layout.addStretch(1)
 
+        standings_panel = QWidget()
+        standings_layout = QVBoxLayout(standings_panel)
+        standings_layout.setContentsMargins(0, 0, 0, 0)
         st_caption = QLabel("Standings")
-        st_caption.setStyleSheet("font-weight: 600; margin-top: 6px;")
-        outer.addWidget(st_caption)
+        st_caption.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        standings_layout.addWidget(st_caption)
+        standings_hint = QLabel(" ")
+        standings_hint.setStyleSheet("color: palette(mid);")
+        standings_layout.addWidget(standings_hint)
         self._standings_table = QTableWidget(0, 4)
         self._standings_table.setHorizontalHeaderLabels(["Pos", "Driver", "No.", "Points"])
         _tidy_table(self._standings_table)
-        outer.addWidget(self._standings_table, 2)
+        standings_layout.addWidget(self._standings_table)
 
         self._standings_empty = QLabel(
             "No results yet \u2014 assign captured race weekends to this season's round to "
@@ -343,7 +358,12 @@ class SeasonsView(QWidget):
         )
         self._standings_empty.setStyleSheet("color: palette(mid);")
         self._standings_empty.setWordWrap(True)
-        outer.addWidget(self._standings_empty)
+        standings_layout.addWidget(self._standings_empty)
+        standings_layout.addStretch(1)
+
+        body.addWidget(calendar_panel, 3)
+        body.addWidget(standings_panel, 2)
+        outer.addLayout(body, 1)
         return page
     
     def _show_detail(self, season_id: int) -> None:
@@ -360,10 +380,10 @@ class SeasonsView(QWidget):
 
         self._calendar_table.setRowCount(len(rounds))
         for i, round in enumerate(rounds):
-            n = len(round.sessions)
             self._calendar_table.setItem(i, 0, _cell(str(round.round_number)))
             self._calendar_table.setItem(i, 1, _cell(track_name(round.track_id)))
-            self._calendar_table.setItem(i, 2, _cell(str(n) if n else "\u2014"))
+            self._calendar_table.setItem(i, 2, _cell(_round_result_summary(round)))
+        _fit_table_height(self._calendar_table)
 
         rows = standings_for_rounds(rounds)
         self._standings_table.setRowCount(len(rows))
@@ -372,6 +392,7 @@ class SeasonsView(QWidget):
             self._standings_table.setItem(i, 1, _cell(row.driver_name))
             self._standings_table.setItem(i, 2, _cell(str(row.race_number)))
             self._standings_table.setItem(i, 3, _cell(str(row.points)))
+        _fit_table_height(self._standings_table)
         self._standings_table.setVisible(bool(rows))
         self._standings_empty.setVisible(not rows)
 
@@ -422,23 +443,33 @@ class SeasonsView(QWidget):
         assigned_scroll.setWidget(assigned_host)
         outer.addWidget(assigned_scroll, 1)
 
+        pick_header = QHBoxLayout()
+        pick_header.setContentsMargins(0, 4, 0, 0)
+        pick_header.setSpacing(12)
+
         pick_caption = QLabel("Assign a capture")
-        pick_caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        outer.addWidget(pick_caption)
+        pick_caption.setStyleSheet("font-weight: 600;")
+        pick_header.addWidget(pick_caption)
 
         self._show_all_tracks = QCheckBox("Show captures from all tracks (not just this round's)")
         self._show_all_tracks.toggled.connect(lambda _checked: self._reload_capture_picker())
-        outer.addWidget(self._show_all_tracks)
+        pick_header.addWidget(self._show_all_tracks)
+
+        pick_header.addStretch(1)
+
+        assign_btn = QPushButton("Assign selected to this round")
+        assign_btn.clicked.connect(self._assign_selected)
+        pick_header.addWidget(assign_btn)
+
+        outer.addLayout(pick_header)
 
         self._capture_table = QTableWidget(0, 4)
         self._capture_table.setHorizontalHeaderLabels(["Session", "Track", "Drivers", "Session ID"])
         _tidy_table(self._capture_table)
-        self._capture_table.setMinimumHeight(200)
+        self._capture_table.setMinimumHeight(135)
+        self._capture_table.setMaximumHeight(165)
         outer.addWidget(self._capture_table)
 
-        assign_btn = QPushButton("Assign selected to this round")
-        assign_btn.clicked.connect(self._assign_selected)
-        outer.addWidget(assign_btn)
         return page
 
     def _show_weekend(self, season_id: int, round_number: int) -> None:
@@ -484,11 +515,19 @@ class SeasonsView(QWidget):
         vbox.setContentsMargins(0, 0, 0, 0)
 
         header = QHBoxLayout()
-        label = QLabel(_slot_label(session.session_type))
-        label.setStyleSheet("font-weight: 600;")
+        toggle = QToolButton()
+        toggle.setCheckable(True)
+        toggle.setChecked(session.session_uid not in self._collapsed_session_uids)
+        toggle.setText(_slot_label(session.session_type))
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toggle.setArrowType(
+            Qt.ArrowType.DownArrow if toggle.isChecked() else Qt.ArrowType.RightArrow
+        )
+        toggle.setStyleSheet("QToolButton { font-weight: 600; border: none; padding: 4px 0; }")
+        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         unassign = QPushButton("Unassign")
         unassign.clicked.connect(partial(self._unassign, session.session_uid))
-        header.addWidget(label)
+        header.addWidget(toggle)
         header.addStretch(1)
         header.addWidget(unassign)
         vbox.addLayout(header)
@@ -517,8 +556,20 @@ class SeasonsView(QWidget):
                 table.setItem(i, 4, _cell(non_race_result(entry, session.session_type)))
                 table.setItem(i, 5, _cell(str(entry.num_laps)))
         _fit_table_height(table)
+        table.setVisible(toggle.isChecked())
+        toggle.toggled.connect(partial(self._toggle_session_table, session.session_uid, table, toggle))
         vbox.addWidget(table)
         return block
+
+    def _toggle_session_table(self, session_uid: int, table: QTableWidget,
+                              toggle: QToolButton, expanded: bool) -> None:
+        """Fold/unfold an assigned session's classification table."""
+        table.setVisible(expanded)
+        toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        if expanded:
+            self._collapsed_session_uids.discard(session_uid)
+        else:
+            self._collapsed_session_uids.add(session_uid)
 
 
     def _reload_capture_picker(self) -> None:
@@ -579,10 +630,23 @@ def _clear_layout(layout: QVBoxLayout) -> None:
         if widget is not None:
             widget.deleteLater()
 
+
+def _round_result_summary(round) -> str:
+    """Return the calendar result cell: race winner/team, pending, or dash."""
+    race_results = [
+        summary for session in round.sessions
+        if (summary := race_winner_summary(session)) is not None
+    ]
+    if race_results:
+        return "; ".join(race_results)
+    if round.sessions:
+        return "Race pending"
+    return "\u2014"
+
 def _fit_table_height(table: QTableWidget) -> None:
     """Freeze a table's height to show all rows (no inner scrollbar); the outer scroll scrolls."""
     table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     height = table.horizontalHeader().height() + 2 * table.frameWidth()
     for i in range(table.rowCount()):
         height += table.rowHeight(i)
-    table.setMinimumHeight(height)
+    table.setFixedHeight(height)
