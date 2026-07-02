@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
 def _decode_name(value: bytes) -> str:
     """Decode a UTF-8, null-terminated name from a fixed-width char buffer."""
-    return bytes(value).split(b"\0x00", 1)[0].decode("utf-8", errors="replace")
+    return bytes(value).split(b"\x00", 1)[0].decode("utf-8", errors="replace")
 
 
 def normalize_participants(packet: PacketParticipantsData) -> tuple[Participant, ...]:
@@ -76,6 +76,21 @@ def normalize_participants(packet: PacketParticipantsData) -> tuple[Participant,
             )
         )
     return tuple(roster)
+
+
+def merge_participant(existing: "Participant | None", incoming: Participant) -> Participant:
+    """Merge two views of the same car seen in diffrent Participants frames (union acreoss frames).
+    Keeps the more complete identity - a real name and a nonzero race number - with later
+    frames winning ties so a car dropped from a late (e.g. post-race results/podium)
+    frame is still recovered from an earlier full-grid frame."""
+    if existing is None:
+        return incoming
+    
+    def _score(participant: Participant) -> int:
+        return (1 if participant.driver_name.strip() else 0) + (
+            1 if participant.race_number else 0)
+    
+    return incoming if _score(incoming) >= _score(existing) else existing
 
 
 def normalize_session(packet: "PacketSessionData") -> SessionResult:

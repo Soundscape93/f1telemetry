@@ -6,8 +6,8 @@ current standings. All navigation stays inside this widget, and inside the one a
 window - nothing opens a new window.
 
 Scope 1: browse and create (with all-Track-25/26 presets) plus a read-only detail.
-Scope 2: Assign captured seasons to rounds, weekend drill-down, custom-calendar picker, and
-roster-resolved league standings.
+Scope 2a: weekend drill-down + round-centric session assignment (standings fill, name-keyed).
+Later: roster resolved league standingds (2b) and the custom-calender picker (2c).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QFrame,
@@ -40,7 +41,9 @@ from PySide6.QtWidgets import (
 from ..analysis.standings import standings_for_rounds
 from ..domain.calendars import official_calendar
 from ..domain.season import SeasonMode
-from ..protocol.reference import track_name
+from ..protocol.reference import track_name, team_name
+from ..protocol.enums import SessionType
+from .formatting import is_race, non_race_result, race_result
  
 _MODE_LABELS = {
     SeasonMode.MY_TEAM: "My Team",
@@ -50,6 +53,11 @@ _MODE_LABELS = {
 }
 
 
+def _mode_label(mode) -> str:
+    """ Return a human-readable label for a SeasonMode, tolerant of enum renames."""
+    return _MODE_LABELS.get(mode, mode.name)
+
+
 def _format_label(game_format: int) -> str:
     """Return a human-readable label for a game format number."""
     return {2025: "F1 25", 2026: "F1 26"}.get(game_format, f"F1 {game_format}")
@@ -57,16 +65,22 @@ def _format_label(game_format: int) -> str:
  
 def _season_title(season) -> str:
     """Return a human-readable title for a season, e.g. "My Team · Season 1 · “Wednesday League”"."""
-    bits = [_MODE_LABELS.get(season.mode, season.mode.name), f"Season {season.number}"]
+    bits = [_mode_label(season.mode), f"Season {season.number}"]
     if season.nickname:
         bits.append(f"\u201c{season.nickname}\u201d")
     return "   \u00b7   ".join(bits)
- 
+
+
+def _slot_label(sesson_type) -> str:
+    """Return prettified session-type name, e.g. RACE -> Race, SHORT_QUALIFYING -> Short Qualifying."""
+    name = getattr(sesson_type, "name", None)
+    return name.replace("_", " ").title() if name else str(sesson_type)
+
  
 class SeasonsView(QWidget):
-    """Browse / create / inspect seasons, swapping pages inside one widget."""
+    """Browse / create / inspect seasons and drill into weekends, all in one widget."""
  
-    _OVERVIEW, _CREATE, _DETAIL = 0, 1, 2
+    _OVERVIEW, _CREATE, _DETAIL, _WEEKEND = 0, 1, 2, 3
  
     def __init__(self, season_store, session_store, parent=None) -> None:
         """Initialize the seasons view."""
@@ -74,11 +88,16 @@ class SeasonsView(QWidget):
         self._seasons = season_store
         self._sessions = session_store
         self._current_season_id: int | None = None
+        self._current_round_number: int | None = None
+        self._detail_rounds: list = []          # 
+        self._weekend_track_id: int | None = None
+        self._weekend_assigned_uids: set[int] = set()
  
         self._stack = QStackedWidget()
         self._stack.addWidget(self._build_overview())     # _OVERVIEW
         self._stack.addWidget(self._build_create())       # _CREATE
         self._stack.addWidget(self._build_detail())        # _DETAIL
+        self._stack.addWidget(self._build_weekend())        # _WEEKEND
  
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -93,9 +112,13 @@ class SeasonsView(QWidget):
  
     def refresh(self) -> None:
         """Re-query whatever page is showing (e.g. after a capture is ingested)."""
-        if self._stack.currentIndex() == self._DETAIL and self._current_season_id is not None:
+        idx = self._stack.currentIndex()
+        if idx == self._WEEKEND and self._current_season_id is not None \
+                and self._current_round_number is not None:
+            self._reload_weekend()
+        elif idx == self._DETAIL and self._current_season_id is not None:
             self._show_detail(self._current_season_id)
-        elif self._stack.currentIndex() == self._OVERVIEW:
+        elif idx == self._OVERVIEW:
             self._reload_overview()
 
     # --- overview ------------------------------------------------------
@@ -213,7 +236,7 @@ class SeasonsView(QWidget):
         form = QFormLayout()
         self._mode_combo = QComboBox()
         for mode in SeasonMode:
-            self._mode_combo.addItem(_MODE_LABELS[mode], mode)
+            self._mode_combo.addItem(_mode_label(mode), mode)
         form.addRow("Game mode:", self._mode_combo)
 
         self._number_spin = QSpinBox()
@@ -296,9 +319,14 @@ class SeasonsView(QWidget):
         cal_caption = QLabel("Calendar")
         cal_caption.setStyleSheet("font-weight: 600; margin-top: 12px;")
         outer.addWidget(cal_caption)
+        hint = QLabel("Double-click a round to open its weekend and assign sessions.")
+        hint.setStyleSheet("color: palette(mid);")
+        outer.addWidget(hint)
+
         self._calendar_table = QTableWidget(0, 3)
         self._calendar_table.setHorizontalHeaderLabels(["Round", "Track", "Results"])
         _tidy_table(self._calendar_table)
+        self._calendar_table.cellDoubleClicked.connect(self._on_calendar_activated)
         outer.addWidget(self._calendar_table, 3)
 
         st_caption = QLabel("Standings")
@@ -310,7 +338,7 @@ class SeasonsView(QWidget):
         outer.addWidget(self._standings_table, 2)
 
         self._standings_empty = QLabel(
-            "No results yet \u2014 assign captured race weekends tho this season's round to "
+            "No results yet \u2014 assign captured race weekends to this season's round to "
             "see standings."
         )
         self._standings_empty.setStyleSheet("color: palette(mid);")
@@ -322,11 +350,13 @@ class SeasonsView(QWidget):
         """Switch to the detail page for a season, showing its calendar and standings."""
         season = self._seasons.get_season(season_id)
         if season is None:
+            self._show_overview()
             return
         self._current_season_id = season_id
         self._detail_title.setText(_season_title(season))
 
         rounds = self._seasons.rounds_with_results(season_id, self._sessions)
+        self._detail_title.setText(_season_title(season))
 
         self._calendar_table.setRowCount(len(rounds))
         for i, round in enumerate(rounds):
@@ -346,6 +376,183 @@ class SeasonsView(QWidget):
         self._standings_empty.setVisible(not rows)
 
         self._stack.setCurrentIndex(self._DETAIL)
+
+    def _on_calendar_activated(self, row: int, _column: int) -> None:
+        """Open the weekend view for the activated round."""
+        if self._current_season_id is None:
+            return
+        item = self._calendar_table.item(row, 0)
+        if item is None:
+            return
+        try:
+            round_number = int(item.text())
+        except ValueError:
+            return
+        self._show_weekend(self._current_season_id, round_number)
+
+    # --- weekend --------------------------------------------------------
+
+    def _build_weekend(self) -> QWidget:
+        """Build the weekend page: a round's assigned sessions plus the assignment picker."""
+        page = QWidget()
+        outer = QVBoxLayout(page)
+
+        header = QHBoxLayout()
+        back = QPushButton("\u2190 Season")
+        back.clicked.connect(lambda: self._show_detail(self._current_season_id))
+        self._weekend_title = QLabel()
+        self._weekend_title.setStyleSheet("font-size: 20px; font-weight: 600")
+        header.addWidget(back)
+        header.addSpacing(12)
+        header.addWidget(self._weekend_title)
+        header.addStretch(1)
+        outer.addLayout(header)
+
+        sess_caption = QLabel("Sessions")
+        sess_caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        outer.addWidget(sess_caption)
+
+        # assigned sessions (each a results table) are rebuilt into this layout, inside a scroll
+        self._assigned_body = QVBoxLayout()
+        assigned_host = QWidget()
+        assigned_host.setLayout(self._assigned_body)
+        assigned_scroll = QScrollArea()
+        assigned_scroll.setWidgetResizable(True)
+        assigned_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        assigned_scroll.setWidget(assigned_host)
+        outer.addWidget(assigned_scroll, 1)
+
+        pick_caption = QLabel("Assign a capture")
+        pick_caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        outer.addWidget(pick_caption)
+
+        self._show_all_tracks = QCheckBox("Show captures from all tracks (not just this round's)")
+        self._show_all_tracks.toggled.connect(lambda _checked: self._reload_capture_picker())
+        outer.addWidget(self._show_all_tracks)
+
+        self._capture_table = QTableWidget(0, 4)
+        self._capture_table.setHorizontalHeaderLabels(["Session", "Track", "Drivers", "Session ID"])
+        _tidy_table(self._capture_table)
+        self._capture_table.setMinimumHeight(200)
+        outer.addWidget(self._capture_table)
+
+        assign_btn = QPushButton("Assign selected to this round")
+        assign_btn.clicked.connect(self._assign_selected)
+        outer.addWidget(assign_btn)
+        return page
+
+    def _show_weekend(self, season_id: int, round_number: int) -> None:
+        """Switch to the weekend page for a given season/round."""
+        self._current_season_id = season_id
+        self._current_round_number = round_number
+        self._reload_weekend()
+        self._stack.setCurrentIndex(self._WEEKEND)
+
+    def _reload_weekend(self) -> None:
+        """Re-query the current round: title, assigned sessions, and the capture picker."""
+        season = self._seasons.get_season(self._current_season_id)
+        if season is None:
+            self._show_overview()
+            return
+        rounds = self._seasons.rounds_with_results(self._current_season_id, self._sessions)
+        round = next((r for r in rounds if r.round_number == self._current_round_number), None)
+        if round is None:
+            self._show_detail(self._current_season_id)
+            return
+
+        self._weekend_track_id = round.track_id
+        self._weekend_assigned_uids = {s.session_uid for s in round.sessions}
+        self._weekend_title.setText(f"Round {round.round_number} \u2014 {track_name(round.track_id)}")
+
+        _clear_layout(self._assigned_body)
+        if not round.sessions:
+            empty = QLabel("No sessions assigned to this round yet \u2014 and one below.")
+            empty.setStyleSheet("color: palette(mid);")
+            self._assigned_body.addWidget(empty)
+        else:
+            for session in sorted(round.sessions, key=lambda s: int(s.session_type)):
+                self._assigned_body.addWidget(self._session_block(session))
+        self._assigned_body.addStretch(1)
+
+        self._reload_capture_picker()
+
+    def _session_block(self, session) -> QWidget:
+        """A labelled classification table for one assigned session, with an Unassign button.
+        Race sessions show the winner's time and gaps; others show best-lap times."""
+        block = QWidget()
+        vbox = QVBoxLayout(block)
+        vbox.setContentsMargins(0, 0, 0, 0)
+
+        header = QHBoxLayout()
+        label = QLabel(_slot_label(session.session_type))
+        label.setStyleSheet("font-weight: 600;")
+        unassign = QPushButton("Unassign")
+        unassign.clicked.connect(partial(self._unassign, session.session_uid))
+        header.addWidget(label)
+        header.addStretch(1)
+        header.addWidget(unassign)
+        vbox.addLayout(header)
+        
+        race_session = is_race(session.session_type)
+        if race_session:
+            columns = ["Pos", "Driver", "No.", "Team", "Time", "Points"]
+        else:
+            columns = ["Pos", "Driver", "No.", "Team", "Best lap", "Laps"]
+        table = QTableWidget(0, len(columns))
+        table.setHorizontalHeaderLabels(columns)
+        _tidy_table(table)
+
+        entries = session.classification.entries if session.classification else []
+        winner = next((e for e in entries if e.position == 1), entries[0] if entries else None)
+        table.setRowCount(len(entries))
+        for i, entry in enumerate(entries):
+            table.setItem(i, 0, _cell(str(entry.position)))
+            table.setItem(i, 1, _cell(entry.driver_name))
+            table.setItem(i, 2, _cell(str(entry.race_number)))
+            table.setItem(i, 3, _cell(team_name(entry.team_id)))
+            if race_session:
+                table.setItem(i, 4, _cell(race_result(entry, winner)))
+                table.setItem(i, 5, _cell(str(entry.points)))
+            else:
+                table.setItem(i, 4, _cell(non_race_result(entry, session.session_type)))
+                table.setItem(i, 5, _cell(str(entry.num_laps)))
+        _fit_table_height(table)
+        vbox.addWidget(table)
+        return block
+
+
+    def _reload_capture_picker(self) -> None:
+        """Fill the picker with captures assignable to this round (track-matched by default)."""
+        show_all = self._show_all_tracks.isChecked()
+        candidates = [
+            s for s in self._sessions.list_sessions()
+            if (show_all or s.track_id == self._weekend_track_id)
+            and s.session_uid not in self._weekend_assigned_uids
+        ]
+        self._capture_table.setRowCount(len(candidates))
+        for i, session in enumerate(candidates):
+            drivers = len(session.classification.entries) if session.classification else 0
+            first = _cell(_slot_label(session.session_type))
+            first.setData(Qt.ItemDataRole.UserRole, str(session.session_uid))
+            self._capture_table.setItem(i, 0, first)
+            self._capture_table.setItem(i, 1, _cell(track_name(session.track_id)))
+            self._capture_table.setItem(i, 2, _cell(str(drivers)))
+            self._capture_table.setItem(i, 3, _cell(str(session.session_uid)))
+
+    def _assign_selected(self) -> None:
+        """Assign the selected caputure to the current round, then re-query the weekend."""
+        selected = self._capture_table.selectionModel().selectedRows()
+        if not selected:
+            return
+        uid = int(self._capture_table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole))
+        self._seasons.assign_session(int(uid), self._current_season_id, self._current_round_number)
+        self._reload_weekend()
+
+    def _unassign(self, session_uid: int) -> None:
+        """Remove a session from its round, then re-query the weekend."""
+        self._seasons.unassign_session(int(session_uid))
+        self._reload_weekend()
+
 
 # --- small helpers --------------------------------------------------------
 
@@ -371,3 +578,11 @@ def _clear_layout(layout: QVBoxLayout) -> None:
         widget = item.widget()
         if widget is not None:
             widget.deleteLater()
+
+def _fit_table_height(table: QTableWidget) -> None:
+    """Freeze a table's height to show all rows (no inner scrollbar); the outer scroll scrolls."""
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    height = table.horizontalHeader().height() + 2 * table.frameWidth()
+    for i in range(table.rowCount()):
+        height += table.rowHeight(i)
+    table.setMinimumHeight(height)

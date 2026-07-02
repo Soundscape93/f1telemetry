@@ -30,6 +30,7 @@ from ..domain.normalizer import (
     Sample,
     build_trace,
     normalize_classification,
+    merge_participant,
     normalize_participants,
     normalize_session,
     telemetry_sample,
@@ -53,7 +54,7 @@ class _SessionBuilder:
 
     def __init__(self) -> None:
         self._scaffold: SessionResult | None = None
-        self._roster: tuple[Participant, ...] | None = None
+        self._roster_by_index: dict[int, Participant] = {}  # merged across all Participants frames
         self._session_history = None            # the player's latest Session History packet
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
@@ -79,7 +80,13 @@ class _SessionBuilder:
         if pid == PacketId.SESSION:
             self._scaffold = normalize_session(packet)
         elif pid == PacketId.PARTICIPANTS:
-            self._roster = normalize_participants(packet)
+            # union aross frames: a late (post-race) frame can drop cars, so merge rather
+            # than overwrite, keeping the most complete identity seen for each car index.
+            for participant in normalize_participants(packet):
+                idx = participant.vehicle_index
+                self._roster_by_index[idx] = merge_participant(
+                    self._roster_by_index.get(idx), participant
+                )
         elif pid == PacketId.SESSION_HISTORY:
             if packet.car_idx == packet.header.player_car_index:
                 self._session_history = packet              # last-write wins -> end-of-session bulk
@@ -171,14 +178,16 @@ class _SessionBuilder:
         # capture the final (trailing) lap's trace; its time comes from Session History
         if self._cur_lap is not None:
             self._store_trace(self._cur_lap)
-        
+
+        roster = tuple(self._roster_by_index[i] for i in sorted(self._roster_by_index))
+
         classification = None
         if self._final_classification is not None:
-            classification = normalize_classification(self._final_classification, self._roster)
+            classification = normalize_classification(self._final_classification, roster)
 
         return dataclasses.replace(
             self._scaffold,
-            participants=self._roster,
+            participants=roster,
             laps=self._build_laps(),
             classification=classification,
         )
