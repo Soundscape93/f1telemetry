@@ -113,12 +113,16 @@ def non_race_result(entry, session_type) -> str:
     return "\u2014"
 
 
-def race_winner_summary(session) -> str | None:
-    """Return the race winner as ``Driver / Team`` for a race session, or None if unavailable."""
+def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """Return the race winner as ``Driver / Team`` for a race session, or None if unavailable.
+
+    ``name_of`` resolves the winner's shown name; it defaults to the entry's own driver name
+    and lets a caller inject a league display name without this module knowing about rosters.
+    """
     if not is_race(session.session_type) or session.classification is None:
         return None
     winner = session.classification.winner
     if winner is None:
         return None
-    return f"{winner.driver_name} / {team_name(winner.team_id)}"
-    
+    return f"{name_of(winner)} / {team_name(winner.team_id)}"
+

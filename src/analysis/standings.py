@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ..domain.models import ClassificationEntry, SessionResult
 from ..domain.season import RoundResults
-from ..domain.roster import LeagueRoster
+from ..domain.roster import LeagueRoster, league_display_name
 
 
 @dataclass(frozen=True)
@@ -133,5 +133,10 @@ def league_standings_for_rounds(
     rounds: Iterable[RoundResults], roster: LeagueRoster) -> tuple[StandingRow, ...]:
     """League standings across a season's rounds: drivers are grouped and labelled by their
     resolved roster member (online name first, race number as fallback), so a member whose
-    shown name drifts between lobbies is still one row under their canonical name."""
-    return standings_for_rounds(rounds, key=roster.member_of, display=roster.member_of)
+    shown name drifts between lobbies is still one row. Display prefers a captured public
+    online name and falls back to the roster when the capture only says ``Player``."""
+    return standings_for_rounds(
+        rounds,
+        key=roster.member_key,
+        display=lambda entry: league_display_name(entry, roster),
+    )

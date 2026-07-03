@@ -1,13 +1,9 @@
 """The seasons surface - browse, create, and drill into user-authored seasons.
 
-A single QWidget backed by an internal QStackedWidget with three pages: on overview of all
-seasons (or empty state), a create form, and a per-season detail showing its calendar and
-current standings. All navigation stays inside this widget, and inside the one application
-window - nothing opens a new window.
-
-Scope 1: browse and create (with all-Track-25/26 presets) plus a read-only detail.
-Scope 2a: weekend drill-down + round-centric session assignment (standings fill, name-keyed).
-Later: roster resolved league standingds (2b) and the custom-calender picker (2c).
+A single QWidget backed by an internal QStackedWidget with four pages: an overview of all
+seasons (or empty state), a create form, a per-season detail showing calendar and standings,
+and a weekend view for round-centric session assignment. All navigation stays inside this
+widget, and inside the one application window - nothing opens a new window.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -39,13 +36,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..analysis.standings import constructor_standings_for_rounds, standings_for_rounds
+from ..analysis.standings import (
+    constructor_standings_for_rounds,
+    league_standings_for_rounds,
+    standings_for_rounds,
+)
 from ..domain.calendars import official_calendar
+from ..domain.roster import LeagueRoster, league_display_name
 from ..domain.season import SeasonMode
-from ..protocol.reference import track_name, team_name
 from ..protocol.enums import SessionType
+from ..protocol.reference import team_name, track_name
 from .formatting import is_race, non_race_result, race_result, race_winner_summary
- 
+from .season_roster import SeasonRosterFiles
+
 _MODE_LABELS = {
     SeasonMode.MY_TEAM: "My Team",
     SeasonMode.DRIVER_CAREER: "Driver Career",
@@ -55,68 +58,71 @@ _MODE_LABELS = {
 
 
 def _mode_label(mode) -> str:
-    """ Return a human-readable label for a SeasonMode, tolerant of enum renames."""
+    """Return a human-readable label for a SeasonMode, tolerant of enum renames."""
     return _MODE_LABELS.get(mode, mode.name)
 
 
 def _format_label(game_format: int) -> str:
     """Return a human-readable label for a game format number."""
     return {2025: "F1 25", 2026: "F1 26"}.get(game_format, f"F1 {game_format}")
- 
- 
+
+
 def _season_title(season) -> str:
-    """Return a human-readable title for a season, e.g. "My Team · Season 1 · “Wednesday League”"."""
+    """Return a human-readable title for a season."""
     bits = [_mode_label(season.mode), f"Season {season.number}"]
     if season.nickname:
         bits.append(f"\u201c{season.nickname}\u201d")
     return "   \u00b7   ".join(bits)
 
 
-def _slot_label(sesson_type) -> str:
-    """Return prettified session-type name, e.g. RACE -> Race, SHORT_QUALIFYING -> Short Qualifying."""
-    name = getattr(sesson_type, "name", None)
-    return name.replace("_", " ").title() if name else str(sesson_type)
+def _slot_label(session_type) -> str:
+    """Return prettified session-type name, e.g. RACE -> Race."""
+    name = getattr(session_type, "name", None)
+    return name.replace("_", " ").title() if name else str(session_type)
 
- 
+
 class SeasonsView(QWidget):
     """Browse / create / inspect seasons and drill into weekends, all in one widget."""
- 
+
     _OVERVIEW, _CREATE, _DETAIL, _WEEKEND = 0, 1, 2, 3
- 
+
     def __init__(self, season_store, session_store, parent=None) -> None:
         """Initialize the seasons view."""
         super().__init__(parent)
         self._seasons = season_store
         self._sessions = session_store
+        self._season_rosters = SeasonRosterFiles()
         self._current_season_id: int | None = None
         self._current_round_number: int | None = None
-        self._detail_rounds: list = []          # 
         self._weekend_track_id: int | None = None
         self._weekend_assigned_uids: set[int] = set()
         self._collapsed_session_uids: set[int] = set()
- 
+
         self._stack = QStackedWidget()
-        self._stack.addWidget(self._build_overview())     # _OVERVIEW
-        self._stack.addWidget(self._build_create())       # _CREATE
-        self._stack.addWidget(self._build_detail())        # _DETAIL
-        self._stack.addWidget(self._build_weekend())        # _WEEKEND
- 
+        self._stack.addWidget(self._build_overview())
+        self._stack.addWidget(self._build_create())
+        self._stack.addWidget(self._build_detail())
+        self._stack.addWidget(self._build_weekend())
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._stack)
- 
+
         self._show_overview()
- 
+
     def showEvent(self, event) -> None:
         """Refresh the overview when the widget is shown, in case a capture was ingested."""
         super().showEvent(event)
         self._show_overview()
- 
+
     def refresh(self) -> None:
-        """Re-query whatever page is showing (e.g. after a capture is ingested)."""
+        """Re-query whatever page is showing."""
         idx = self._stack.currentIndex()
-        if idx == self._WEEKEND and self._current_season_id is not None \
-                and self._current_round_number is not None:
+        if (
+            idx == self._WEEKEND
+            and self._current_season_id is not None
+            and self._current_round_number is not None
+        ):
             self._reload_weekend()
         elif idx == self._DETAIL and self._current_season_id is not None:
             self._show_detail(self._current_season_id)
@@ -126,7 +132,7 @@ class SeasonsView(QWidget):
     # --- overview ------------------------------------------------------
 
     def _build_overview(self) -> QWidget:
-        """Build the overview page, which is either a list of seasons or an empty state."""
+        """Build the overview page."""
         page = QWidget()
         outer = QVBoxLayout(page)
 
@@ -140,7 +146,6 @@ class SeasonsView(QWidget):
         header.addWidget(new_btn)
         outer.addLayout(header)
 
-        # the list of seasons cards (or empty state) is rebuilt into this layout
         self._overview_body = QVBoxLayout()
         body_host = QWidget()
         body_host.setLayout(self._overview_body)
@@ -151,9 +156,9 @@ class SeasonsView(QWidget):
         scroll.setWidget(body_host)
         outer.addWidget(scroll, 1)
         return page
-    
+
     def _reload_overview(self) -> None:
-        """Rebuild the overview body with the current seasons or empty state."""
+        """Rebuild the overview body with current seasons or empty state."""
         _clear_layout(self._overview_body)
         seasons = self._seasons.list_seasons()
 
@@ -174,11 +179,10 @@ class SeasonsView(QWidget):
             self._overview_body.addWidget(blurb)
             self._overview_body.addStretch(1)
             return
-        
+
         for season in seasons:
             self._overview_body.addWidget(self._season_card(season))
         self._overview_body.addStretch(1)
-
 
     def _season_card(self, season) -> QWidget:
         """Return a row with a clickable season card and a delete button."""
@@ -227,7 +231,7 @@ class SeasonsView(QWidget):
     # --- create --------------------------------------------------------
 
     def _build_create(self) -> QWidget:
-        """Build the create page, which is a form for creating a new season."""
+        """Build the create page."""
         page = QWidget()
         outer = QVBoxLayout(page)
 
@@ -273,7 +277,7 @@ class SeasonsView(QWidget):
         buttons.addWidget(create)
         outer.addLayout(buttons)
         return page
-    
+
     def _reset_create_form(self) -> None:
         """Reset the create form to its default state."""
         self._mode_combo.setCurrentIndex(0)
@@ -295,21 +299,21 @@ class SeasonsView(QWidget):
         rounds = official_calendar(game_format)
 
         season = self._seasons.create_season(
-            mode=mode, number=number, game_format=game_format,
-            nickname=nickname, rounds=rounds
+            mode=mode,
+            number=number,
+            game_format=game_format,
+            nickname=nickname,
+            rounds=rounds,
         )
         self._show_detail(season.season_id)
 
     # --- detail --------------------------------------------------------
 
     def _build_detail(self) -> QWidget:
-        """Build the detail page, which shows a season's calendar and standings."""
+        """Build the detail page."""
         page = QWidget()
         outer = QVBoxLayout(page)
 
-        # Header row: back + season title on the left, the "Player Standings" caption on the
-        # right. The 3:2 split matches the body columns below, so the caption sits on the same
-        # line as the season title and directly above the standings column.
         header = QHBoxLayout()
         back = QPushButton("\u2190 Seasons")
         back.clicked.connect(self._show_overview)
@@ -357,7 +361,25 @@ class SeasonsView(QWidget):
         standings_layout.setContentsMargins(0, 0, 0, 0)
         standings_layout.setSpacing(6)
 
-        # "Player Standings" caption lives in the header row (aligned with the season title).
+        self._roster_panel = QWidget()
+        roster_layout = QVBoxLayout(self._roster_panel)
+        roster_layout.setContentsMargins(0, 0, 0, 0)
+        roster_layout.setSpacing(4)
+        self._roster_status = QLabel()
+        self._roster_status.setStyleSheet("color: palette(mid);")
+        self._roster_status.setWordWrap(True)
+        roster_buttons = QHBoxLayout()
+        self._roster_create_btn = QPushButton("Create roster file")
+        self._roster_create_btn.clicked.connect(self._create_roster_file)
+        roster_buttons.addWidget(self._roster_create_btn)
+        self._roster_import_btn = QPushButton("Import roster CSV")
+        self._roster_import_btn.clicked.connect(self._import_roster_csv)
+        roster_buttons.addWidget(self._roster_import_btn)
+        roster_buttons.addStretch(1)
+        roster_layout.addWidget(self._roster_status)
+        roster_layout.addLayout(roster_buttons)
+        standings_layout.addWidget(self._roster_panel)
+
         self._standings_table = QTableWidget(0, 4)
         self._standings_table.setHorizontalHeaderLabels(["Pos", "Driver", "No.", "Points"])
         _tidy_table(self._standings_table)
@@ -392,9 +414,6 @@ class SeasonsView(QWidget):
         body.addWidget(calendar_panel, 3)
         body.addWidget(standings_panel, 2)
 
-        # The tables freeze their own height (see _fit_table_height), so the columns are wrapped
-        # in a scroll area. Without it the fixed heights force the whole window's minimum height
-        # past the screen, which blocks maximizing/snapping while the detail page is showing.
         body_host = QWidget()
         body_host.setLayout(body)
         body_scroll = QScrollArea()
@@ -403,7 +422,7 @@ class SeasonsView(QWidget):
         body_scroll.setWidget(body_host)
         outer.addWidget(body_scroll, 1)
         return page
-    
+
     def _show_detail(self, season_id: int) -> None:
         """Switch to the detail page for a season, showing its calendar and standings."""
         season = self._seasons.get_season(season_id)
@@ -414,16 +433,22 @@ class SeasonsView(QWidget):
         self._detail_title.setText(_season_title(season))
 
         rounds = self._seasons.rounds_with_results(season_id, self._sessions)
-        self._detail_title.setText(_season_title(season))
+        roster = self._league_roster_for_detail(season, rounds)
+        name_of = _display_name_fn(roster)
 
         self._calendar_table.setRowCount(len(rounds))
         for i, round in enumerate(rounds):
             self._calendar_table.setItem(i, 0, _cell(str(round.round_number)))
             self._calendar_table.setItem(i, 1, _cell(track_name(round.track_id)))
-            self._calendar_table.setItem(i, 2, _cell(_round_result_summary(round)))
+            self._calendar_table.setItem(i, 2, _cell(_round_result_summary(round, name_of)))
         _fit_table_height(self._calendar_table)
 
-        rows = standings_for_rounds(rounds)
+        rows = (
+            league_standings_for_rounds(rounds, roster)
+            if roster is not None
+            else standings_for_rounds(rounds)
+        )
+
         self._standings_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             self._standings_table.setItem(i, 0, _cell(str(row.position)))
@@ -446,6 +471,97 @@ class SeasonsView(QWidget):
 
         self._stack.setCurrentIndex(self._DETAIL)
 
+    def _league_roster_for_detail(self, season, rounds) -> LeagueRoster | None:
+        """Return a roster for LEAGUE seasons and update the roster status panel.
+
+        Read-only: a saved file is loaded, otherwise a capture-seeded roster is shown without
+        writing. The file is created only by the Create/Import buttons.
+        """
+        is_league = season.mode == SeasonMode.LEAGUE
+        self._roster_panel.setVisible(is_league)
+        if not is_league:
+            return None
+
+        try:
+            roster = self._season_rosters.roster_for(
+                season, rounds, self._seasons.list_seasons
+            )
+        except (OSError, ValueError) as exc:
+            self._roster_status.setText("Roster could not be loaded.")
+            self._roster_create_btn.setVisible(False)
+            QMessageBox.warning(self, "League roster", f"Could not load roster:\n\n{exc}")
+            return LeagueRoster()
+
+        saved = self._season_rosters.has_roster(season.season_id)
+        self._roster_create_btn.setVisible(not saved)
+        if saved:
+            path = self._season_rosters.path_for(season.season_id)
+            self._roster_status.setText(f"Roster: {path} ({len(roster.members)} members)")
+        else:
+            self._roster_status.setText(
+                f"No roster file yet — showing {len(roster.members)} members seeded from "
+                "captures. Create the file to hand-edit names and aliases."
+            )
+        return roster
+
+    def _create_roster_file(self) -> None:
+        """Write the capture-seeded roster to its canonical JSON so it can be hand-edited."""
+        if self._current_season_id is None:
+            return
+        season = self._seasons.get_season(self._current_season_id)
+        if season is None:
+            return
+        rounds = self._seasons.rounds_with_results(self._current_season_id, self._sessions)
+
+        try:
+            roster = self._season_rosters.create_from_captures(
+                season, rounds, self._seasons.list_seasons
+            )
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self, "Create roster file", f"Could not create roster file:\n\n{exc}"
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Create roster file",
+            f"Created a roster file with {len(roster.members)} members:\n\n"
+            f"{self._season_rosters.path_for(self._current_season_id)}",
+        )
+        self._show_detail(self._current_season_id)
+
+    def _import_roster_csv(self) -> None:
+        """Import a user-selected CSV into the current season's canonical roster JSON."""
+        if self._current_season_id is None:
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import roster CSV",
+            "",
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            roster = self._season_rosters.import_csv(self._current_season_id, path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Import roster CSV",
+                f"Could not import roster CSV:\n\n{exc}",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Import roster CSV",
+            f"Imported {len(roster.members)} roster members.",
+        )
+        self._show_detail(self._current_season_id)
+
     def _on_calendar_activated(self, row: int, _column: int) -> None:
         """Open the weekend view for the activated round."""
         if self._current_season_id is None:
@@ -462,7 +578,7 @@ class SeasonsView(QWidget):
     # --- weekend --------------------------------------------------------
 
     def _build_weekend(self) -> QWidget:
-        """Build the weekend page: a round's assigned sessions plus the assignment picker."""
+        """Build the weekend page."""
         page = QWidget()
         outer = QVBoxLayout(page)
 
@@ -481,7 +597,6 @@ class SeasonsView(QWidget):
         sess_caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
         outer.addWidget(sess_caption)
 
-        # assigned sessions (each a results table) are rebuilt into this layout, inside a scroll
         self._assigned_body = QVBoxLayout()
         assigned_host = QWidget()
         assigned_host.setLayout(self._assigned_body)
@@ -528,7 +643,7 @@ class SeasonsView(QWidget):
         self._stack.setCurrentIndex(self._WEEKEND)
 
     def _reload_weekend(self) -> None:
-        """Re-query the current round: title, assigned sessions, and the capture picker."""
+        """Re-query the current round."""
         season = self._seasons.get_season(self._current_season_id)
         if season is None:
             self._show_overview()
@@ -538,6 +653,7 @@ class SeasonsView(QWidget):
         if round is None:
             self._show_detail(self._current_season_id)
             return
+        name_of = _display_name_fn(self._league_roster_for_weekend(season, rounds))
 
         self._weekend_track_id = round.track_id
         self._weekend_assigned_uids = {s.session_uid for s in round.sessions}
@@ -545,19 +661,29 @@ class SeasonsView(QWidget):
 
         _clear_layout(self._assigned_body)
         if not round.sessions:
-            empty = QLabel("No sessions assigned to this round yet \u2014 and one below.")
+            empty = QLabel("No sessions assigned to this round yet \u2014 add one below.")
             empty.setStyleSheet("color: palette(mid);")
             self._assigned_body.addWidget(empty)
         else:
             for session in sorted(round.sessions, key=lambda s: int(s.session_type)):
-                self._assigned_body.addWidget(self._session_block(session))
+                self._assigned_body.addWidget(self._session_block(session, name_of))
         self._assigned_body.addStretch(1)
 
         self._reload_capture_picker()
 
-    def _session_block(self, session) -> QWidget:
-        """A labelled classification table for one assigned session, with an Unassign button.
-        Race sessions show the winner's time and gaps; others show best-lap times."""
+    def _league_roster_for_weekend(self, season, rounds) -> LeagueRoster | None:
+        """Return a roster for LEAGUE weekend tables (read-only) without touching detail-page
+        widgets. Non-LEAGUE seasons return None."""
+        if season.mode != SeasonMode.LEAGUE:
+            return None
+        try:
+            return self._season_rosters.roster_for(season, rounds, self._seasons.list_seasons)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "League roster", f"Could not load roster:\n\n{exc}")
+            return LeagueRoster()
+
+    def _session_block(self, session, name_of=lambda entry: entry.driver_name) -> QWidget:
+        """A labelled classification table for one assigned session, with an Unassign button."""
         block = QWidget()
         vbox = QVBoxLayout(block)
         vbox.setContentsMargins(0, 0, 0, 0)
@@ -579,7 +705,7 @@ class SeasonsView(QWidget):
         header.addStretch(1)
         header.addWidget(unassign)
         vbox.addLayout(header)
-        
+
         race_session = is_race(session.session_type)
         if race_session:
             columns = ["Pos", "Driver", "No.", "Team", "Time", "Points"]
@@ -594,7 +720,7 @@ class SeasonsView(QWidget):
         table.setRowCount(len(entries))
         for i, entry in enumerate(entries):
             table.setItem(i, 0, _cell(str(entry.position)))
-            table.setItem(i, 1, _cell(entry.driver_name))
+            table.setItem(i, 1, _cell(name_of(entry)))
             table.setItem(i, 2, _cell(str(entry.race_number)))
             table.setItem(i, 3, _cell(team_name(entry.team_id)))
             if race_session:
@@ -609,8 +735,13 @@ class SeasonsView(QWidget):
         vbox.addWidget(table)
         return block
 
-    def _toggle_session_table(self, session_uid: int, table: QTableWidget,
-                              toggle: QToolButton, expanded: bool) -> None:
+    def _toggle_session_table(
+        self,
+        session_uid: int,
+        table: QTableWidget,
+        toggle: QToolButton,
+        expanded: bool,
+    ) -> None:
         """Fold/unfold an assigned session's classification table."""
         table.setVisible(expanded)
         toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
@@ -619,9 +750,8 @@ class SeasonsView(QWidget):
         else:
             self._collapsed_session_uids.add(session_uid)
 
-
     def _reload_capture_picker(self) -> None:
-        """Fill the picker with captures assignable to this round (track-matched by default)."""
+        """Fill the picker with captures assignable to this round."""
         show_all = self._show_all_tracks.isChecked()
         candidates = [
             s for s in self._sessions.list_sessions()
@@ -639,7 +769,7 @@ class SeasonsView(QWidget):
             self._capture_table.setItem(i, 3, _cell(str(session.session_uid)))
 
     def _assign_selected(self) -> None:
-        """Assign the selected caputure to the current round, then re-query the weekend."""
+        """Assign the selected capture to the current round, then re-query the weekend."""
         selected = self._capture_table.selectionModel().selectedRows()
         if not selected:
             return
@@ -663,7 +793,7 @@ def _cell(text: str) -> QTableWidgetItem:
 
 
 def _tidy_table(table: QTableWidget) -> None:
-    """Apply some common styling to a table: no vertical header, no editing, row selection, stretch columns."""
+    """Apply common table styling."""
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -679,11 +809,19 @@ def _clear_layout(layout: QVBoxLayout) -> None:
             widget.deleteLater()
 
 
-def _round_result_summary(round) -> str:
+def _display_name_fn(roster: LeagueRoster | None):
+    """A per-render name resolver: the league display name when a roster is present, else the
+    entry's own shown name. Injected into result cells so non-LEAGUE views stay unchanged."""
+    if roster is None:
+        return lambda entry: entry.driver_name
+    return lambda entry: league_display_name(entry, roster)
+
+
+def _round_result_summary(round, name_of=lambda entry: entry.driver_name) -> str:
     """Return the calendar result cell: race winner/team, pending, or dash."""
     race_results = [
         summary for session in round.sessions
-        if (summary := race_winner_summary(session)) is not None
+        if (summary := race_winner_summary(session, name_of)) is not None
     ]
     if race_results:
         return "; ".join(race_results)
@@ -691,8 +829,9 @@ def _round_result_summary(round) -> str:
         return "Race pending"
     return "\u2014"
 
+
 def _fit_table_height(table: QTableWidget) -> None:
-    """Freeze a table's height to show all rows (no inner scrollbar); the outer scroll scrolls."""
+    """Freeze a table's height to show all rows."""
     table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     height = table.horizontalHeader().height() + 2 * table.frameWidth()
     for i in range(table.rowCount()):

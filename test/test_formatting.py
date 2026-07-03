@@ -111,6 +111,19 @@ class RaceWinnerSummaryTest(unittest.TestCase):
             classification=SimpleNamespace(winner=_entry(position=1)),
         )
         self.assertIsNone(race_winner_summary(session))
+
+    def test_name_of_overrides_shown_name(self):
+        # a league caller injects a display resolver; the module itself knows no rosters
+        winner = _entry(position=1)
+        winner.driver_name = "Player"
+        session = SimpleNamespace(
+            session_type=SessionType.RACE,
+            classification=SimpleNamespace(winner=winner),
+        )
+        self.assertEqual(
+            race_winner_summary(session, name_of=lambda e: "soundscape93"),
+            "soundscape93 / Ferrari",
+        )
  
  
 if __name__ == "__main__":
