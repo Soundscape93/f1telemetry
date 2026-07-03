@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..analysis.standings import standings_for_rounds
+from ..analysis.standings import constructor_standings_for_rounds, standings_for_rounds
 from ..domain.calendars import official_calendar
 from ..domain.season import SeasonMode
 from ..protocol.reference import track_name, team_name
@@ -307,15 +307,29 @@ class SeasonsView(QWidget):
         page = QWidget()
         outer = QVBoxLayout(page)
 
+        # Header row: back + season title on the left, the "Player Standings" caption on the
+        # right. The 3:2 split matches the body columns below, so the caption sits on the same
+        # line as the season title and directly above the standings column.
         header = QHBoxLayout()
         back = QPushButton("\u2190 Seasons")
         back.clicked.connect(self._show_overview)
         self._detail_title = QLabel()
         self._detail_title.setStyleSheet("font-size: 20px; font-weight: 600")
-        header.addWidget(back)
-        header.addSpacing(12)
-        header.addWidget(self._detail_title)
-        header.addStretch(1)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(back)
+        title_row.addSpacing(12)
+        title_row.addWidget(self._detail_title)
+        title_row.addStretch(1)
+        title_host = QWidget()
+        title_host.setLayout(title_row)
+
+        st_caption = QLabel("Player Standings")
+        st_caption.setStyleSheet("font-weight: 600;")
+
+        header.addWidget(title_host, 3)
+        header.addWidget(st_caption, 2)
         outer.addLayout(header)
 
         body = QHBoxLayout()
@@ -325,7 +339,7 @@ class SeasonsView(QWidget):
         calendar_layout = QVBoxLayout(calendar_panel)
         calendar_layout.setContentsMargins(0, 0, 0, 0)
         cal_caption = QLabel("Calendar")
-        cal_caption.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        cal_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
         calendar_layout.addWidget(cal_caption)
         hint = QLabel("Double-click a round to open its weekend and assign sessions.")
         hint.setStyleSheet("color: palette(mid);")
@@ -341,12 +355,9 @@ class SeasonsView(QWidget):
         standings_panel = QWidget()
         standings_layout = QVBoxLayout(standings_panel)
         standings_layout.setContentsMargins(0, 0, 0, 0)
-        st_caption = QLabel("Standings")
-        st_caption.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        standings_layout.addWidget(st_caption)
-        standings_hint = QLabel(" ")
-        standings_hint.setStyleSheet("color: palette(mid);")
-        standings_layout.addWidget(standings_hint)
+        standings_layout.setSpacing(6)
+
+        # "Player Standings" caption lives in the header row (aligned with the season title).
         self._standings_table = QTableWidget(0, 4)
         self._standings_table.setHorizontalHeaderLabels(["Pos", "Driver", "No.", "Points"])
         _tidy_table(self._standings_table)
@@ -359,11 +370,38 @@ class SeasonsView(QWidget):
         self._standings_empty.setStyleSheet("color: palette(mid);")
         self._standings_empty.setWordWrap(True)
         standings_layout.addWidget(self._standings_empty)
+
+        ct_caption = QLabel("Constructor Standings")
+        ct_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
+        standings_layout.addWidget(ct_caption)
+        self._constructor_table = QTableWidget(0, 3)
+        self._constructor_table.setHorizontalHeaderLabels(["Pos", "Team", "Points"])
+        _tidy_table(self._constructor_table)
+        standings_layout.addWidget(self._constructor_table)
+
+        self._constructor_empty = QLabel(
+            "No results yet \u2014 assign captured race weekends to this season's round to "
+            "see standings."
+        )
+        self._constructor_empty.setStyleSheet("color: palette(mid);")
+        self._constructor_empty.setWordWrap(True)
+        standings_layout.addWidget(self._constructor_empty)
+
         standings_layout.addStretch(1)
 
         body.addWidget(calendar_panel, 3)
         body.addWidget(standings_panel, 2)
-        outer.addLayout(body, 1)
+
+        # The tables freeze their own height (see _fit_table_height), so the columns are wrapped
+        # in a scroll area. Without it the fixed heights force the whole window's minimum height
+        # past the screen, which blocks maximizing/snapping while the detail page is showing.
+        body_host = QWidget()
+        body_host.setLayout(body)
+        body_scroll = QScrollArea()
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        body_scroll.setWidget(body_host)
+        outer.addWidget(body_scroll, 1)
         return page
     
     def _show_detail(self, season_id: int) -> None:
@@ -395,6 +433,16 @@ class SeasonsView(QWidget):
         _fit_table_height(self._standings_table)
         self._standings_table.setVisible(bool(rows))
         self._standings_empty.setVisible(not rows)
+
+        constructor_rows = constructor_standings_for_rounds(rounds)
+        self._constructor_table.setRowCount(len(constructor_rows))
+        for i, row in enumerate(constructor_rows):
+            self._constructor_table.setItem(i, 0, _cell(str(row.position)))
+            self._constructor_table.setItem(i, 1, _cell(team_name(row.team_id)))
+            self._constructor_table.setItem(i, 2, _cell(str(row.points)))
+        _fit_table_height(self._constructor_table)
+        self._constructor_table.setVisible(bool(constructor_rows))
+        self._constructor_empty.setVisible(not constructor_rows)
 
         self._stack.setCurrentIndex(self._DETAIL)
 

@@ -26,6 +26,14 @@ class StandingRow:
     points: int
 
 
+@dataclass(frozen=True)
+class ConstructorRow:
+    """One row in a season's constructor standings: a team and its total points."""
+    position: int
+    team_id: int
+    points: int
+
+
 def by_driver_name(entry: ClassificationEntry) -> Hashable:
     """Identify a driver by name - stable for AI opponents (Career, MyTeam)."""
     return entry.driver_name
@@ -90,6 +98,35 @@ def standings_for_rounds(
     sessions and compute standings over them."""
     sessions = [session for round in rounds for session in round.sessions]
     return compute_standings(sessions, key, display)
+
+
+def compute_constructor_standings(
+        sessions: Iterable[SessionResult]) -> tuple[ConstructorRow, ...]:
+    """Total points per team across the given sessions, ranked.
+
+    Points are summed per ``team_id`` across every classification (non-scoring sessions
+    contribute zero, so no session-type filtering is needed). Ties break by points then
+    team_id (deterministic)."""
+    totals: dict[int, int] = {}
+    for session in sessions:
+        if session.classification is None:
+            continue
+        for entry in session.classification.entries:
+            totals[entry.team_id] = totals.get(entry.team_id, 0) + entry.points
+
+    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    return tuple(
+        ConstructorRow(position=i, team_id=team_id, points=points)
+        for i, (team_id, points) in enumerate(ranked, start=1)
+    )
+
+
+def constructor_standings_for_rounds(
+        rounds: Iterable[RoundResults]) -> tuple[ConstructorRow, ...]:
+    """Convenience for the season view: flatten ``rounds_with_results`` output into its
+    sessions and compute constructor standings over them."""
+    sessions = [session for round in rounds for session in round.sessions]
+    return compute_constructor_standings(sessions)
 
 
 def league_standings_for_rounds(
