@@ -15,7 +15,7 @@ def compressed_capture_path(path: str | Path) -> Path:
     source = Path(path)
     if is_compressed_capture(source):
         return source
-    return source.with_name(f"{source.name}.f1cap.gz")
+    return source.with_name(f"{source.name}.gz")
 
 
 def open_capture(path: str | Path,) -> BinaryIO:

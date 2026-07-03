@@ -222,3 +222,12 @@ captures/
 *.f1cap
 **.f1cap.gz
 f1league.db
+
+# other files
+Claude.md
+docs/
+ARCHITECTURE.md
+DECISIONS.md
+TELEMETRY_NOTES.md
+ROADMAP.md
+
