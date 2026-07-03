@@ -24,7 +24,7 @@ def open_capture(path: str | Path,) -> BinaryIO:
     return open(path, "rb")
 
 
-def archive_capture(path: str | Path, *, compresslevel: int = 9, remove_original: bool = True) -> Path:
+def archive_capture(path: str | Path, *, compresslevel: int = 6, remove_original: bool = True) -> Path:
     source = Path(path)
     if is_compressed_capture(source):
         return source
