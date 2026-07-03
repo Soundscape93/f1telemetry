@@ -16,6 +16,7 @@ from collections.abc import Iterator
 import threading
 
 from .recording import read_header, read_packet
+from .archive import open_capture
 
 _RECV_BUFFER = 4096        # bytes; largest F1 UDP datagram is ~1460, but we can be generous
 _SOCKET_TIMEOUT = 0.5      # seconds; wake up periodically so Ctrl-C stays responsive
@@ -81,7 +82,7 @@ class FileReplaySource(PacketSource):
         self.speed = speed
 
     def __iter__(self) -> Iterator[bytes]:
-        with open(self.path, "rb") as f:
+        with open_capture(self.path) as f:
             read_header(f)
             anchor_wall: float | None = None
             anchor_rec: float | None = None

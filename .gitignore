@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+#f1telemetry app: captures and local database
+captures/
+*.f1cap
+**.f1cap.gz
+f1league.db

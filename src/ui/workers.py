@@ -14,6 +14,7 @@ from PySide6.QtCore import QThread, Signal
 
 from ..ingest.recorder import SessionRecorder
 from ..ingest.sources import LiveUDPSource
+from ..ingest.archive import archive_capture
 
 
 class RecorderWorker(QThread):
@@ -53,7 +54,7 @@ class RecorderWorker(QThread):
 class IngestWorker(QThread):
     """Parses a capture, assembles its sessions, and persists each to the store."""
 
-    done = Signal(list)     # list[str] human readbale session descriptions
+    done = Signal(list, str, str)  # list[str] human readable session descriptions, archive path, archive error
     failed = Signal(str)    # error message
 
     def __init__(self, capture_path: str, db_url: str, parent=None) -> None:
@@ -73,7 +74,14 @@ class IngestWorker(QThread):
         try:
             store = SessionStore(self._db_url)
             sessions = ingest_capture(self._capture_path, store)
-            self.done.emit([self._describe(s) for s in sessions])
+            archive_path = ""
+            archive_error = ""
+            if sessions:
+                try:
+                    archive_path = str(archive_capture(self._capture_path))
+                except Exception as exc:
+                    archive_error = str(exc)
+            self.done.emit([self._describe(s) for s in sessions], archive_path, archive_error)
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
             

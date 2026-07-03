@@ -173,7 +173,8 @@ class MainWindow(QMainWindow):
             return
         start_dir = str(_CAPTURE_DIR) if _CAPTURE_DIR.exists() else ""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a .f1cap to ingest", start_dir, "Captures (*.f1cap);;All files (*)"
+            self, "Choose a .f1cap / .f1cap.gz to ingest", start_dir,
+             "Captures (*.f1cap *.f1cap.gz);;All files (*)"
         )
         if not path:
             return
@@ -230,7 +231,7 @@ class MainWindow(QMainWindow):
         self._ingest.failed.connect(self._on_failed)
         self._ingest.start()
 
-    def _on_ingest_done(self, descriptions: list) -> None:
+    def _on_ingest_done(self, descriptions: list, archive_path: str, archive_error: str) -> None:
         """Handle the IngestWorker's done signal; update the status and refresh the seasons view."""
         worker, self._ingest = self._ingest, None
         if worker is not None:
@@ -238,9 +239,12 @@ class MainWindow(QMainWindow):
         
         self._reset_button()
         if descriptions:
-            self._status.setText(
-                f"Stored {len(descriptions)} session(s): " + " ".join(descriptions)
-            )
+            message = f"Stored {len(descriptions)} session(s): " + " ".join(descriptions)
+            if archive_path:
+                message += f"Archived capture to {Path(archive_path).name}"
+            elif archive_error:
+                message += f"Capture kept uncompressed: {archive_error}"
+            self._status.setText(message)
         else:
             self._status.setText("Capture saved, but no complete session(s) found.")
 
