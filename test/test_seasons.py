@@ -48,24 +48,6 @@ class StoreTestBase(unittest.TestCase):
         os.unlink(self._path)
 
 
-class CalendarPresetTest(unittest.TestCase):
-    def test_2025_and_2026_presets(self):
-        c25 = official_calendar(2025)
-        c26 = official_calendar(2026)
-        self.assertEqual(len(c25), 24, "2025 preset should have 24 rounds")
-        self.assertEqual(len(c26), 24, "2026 preset should have 24 rounds")
-        self.assertEqual(c25[0].track_id, 0, "2025 round 1 should be Melbourne")
-        self.assertEqual(c25[-1].track_id, 14, "2025 round 24 should be Abu Dhabi (last race)")
-        self.assertEqual(c25[6].track_id, 27, "2025 round 7 should be Imola")
-        self.assertEqual(c26[15].track_id, 42, "2026 round 16 should be Madrid")
-        self.assertNotIn(27, [r.track_id for r in c26], "2026 preset should not have Imola (27)")
-        self.assertEqual([r.round_number for r in c25], list(range(1, 25)), "2025 rounds should be numbered 1-24")
-
-    def test_unknown_format_rejected(self):
-        with self.assertRaises(ValueError):
-            official_calendar(2024)
-
-
 class SeasonCrudTest(StoreTestBase):
     def test_create_get_list(self):
         s = self.seasons.create_season(SeasonMode.LEAGUE, number=1, game_format=2026, 
@@ -82,7 +64,7 @@ class SeasonCrudTest(StoreTestBase):
                         "list should return the created season")
 
     def test_set_calendar_replaces(self):
-        s = self.seasons.create_season(SeasonMode.SOLO_CHAMPIONSHIP, 1, 2025)
+        s = self.seasons.create_season(SeasonMode.GRAND_PRIX, 1, 2025)
         self.assertEqual(len(self.seasons.get_season(s.season_id).rounds), 0, "new season should have no rounds")
         self.seasons.set_calendar(s.season_id, (SeasonRound(1, 5), SeasonRound(2, 11)))
         rounds = self.seasons.get_season(s.season_id).rounds

@@ -14,7 +14,7 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   the live roster path. League standings group drivers by their resolved member's **race number**
   (`LeagueRoster.member_key`), so two roster-unknown humans both shown as `"Player"` never
   collapse into one row. LEAGUE
-  driver standings use `league_standings_for_rounds`; career/My-Team/Solo Championship stay on
+  driver standings use `league_standings_for_rounds`; career/My-Team/Grand Prix stay on
   `standings_for_rounds`. LEAGUE detail/weekend displays prefer captured public online names;
   if the capture only says `"Player"` or blank, display falls back to the first roster
   `online_names` alias. The CSV `name` column is only a human helper/canonical identity for
@@ -24,9 +24,13 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   are matched case-insensitively and tolerate spaces/underscores. `race_number` must parse as an
   integer and be unique. `online_names`, when present, is a semicolon-separated list of public
   telemetry names/aliases for that member. Unknown extra columns are ignored.
-- **2c — custom-calendar picker.** Let a season order up to 24 tracks by hand (the fiddly
-  widget), instead of only the All-Tracks-25/26 presets. Deferred deliberately so the presets
-  shipped first.
+- **2c — custom-calendar picker. DONE.** A season's calendar can be authored by hand, with the
+  constraints the game actually enforces per mode: Career/My-Team pick a fixed-length subset
+  (10/16/24) of the official order; Grand Prix/League are a reorderable sandbox with duplicates
+  allowed (League open-ended, Grand Prix capped at 28). Rules live in `domain/calendars.py`
+  (`calendar_rules`), the widget in `ui/components/calendar_picker.py`. *Next here:* surface the
+  same picker as an edit-calendar action on the detail page (the store already has
+  `set_calendar()`).
 
 ## Other surfaces (currently placeholders)
 - **Sessions** — a list of every captured session; likely also a *session-centric* assignment

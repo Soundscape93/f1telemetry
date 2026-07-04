@@ -112,6 +112,20 @@ what would trigger revisiting it.
   and reusable across views.
 - **Result-cell gaps include post-race penalties** (`total_race_time_s + penalties_time_s`) so
   the displayed gaps line up with the classified finishing order.
+- **Custom-calendar authoring is driven by `(SeasonMode, game_format)` rules, not a single
+  toggle.** The game constrains a custom calendar differently per mode, so `calendar_rules()` (in
+  `domain/calendars.py`) returns a `CalendarRules` value object and one widget
+  (`ui/components/calendar_picker.py`) renders whichever face it describes. Career / My Team = a
+  *preset subset*: pick exactly 10/16/24 of the official calendar with its order frozen (checklist
+  face). Grand Prix / League = a *sandbox*: any count, freely reordered, duplicate tracks allowed
+  (add/reorder face). The game rules stay in the pure domain layer so they're unit-testable
+  without Qt; deriving them from `SeasonMode` doesn't violate the "SeasonMode is decoupled from
+  the game's `game_mode`" note (that note is about the granular per-session id). The picker lives
+  in `components/` (not inline in the create page) so a future edit-calendar surface reuses it via
+  the existing `SeasonStore.set_calendar()`. *Track pools:* Madrid (42) is 2026-only; reverse
+  layouts (39/40/41) are offered in the sandbox. *League cap:* left **open-ended** — EA's Racenet
+  documents no maximum and its league pages are login-gated, so no limit is enforced; revisit if a
+  real cap surfaces.
 
 ## Conventions
 - **Module-level constants use a single leading underscore.** A double underscore name-mangles

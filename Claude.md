@@ -122,11 +122,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   roster `online_names` alias when captures only say `"Player"`/blank. Reusable widgets (the
   session classification table, table primitives) live in `ui/components/`, ready for the
   upcoming surfaces. The Seasons surface is split into `ui/seasons/` — a thin `SeasonsView`
-  container coordinating one widget per page via navigation signals — so the custom-calendar
-  picker and a future session-detail subview each land in their own file. Dashboard / Sessions /
-  Laps / Analytics are placeholders.
-- **Next:** the custom-calendar picker, then the Laps / Analytics surfaces and dense-trace
-  persistence. See `docs/ROADMAP.md`.
+  container coordinating one widget per page via navigation signals. The custom-calendar picker
+  is live: `create_page.py` embeds the reusable `ui/components/calendar_picker.py`, driven by
+  `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
+  Grand Prix/League = reorderable sandbox with duplicates). Dashboard / Sessions / Laps /
+  Analytics are placeholders.
+- **Next:** the Laps / Analytics surfaces and dense-trace persistence; an edit-calendar action
+  reusing the picker on the detail page. See `docs/ROADMAP.md`.
 
 ## Where to look
 

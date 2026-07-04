@@ -57,7 +57,7 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `telemetry_sample`, `build_trace`, and the `Sample` tuple. Reads struct fields by name; the
   field-name contract is documented in the module docstring.
 - **`season.py`** — the user-authored season layer: `SeasonMode` (MY_TEAM / DRIVER_CAREER /
-  SOLO_CHAMPIONSHIP / LEAGUE — *our* categorisation, not the game's `m_gameMode`), `Season`,
+  GRAND_PRIX / LEAGUE — *our* categorisation, not the game's `m_gameMode`), `Season`,
   `SeasonRound`, `RoundResults`.
 - **`calendars.py`** — `official_calendar(year)` preset track-id orders for 2025 / 2026.
 - **`roster.py`** — `LeagueMember`, `LeagueRoster.member_for(entry)` /

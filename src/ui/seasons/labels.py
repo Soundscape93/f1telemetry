@@ -11,7 +11,7 @@ from ...domain.season import SeasonMode
 _MODE_LABELS = {
     SeasonMode.MY_TEAM: "My Team",
     SeasonMode.DRIVER_CAREER: "Driver Career",
-    SeasonMode.SOLO_CHAMPIONSHIP: "Solo Championship",
+    SeasonMode.GRAND_PRIX: "Grand Prix (Solo/Multiplayer)",
     SeasonMode.LEAGUE: "Multiplayer (League)",
 }
 

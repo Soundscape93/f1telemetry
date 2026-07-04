@@ -20,7 +20,7 @@ class SeasonMode(IntEnum):
 
     MY_TEAM = 0
     DRIVER_CAREER = 1
-    SOLO_CHAMPIONSHIP = 2
+    GRAND_PRIX = 2
     LEAGUE = 3
 
 
