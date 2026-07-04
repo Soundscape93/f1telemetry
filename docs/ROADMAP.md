@@ -40,7 +40,9 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   "Delete from database…" on the weekend capture picker (unassigned captures only — an assigned
   session must be unassigned first, which drops it back into the picker). Delete removes the
   stored results only; the `captures/` recording is kept, so a re-ingest recreates the session.
-  This action moves to (or is shared with) the Sessions surface when it lands.
+  This action moves to (or is shared with) the Sessions surface when it lands. The picker shows
+  a "Recorded" column stamped from the capture's real packet time (see DECISIONS → `recorded_at`),
+  so repeated attempts of one session are separable by time — the keeper is the latest.
 - **Laps** — per-lap browser feeding the analysis work below.
 - **Analytics** — overlay N laps on a shared distance grid; lap delta; ERS-deployment view.
   In-memory `LapTrace` analytics stay desktop-bound regardless of any web future.

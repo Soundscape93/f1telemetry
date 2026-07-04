@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from f1telemetry.src.protocol.enums import SessionType
@@ -60,6 +61,10 @@ class IngestPipelineTest(unittest.TestCase):
         self.assertTrue(sessions, "The capture produced no sessions")
 
         for original in sessions:
+            # recorded_at is stamped from the capture's per-packet recv_time, not ingest time,
+            # so two attempts of one session get distinct chronological timestamps.
+            self.assertIsInstance(original.recorded_at, datetime,
+                                  "session was not stamped with a capture recorded_at")
             loaded = self.store.load(original.session_uid)
             self.assertIsNotNone(loaded, f"Session {original.session_uid} not in the store")
             self.assertEqual(loaded.session_uid, original.session_uid, "Loaded session does not match original")

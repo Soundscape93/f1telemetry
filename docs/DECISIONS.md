@@ -25,6 +25,14 @@ what would trigger revisiting it.
 - **`session_assignments.session_uid` is NOT a foreign key** to `sessions`. Re-ingesting a
   capture replaces its session row by uid; a FK (or cascade) would wipe the manual league round
   placements. Keeping them independent means results can be re-processed freely.
+- **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
+  single recording often holds several attempts of the same session (a crash/restart, or a
+  re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.
+  `ingest_capture` reads the capture's per-packet `recv_time` and stamps each assembled session
+  with its first packet's wall-clock; the later attempt (the keeper) therefore sorts *after* the
+  aborted ones. This is why the pipeline reads the capture directly rather than via
+  `FileReplaySource`, which drops `recv_time`. Sessions stored before this existed keep their
+  old ingest-time stamp until their capture is re-ingested.
 - **Enums stored as raw ints, read via `safe_enum`.** The game's enums grow across title
   updates; `safe_enum` returns the member or the raw int so an unknown value never crashes load.
 - **Captures are gzip-archived after ingest, not compressed while recording.** Recording stays
