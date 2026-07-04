@@ -41,6 +41,12 @@ def is_race(session_type: SessionType) -> bool:
     return session_type in _RACE_TYPES
 
 
+def slot_label(session_type) -> str:
+    """Return prettified session-type name, e.g. RACE -> Race."""
+    name = getattr(session_type, "name", None)
+    return name.replace("_", " ").title() if name else str(session_type)
+
+
 def _finished(status) -> bool:
     """Whether the driver finished the race."""
     return status == ResultStatus.FINISHED

@@ -12,7 +12,6 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -20,7 +19,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -30,7 +28,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QTableWidget,
-    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,11 +39,19 @@ from ..analysis.standings import (
     standings_for_rounds,
 )
 from ..domain.calendars import official_calendar
-from ..domain.roster import LeagueRoster, league_display_name
+from ..domain.roster import LeagueRoster
 from ..domain.season import SeasonMode
 from ..protocol.enums import SessionType
 from ..protocol.reference import team_name, track_name
-from .formatting import is_race, non_race_result, race_result, race_winner_summary
+from .components import (
+    build_classification_table,
+    cell,
+    clear_layout,
+    display_name_fn,
+    fit_table_height,
+    tidy_table,
+)
+from .formatting import race_winner_summary, slot_label
 from .season_roster import SeasonRosterFiles
 
 _MODE_LABELS = {
@@ -73,12 +78,6 @@ def _season_title(season) -> str:
     if season.nickname:
         bits.append(f"\u201c{season.nickname}\u201d")
     return "   \u00b7   ".join(bits)
-
-
-def _slot_label(session_type) -> str:
-    """Return prettified session-type name, e.g. RACE -> Race."""
-    name = getattr(session_type, "name", None)
-    return name.replace("_", " ").title() if name else str(session_type)
 
 
 class SeasonsView(QWidget):
@@ -159,7 +158,7 @@ class SeasonsView(QWidget):
 
     def _reload_overview(self) -> None:
         """Rebuild the overview body with current seasons or empty state."""
-        _clear_layout(self._overview_body)
+        clear_layout(self._overview_body)
         seasons = self._seasons.list_seasons()
 
         if not seasons:
@@ -351,7 +350,7 @@ class SeasonsView(QWidget):
 
         self._calendar_table = QTableWidget(0, 3)
         self._calendar_table.setHorizontalHeaderLabels(["Round", "Track", "Results"])
-        _tidy_table(self._calendar_table)
+        tidy_table(self._calendar_table)
         self._calendar_table.cellDoubleClicked.connect(self._on_calendar_activated)
         calendar_layout.addWidget(self._calendar_table)
         calendar_layout.addStretch(1)
@@ -382,7 +381,7 @@ class SeasonsView(QWidget):
 
         self._standings_table = QTableWidget(0, 4)
         self._standings_table.setHorizontalHeaderLabels(["Pos", "Driver", "No.", "Points"])
-        _tidy_table(self._standings_table)
+        tidy_table(self._standings_table)
         standings_layout.addWidget(self._standings_table)
 
         self._standings_empty = QLabel(
@@ -398,7 +397,7 @@ class SeasonsView(QWidget):
         standings_layout.addWidget(ct_caption)
         self._constructor_table = QTableWidget(0, 3)
         self._constructor_table.setHorizontalHeaderLabels(["Pos", "Team", "Points"])
-        _tidy_table(self._constructor_table)
+        tidy_table(self._constructor_table)
         standings_layout.addWidget(self._constructor_table)
 
         self._constructor_empty = QLabel(
@@ -434,14 +433,14 @@ class SeasonsView(QWidget):
 
         rounds = self._seasons.rounds_with_results(season_id, self._sessions)
         roster = self._league_roster_for_detail(season, rounds)
-        name_of = _display_name_fn(roster)
+        name_of = display_name_fn(roster)
 
         self._calendar_table.setRowCount(len(rounds))
         for i, round in enumerate(rounds):
-            self._calendar_table.setItem(i, 0, _cell(str(round.round_number)))
-            self._calendar_table.setItem(i, 1, _cell(track_name(round.track_id)))
-            self._calendar_table.setItem(i, 2, _cell(_round_result_summary(round, name_of)))
-        _fit_table_height(self._calendar_table)
+            self._calendar_table.setItem(i, 0, cell(str(round.round_number)))
+            self._calendar_table.setItem(i, 1, cell(track_name(round.track_id)))
+            self._calendar_table.setItem(i, 2, cell(_round_result_summary(round, name_of)))
+        fit_table_height(self._calendar_table)
 
         rows = (
             league_standings_for_rounds(rounds, roster)
@@ -451,21 +450,21 @@ class SeasonsView(QWidget):
 
         self._standings_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
-            self._standings_table.setItem(i, 0, _cell(str(row.position)))
-            self._standings_table.setItem(i, 1, _cell(row.driver_name))
-            self._standings_table.setItem(i, 2, _cell(str(row.race_number)))
-            self._standings_table.setItem(i, 3, _cell(str(row.points)))
-        _fit_table_height(self._standings_table)
+            self._standings_table.setItem(i, 0, cell(str(row.position)))
+            self._standings_table.setItem(i, 1, cell(row.driver_name))
+            self._standings_table.setItem(i, 2, cell(str(row.race_number)))
+            self._standings_table.setItem(i, 3, cell(str(row.points)))
+        fit_table_height(self._standings_table)
         self._standings_table.setVisible(bool(rows))
         self._standings_empty.setVisible(not rows)
 
         constructor_rows = constructor_standings_for_rounds(rounds)
         self._constructor_table.setRowCount(len(constructor_rows))
         for i, row in enumerate(constructor_rows):
-            self._constructor_table.setItem(i, 0, _cell(str(row.position)))
-            self._constructor_table.setItem(i, 1, _cell(team_name(row.team_id)))
-            self._constructor_table.setItem(i, 2, _cell(str(row.points)))
-        _fit_table_height(self._constructor_table)
+            self._constructor_table.setItem(i, 0, cell(str(row.position)))
+            self._constructor_table.setItem(i, 1, cell(team_name(row.team_id)))
+            self._constructor_table.setItem(i, 2, cell(str(row.points)))
+        fit_table_height(self._constructor_table)
         self._constructor_table.setVisible(bool(constructor_rows))
         self._constructor_empty.setVisible(not constructor_rows)
 
@@ -628,7 +627,7 @@ class SeasonsView(QWidget):
 
         self._capture_table = QTableWidget(0, 4)
         self._capture_table.setHorizontalHeaderLabels(["Session", "Track", "Drivers", "Session ID"])
-        _tidy_table(self._capture_table)
+        tidy_table(self._capture_table)
         self._capture_table.setMinimumHeight(135)
         self._capture_table.setMaximumHeight(165)
         outer.addWidget(self._capture_table)
@@ -653,13 +652,13 @@ class SeasonsView(QWidget):
         if round is None:
             self._show_detail(self._current_season_id)
             return
-        name_of = _display_name_fn(self._league_roster_for_weekend(season, rounds))
+        name_of = display_name_fn(self._league_roster_for_weekend(season, rounds))
 
         self._weekend_track_id = round.track_id
         self._weekend_assigned_uids = {s.session_uid for s in round.sessions}
         self._weekend_title.setText(f"Round {round.round_number} \u2014 {track_name(round.track_id)}")
 
-        _clear_layout(self._assigned_body)
+        clear_layout(self._assigned_body)
         if not round.sessions:
             empty = QLabel("No sessions assigned to this round yet \u2014 add one below.")
             empty.setStyleSheet("color: palette(mid);")
@@ -692,7 +691,7 @@ class SeasonsView(QWidget):
         toggle = QToolButton()
         toggle.setCheckable(True)
         toggle.setChecked(session.session_uid not in self._collapsed_session_uids)
-        toggle.setText(_slot_label(session.session_type))
+        toggle.setText(slot_label(session.session_type))
         toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         toggle.setArrowType(
             Qt.ArrowType.DownArrow if toggle.isChecked() else Qt.ArrowType.RightArrow
@@ -706,30 +705,7 @@ class SeasonsView(QWidget):
         header.addWidget(unassign)
         vbox.addLayout(header)
 
-        race_session = is_race(session.session_type)
-        if race_session:
-            columns = ["Pos", "Driver", "No.", "Team", "Time", "Points"]
-        else:
-            columns = ["Pos", "Driver", "No.", "Team", "Best lap", "Laps"]
-        table = QTableWidget(0, len(columns))
-        table.setHorizontalHeaderLabels(columns)
-        _tidy_table(table)
-
-        entries = session.classification.entries if session.classification else []
-        winner = next((e for e in entries if e.position == 1), entries[0] if entries else None)
-        table.setRowCount(len(entries))
-        for i, entry in enumerate(entries):
-            table.setItem(i, 0, _cell(str(entry.position)))
-            table.setItem(i, 1, _cell(name_of(entry)))
-            table.setItem(i, 2, _cell(str(entry.race_number)))
-            table.setItem(i, 3, _cell(team_name(entry.team_id)))
-            if race_session:
-                table.setItem(i, 4, _cell(race_result(entry, winner)))
-                table.setItem(i, 5, _cell(str(entry.points)))
-            else:
-                table.setItem(i, 4, _cell(non_race_result(entry, session.session_type)))
-                table.setItem(i, 5, _cell(str(entry.num_laps)))
-        _fit_table_height(table)
+        table = build_classification_table(session, name_of)
         table.setVisible(toggle.isChecked())
         toggle.toggled.connect(partial(self._toggle_session_table, session.session_uid, table, toggle))
         vbox.addWidget(table)
@@ -761,12 +737,12 @@ class SeasonsView(QWidget):
         self._capture_table.setRowCount(len(candidates))
         for i, session in enumerate(candidates):
             drivers = len(session.classification.entries) if session.classification else 0
-            first = _cell(_slot_label(session.session_type))
+            first = cell(slot_label(session.session_type))
             first.setData(Qt.ItemDataRole.UserRole, str(session.session_uid))
             self._capture_table.setItem(i, 0, first)
-            self._capture_table.setItem(i, 1, _cell(track_name(session.track_id)))
-            self._capture_table.setItem(i, 2, _cell(str(drivers)))
-            self._capture_table.setItem(i, 3, _cell(str(session.session_uid)))
+            self._capture_table.setItem(i, 1, cell(track_name(session.track_id)))
+            self._capture_table.setItem(i, 2, cell(str(drivers)))
+            self._capture_table.setItem(i, 3, cell(str(session.session_uid)))
 
     def _assign_selected(self) -> None:
         """Assign the selected capture to the current round, then re-query the weekend."""
@@ -785,38 +761,6 @@ class SeasonsView(QWidget):
 
 # --- small helpers --------------------------------------------------------
 
-def _cell(text: str) -> QTableWidgetItem:
-    """Return a read-only table cell with the given text."""
-    item = QTableWidgetItem(text)
-    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-    return item
-
-
-def _tidy_table(table: QTableWidget) -> None:
-    """Apply common table styling."""
-    table.verticalHeader().setVisible(False)
-    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-
-def _clear_layout(layout: QVBoxLayout) -> None:
-    """Remove all widgets from a layout and delete them."""
-    while layout.count():
-        item = layout.takeAt(0)
-        widget = item.widget()
-        if widget is not None:
-            widget.deleteLater()
-
-
-def _display_name_fn(roster: LeagueRoster | None):
-    """A per-render name resolver: the league display name when a roster is present, else the
-    entry's own shown name. Injected into result cells so non-LEAGUE views stay unchanged."""
-    if roster is None:
-        return lambda entry: entry.driver_name
-    return lambda entry: league_display_name(entry, roster)
-
-
 def _round_result_summary(round, name_of=lambda entry: entry.driver_name) -> str:
     """Return the calendar result cell: race winner/team, pending, or dash."""
     race_results = [
@@ -828,12 +772,3 @@ def _round_result_summary(round, name_of=lambda entry: entry.driver_name) -> str
     if round.sessions:
         return "Race pending"
     return "\u2014"
-
-
-def _fit_table_height(table: QTableWidget) -> None:
-    """Freeze a table's height to show all rows."""
-    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    height = table.horizontalHeader().height() + 2 * table.frameWidth()
-    for i in range(table.rowCount()):
-        height += table.rowHeight(i)
-    table.setFixedHeight(height)
