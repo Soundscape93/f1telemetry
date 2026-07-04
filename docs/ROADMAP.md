@@ -36,7 +36,11 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
 - **Sessions** — a list of every captured session; likely also a *session-centric* assignment
   path (complement to the round-centric one in the weekend view). The per-session detail renders
   its classification via `ui/components/classification_table.py` (the same builder the weekend
-  view uses).
+  view uses). *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
+  "Delete from database…" on the weekend capture picker (unassigned captures only — an assigned
+  session must be unassigned first, which drops it back into the picker). Delete removes the
+  stored results only; the `captures/` recording is kept, so a re-ingest recreates the session.
+  This action moves to (or is shared with) the Sessions surface when it lands.
 - **Laps** — per-lap browser feeding the analysis work below.
 - **Analytics** — overlay N laps on a shared distance grid; lap delta; ERS-deployment view.
   In-memory `LapTrace` analytics stay desktop-bound regardless of any web future.

@@ -65,6 +65,22 @@ class SessionStore:
                 db.flush()                          # flush to avoid unique constraint violation
             db.add(self._to_row(result))
 
+    def delete(self, session_uid: int) -> bool:
+        """Delete a stored session (and its classification entries via cascade).
+
+        Returns True if a row was removed, False if the uid wasn't present. Only the stored
+        results are removed; the underlying capture in ``captures/`` is kept and re-ingesting
+        it re-creates the session. Any season assignment for this uid lives in the separate
+        ``season_assignments`` table (no FK) and is not touched here - callers delete only
+        unassigned sessions, so there is nothing to clean up.
+        """
+        with self._Session.begin() as db:
+            row = db.get(SessionRow, str(session_uid))
+            if row is None:
+                return False
+            db.delete(row)                          # cascade removes its entries
+            return True
+
     # --- read ---------------------------------------------------------------
     def load(self, session_uid:int) -> SessionResult | None:
         """Reconstruct a stored SessionResult, or None if it isn't present."""

@@ -118,7 +118,9 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
 - **UI:** single-window shell (sidebar + persistent record/stop header + stacked pages). The
   Seasons surface is real — overview, create, per-season detail (calendar + driver & constructor
   standings), per-season LEAGUE roster CSV import, and a weekend view with round-centric session
-  assignment. LEAGUE displays prefer captured public online names, falling back to the first
+  assignment (its capture picker can also delete an unassigned session's stored results via
+  right-click; the recording on disk is kept). LEAGUE displays prefer captured public online
+  names, falling back to the first
   roster `online_names` alias when captures only say `"Player"`/blank. Reusable widgets (the
   session classification table, table primitives) live in `ui/components/`, ready for the
   upcoming surfaces. The Seasons surface is split into `ui/seasons/` — a thin `SeasonsView`

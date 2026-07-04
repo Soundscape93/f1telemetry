@@ -124,6 +124,20 @@ class ListSessionTest(StorageTestBase):
         self.assertEqual(uids, {1001, 1002, 1003, 1004})
 
 
+class DeleteTest(StorageTestBase):
+    """Test that a saved session (and its entries) can be deleted by uid."""
+    def test_delete_removes_session_and_entries(self):
+        self.store.save(make_session(uid=1001, stype=SessionType.PRACTICE_1))
+        self.store.save(make_session(uid=1002, stype=SessionType.RACE))
+        self.assertTrue(self.store.delete(1001))
+        self.assertIsNone(self.store.load(1001))                 # gone
+        self.assertIsNotNone(self.store.load(1002))              # sibling untouched
+        self.assertEqual({s.session_uid for s in self.store.list_sessions()}, {1002})
+
+    def test_delete_missing_uid_returns_false(self):
+        self.assertFalse(self.store.delete(4242))
+
+
 class NoClassificationTest(StorageTestBase):
     """Test that a session without classification can be saved and loaded."""
     def test_session_without_classification_persists_metadata(self):

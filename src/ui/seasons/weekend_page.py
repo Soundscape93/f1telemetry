@@ -6,6 +6,7 @@ of assignable captures filtered to the round's track. Roster-aware for LEAGUE se
 
 from __future__ import annotations
 
+from datetime import datetime
 from functools import partial
 
 from PySide6.QtCore import Qt, Signal
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -34,6 +36,19 @@ from ..components import (
     tidy_table,
 )
 from ..formatting import slot_label
+
+
+def _recorded_label(recorded_at: datetime | None) -> str:
+    """Local-time 'YYYY-MM-DD HH:MM' for a session's recorded_at, or an em dash if unset.
+
+    ``recorded_at`` is stored as UTC; a tz-aware value is converted to local time, while a
+    naive value (older rows) is shown as-is.
+    """
+    if recorded_at is None:
+        return "—"
+    if recorded_at.tzinfo is not None:
+        recorded_at = recorded_at.astimezone()
+    return recorded_at.strftime("%Y-%m-%d %H:%M")
 
 
 class WeekendPage(QWidget):
@@ -105,11 +120,15 @@ class WeekendPage(QWidget):
 
         outer.addLayout(pick_header)
 
-        self._capture_table = QTableWidget(0, 4)
-        self._capture_table.setHorizontalHeaderLabels(["Session", "Track", "Drivers", "Session ID"])
+        self._capture_table = QTableWidget(0, 5)
+        self._capture_table.setHorizontalHeaderLabels(
+            ["Session", "Track", "Drivers", "Recorded", "Session ID"]
+        )
         tidy_table(self._capture_table)
         self._capture_table.setMinimumHeight(135)
         self._capture_table.setMaximumHeight(165)
+        self._capture_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._capture_table.customContextMenuRequested.connect(self._show_capture_menu)
         outer.addWidget(self._capture_table)
 
     def _on_back(self) -> None:
@@ -226,7 +245,8 @@ class WeekendPage(QWidget):
             self._capture_table.setItem(i, 0, first)
             self._capture_table.setItem(i, 1, cell(track_name(session.track_id)))
             self._capture_table.setItem(i, 2, cell(str(drivers)))
-            self._capture_table.setItem(i, 3, cell(str(session.session_uid)))
+            self._capture_table.setItem(i, 3, cell(_recorded_label(session.recorded_at)))
+            self._capture_table.setItem(i, 4, cell(str(session.session_uid)))
 
     def _assign_selected(self) -> None:
         """Assign the selected capture to the current round, then re-query the weekend."""
@@ -240,4 +260,31 @@ class WeekendPage(QWidget):
     def _unassign(self, session_uid: int) -> None:
         """Remove a session from its round, then re-query the weekend."""
         self._seasons.unassign_session(int(session_uid))
+        self.reload()
+
+    def _show_capture_menu(self, pos) -> None:
+        """Right-click menu for the capture picker: delete an unassigned capture's results."""
+        item = self._capture_table.itemAt(pos)
+        if item is None:
+            return
+        uid = int(self._capture_table.item(item.row(), 0).data(Qt.ItemDataRole.UserRole))
+        menu = QMenu(self)
+        delete = menu.addAction("Delete from database…")
+        chosen = menu.exec(self._capture_table.viewport().mapToGlobal(pos))
+        if chosen is delete:
+            self._delete_capture(uid)
+
+    def _delete_capture(self, session_uid: int) -> None:
+        """Confirm, then delete an unassigned capture's stored results (the recording is kept)."""
+        confirm = QMessageBox.question(
+            self,
+            "Delete session",
+            "Delete this session's stored results from the database?\n\n"
+            "The original recording in captures/ is kept and can be re-ingested later.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        self._sessions.delete(int(session_uid))
         self.reload()
