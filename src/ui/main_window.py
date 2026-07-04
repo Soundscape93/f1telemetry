@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from .workers import IngestWorker, RecorderWorker
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
-from .seasons_window import SeasonsView
+from .seasons import SeasonsView
 
 # Defaults; these become user settings later.
 _CAPTURE_DIR = Path("captures")
