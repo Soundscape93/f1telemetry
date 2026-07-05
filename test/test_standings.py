@@ -24,7 +24,7 @@ def _reason():
 def _entry(name, number, position, points):
     return ClassificationEntry(
         vehicle_index=position-1, position=position, driver_name=name, team_id=0,
-        race_number=number, is_player=False, grid_position=position, points=points,
+        race_number=number, nationality_id=0, is_player=False, grid_position=position, points=points,
         num_laps=5, num_pit_stops=1, best_lap_time_ms=70000, total_race_time_s=300.0,
         penalties_time_s=0.0, num_penalties=0, result_status=ResultStatus.FINISHED,
         result_reason=_reason(), tyre_stints=())

@@ -33,6 +33,7 @@ def _entry(name, number, position, points):
         driver_name=name,
         team_id=0,
         race_number=number,
+        nationality_id=0,
         is_player=False,
         grid_position=position,
         points=points,

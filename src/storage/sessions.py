@@ -28,6 +28,7 @@ from ..protocol.enums import (
     safe_enum
 )
 
+from .migrations import ensure_schema
 from .schema import Base, ClassificationEntryRow, DeletedSessionRow, SessionRow
 
 _DEFAULT_URL = "sqlite:///f1league.db"
@@ -38,7 +39,8 @@ class SessionStore:
     This is a temporary solution until we have a proper database backend (Postgres, MySQL)."""
     def __init__(self, url: str = _DEFAULT_URL, echo: bool = False) -> None:
         self._engine = create_engine(url, echo=echo)
-        Base.metadata.create_all(self._engine)
+        Base.metadata.create_all(self._engine)      # new tables
+        ensure_schema(self._engine)                 # additive columns on existing tables
         self._Session = sessionmaker(self._engine)
 
     # --- lifecycle -----------------------------------------------------------
@@ -139,6 +141,7 @@ class SessionStore:
                         driver_name=entry.driver_name,
                         team_id=entry.team_id,
                         race_number=entry.race_number,
+                        nationality_id=entry.nationality_id,
                         is_player=entry.is_player,
                         grid_position=entry.grid_position,
                         points=entry.points,
@@ -186,6 +189,7 @@ class SessionStore:
                 driver_name=rows.driver_name,
                 team_id=rows.team_id,
                 race_number=rows.race_number,
+                nationality_id=rows.nationality_id,
                 is_player=rows.is_player,
                 grid_position=rows.grid_position,
                 points=rows.points,

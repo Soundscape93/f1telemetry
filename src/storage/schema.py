@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, JSON, String
+from sqlalchemy import BigInteger, ForeignKey, JSON, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -63,6 +63,9 @@ class ClassificationEntryRow(Base):
     driver_name: Mapped[str]    # denormalized so a card renders self-contained
     team_id: Mapped[int]
     race_number: Mapped[int] = mapped_column(default=0)  # denormalized so a card renders self-contained
+    # server_default so ensure_schema's ADD COLUMN can back-fill existing rows (a NOT NULL
+    # column added to a populated table needs a SQL-level default, not just a Python one).
+    nationality_id: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     is_player: Mapped[bool]
     grid_position: Mapped[int]
     points: Mapped[int]

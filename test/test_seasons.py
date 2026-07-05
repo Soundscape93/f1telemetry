@@ -20,7 +20,8 @@ def _reason():
 def make_session(uid, stype=SessionType.RACE, winner="Rival"):
     entries = (
         ClassificationEntry(
-            vehicle_index=1, position=1, driver_name=winner, team_id=0, race_number=50, is_player=False,
+            vehicle_index=1, position=1, driver_name=winner, team_id=0, race_number=50,
+            nationality_id=0, is_player=False,
             grid_position=1, points=25, num_laps=5, num_pit_stops=1, best_lap_time_ms=67000,
             total_race_time_s=280.0, penalties_time_s=0.0, num_penalties=0,
             result_status=ResultStatus.FINISHED, result_reason=_reason(), tyre_stints=()),       

@@ -1,9 +1,10 @@
 """The session classification table - the results grid shown for one captured session.
 
 A view-agnostic builder: it renders a session's classification the way the game's results
-screen reads. Race sessions show position (with a grid-vs-finish change triangle), driver,
-team, grid, stops, best lap, time (alternating with a penalty badge), and points; non-race
-sessions show position, driver, team, tyre, best lap, and gap to the session's fastest lap.
+screen reads. Race sessions show position (with a grid-vs-finish change triangle), driver
+(with a nationality flag), team, grid, stops, best lap, time (alternating with a penalty badge),
+and points; non-race sessions show position, driver, team, tyre, best lap, and gap to the
+session's fastest lap.
 The weekend view, and later the Sessions / Laps surfaces, all compose this same table instead
 of rebuilding it.
 
@@ -15,7 +16,7 @@ into ``driver_name`` by the normalizer); human online names are left untouched.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import QLabel, QTableWidget, QTableWidgetItem
 
 from ..formatting import (
@@ -31,6 +32,7 @@ from ..formatting import (
 from ...domain.roster import LeagueRoster, league_display_name
 from ...protocol.enums import ResultStatus
 from ...protocol.reference import team_display_name
+from .flags import flag_icon
 from .tables import cell, fit_table_height, tidy_table
 
 # Position-change colours (Pos triangle). Chosen to read on both light and dark palettes.
@@ -99,6 +101,7 @@ def build_classification_table(session, name_of=lambda entry: entry.driver_name)
     table = QTableWidget(0, len(columns))
     table.setHorizontalHeaderLabels(columns)
     tidy_table(table)
+    table.setIconSize(QSize(28, 21))    # nationality flag in the DRIVER cell (4:3)
 
     entries = session.classification.entries if session.classification else []
     winner = next((e for e in entries if e.position == 1), entries[0] if entries else None)
@@ -106,7 +109,11 @@ def build_classification_table(session, name_of=lambda entry: entry.driver_name)
 
     penalty_cells: list[tuple[QTableWidgetItem, str, str]] = []
     for i, entry in enumerate(entries):
-        table.setItem(i, 1, cell(name_of(entry)))
+        driver_item = cell(name_of(entry))
+        flag = flag_icon(entry.nationality_id)
+        if flag is not None:
+            driver_item.setIcon(flag)
+        table.setItem(i, 1, driver_item)
         table.setItem(i, 2, cell(team_display_name(entry.team_id)))
         if race_session:
             glyph, kind = format_position_change(entry.grid_position, entry.position)
