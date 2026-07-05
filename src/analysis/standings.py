@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from ..domain.models import ClassificationEntry, SessionResult
 from ..domain.season import RoundResults
 from ..domain.roster import LeagueRoster, league_display_name
+from ..protocol.enums import RACE_SESSION_TYPES
 
 
 @dataclass(frozen=True)
@@ -57,18 +58,25 @@ def compute_standings(
         key: Callable[[ClassificationEntry], Hashable] = by_driver_name,
         display: Callable[[ClassificationEntry], str] | None = None) -> tuple[StandingRow, ...]:
     """Total points per driver across the given sessions, ranked.
-    
-    Points are summed across every classification; non-scoring sessions (practice, quali)
-    carry zero point, so no session-type filtering is needed - a season's quali results can
-    be passed in alongside its races and simply contribute nothing. ``key`` groups drivers
-    across rounds; ``display`` chooses the shwon name (default: the entry's own driver name).
-    For a league both are the roster resolver, so rows group and label by canonical membler.
-    Ties break by points then name (deterministic); full FIA countback is a later refinement.
+
+    Only race-type sessions are counted (``RACE_SESSION_TYPES`` - RACE/RACE_2/RACE_3, which
+    includes the sprint race). Every other session type is skipped: the game does NOT zero the
+    final classification's ``m_points`` for non-scoring sessions - it leaves the field holding
+    the most recent race's points (so a Shanghai practice/quali/shootout echoes the last race
+    result). The UDP spec defines ``m_points`` as points scored in that session and the packet
+    as end-of-race only, so those non-race values are stale and summing them would double-count.
+    A season's quali/practice results can therefore be passed in alongside its races and are
+    simply ignored. ``key`` groups drivers across rounds; ``display`` chooses the shown name
+    (default: the entry's own driver name). For a league both are the roster resolver, so rows
+    group and label by canonical member. Ties break by points then name (deterministic); full
+    FIA countback is a later refinement.
     """
     name_of = display or (lambda entry: entry.driver_name)
     totals: dict[Hashable, _Accumulator] = {}
     for session in sessions:
         if session.classification is None:
+            continue
+        if session.session_type not in RACE_SESSION_TYPES:
             continue
         for entry in session.classification.entries:
             k = key(entry)
@@ -104,12 +112,15 @@ def compute_constructor_standings(
         sessions: Iterable[SessionResult]) -> tuple[ConstructorRow, ...]:
     """Total points per team across the given sessions, ranked.
 
-    Points are summed per ``team_id`` across every classification (non-scoring sessions
-    contribute zero, so no session-type filtering is needed). Ties break by points then
-    team_id (deterministic)."""
+    Points are summed per ``team_id`` across race-type sessions only (``RACE_SESSION_TYPES``);
+    other session types are skipped because the game leaves stale last-race points in a non-race
+    classification's ``m_points`` (see ``compute_standings``), which would otherwise double-count.
+    Ties break by points then team_id (deterministic)."""
     totals: dict[int, int] = {}
     for session in sessions:
         if session.classification is None:
+            continue
+        if session.session_type not in RACE_SESSION_TYPES:
             continue
         for entry in session.classification.entries:
             totals[entry.team_id] = totals.get(entry.team_id, 0) + entry.points

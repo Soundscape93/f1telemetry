@@ -15,7 +15,7 @@ so they line up with the classification order.
 
 from __future__ import annotations
 
-from ..protocol.enums import ResultStatus, SessionType
+from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType
 from ..protocol.reference import team_display_name
 
 # Position-change glyphs (race Pos cell): filled triangles read closer to the game than
@@ -25,7 +25,7 @@ _TRIANGLE_DOWN = "▼"   # ▼
 _EM_DASH = "—"         # —
 _PENALTY_FLAG = "⚑"    # ⚑
 
-_RACE_TYPES = frozenset({SessionType.RACE, SessionType.RACE_2, SessionType.RACE_3})
+_RACE_TYPES = RACE_SESSION_TYPES
 
 __QUALI_TYPES = frozenset({SessionType.QUALIFYING_1, SessionType.QUALIFYING_2, SessionType.QUALIFYING_3,
                            SessionType.SHORT_QUALIFYING, SessionType.ONE_SHOT_QUALIFYING,

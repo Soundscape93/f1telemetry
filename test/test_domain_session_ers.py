@@ -114,6 +114,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 ),
                 car_idx=0,
                 num_laps=1,
+                best_lap_time_lap_num=1,
                 lap_history_data=[
                     SimpleNamespace(
                         lap_time_in_ms=90000,

@@ -94,8 +94,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 ### analysis/ — derived facts
 - **`standings.py`** — `StandingRow`; `by_driver_name` / `by_race_number` keys;
   `compute_standings(sessions, key, display)`; `standings_for_rounds`;
-  `league_standings_for_rounds(rounds, roster)`. Points sum across all sessions (quali scores 0,
-  so no session-type filtering needed). LEAGUE driver standings resolve through the per-season
+  `league_standings_for_rounds(rounds, roster)`. Points sum across race-type sessions only 
+  (RACE_SESSION_TYPES); the game leaves stale last-race points in non-race classifications' 
+  m_points, so other session types are skipped. LEAGUE driver standings resolve through the per-season
   roster and display via `league_display_name`; non-league seasons stay name-keyed. Constructor
   standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
   in-memory and desktop-bound.

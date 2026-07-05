@@ -6,6 +6,7 @@ import unittest
 
 from f1telemetry.src.analysis.standings import (
     by_race_number,
+    compute_constructor_standings,
     compute_standings,
     standings_for_rounds,
 )
@@ -52,6 +53,27 @@ class ComputeStandingsTest(unittest.TestCase):
         # quali was include but contributed nothing
         self.assertEqual(table[0].points, 50, "Alice should have 50 points")
         self.assertEqual(table[1].points, 36, "Bob should have 36 points")
+
+    def test_ignores_points_on_non_race_sessions(self):
+        # A non-race final classification can carry non-zero points: the game leaves m_points
+        # holding the most recent race's points (it doesn't zero the field for non-scoring
+        # sessions). Those must never reach championship standings - only race-type sessions score.
+        race = make_session(1, SessionType.RACE, [("Alice", 1, 1, 25), ("Bob", 2, 2, 18)])
+        practice = make_session(2, SessionType.PRACTICE_1, [("Alice", 1, 1, 25), ("Bob", 2, 2, 18)])
+        shootout = make_session(3, SessionType.SPRINT_SHOOTOUT_1, [("Alice", 1, 1, 25), ("Bob", 2, 2, 18)])
+
+        table = compute_standings([race, practice, shootout])
+        self.assertEqual([(r.driver_name, r.points) for r in table], [("Alice", 25), ("Bob", 18)],
+                         "Only the race session's points should count; practice/shootout carry none")
+
+    def test_constructor_ignores_points_on_non_race_sessions(self):
+        race = make_session(1, SessionType.RACE, [("Alice", 1, 1, 25), ("Bob", 2, 2, 18)])
+        practice = make_session(2, SessionType.PRACTICE_1, [("Alice", 1, 1, 25), ("Bob", 2, 2, 18)])
+
+        table = compute_constructor_standings([race, practice])
+        # _entry puts every driver on team_id 0, so the single team's total is the race points only.
+        self.assertEqual([(r.team_id, r.points) for r in table], [(0, 43)],
+                         "Constructor total should count the race session only, not practice")
 
     def test_breaks_ties_by_name_deterministically(self):
         race1 = make_session(1, SessionType.RACE, [("Amy", 3, 1, 25), ("Zoe", 2, 2, 18)])

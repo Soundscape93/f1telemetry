@@ -72,6 +72,10 @@ class SessionType(IntEnum):
     TIME_TRIAL = 18
 
 
+# The race-type sessions - the ones that award championship points (a sprint race is also RACE).
+RACE_SESSION_TYPES = frozenset({SessionType.RACE, SessionType.RACE_2, SessionType.RACE_3})
+
+
 class Formula(IntEnum):
     """session.m_formula - used by the registry/parser for dispatch."""
 
