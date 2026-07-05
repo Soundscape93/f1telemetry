@@ -142,13 +142,26 @@ class NormalizeClassificationTest(unittest.TestCase):
     def test_winner_and_player_denormalized(self):
         """The winner and player entries are denormalized with driver name and team."""
         c = normalize_classification(self._packet(), self._roster())
-        self.assertEqual(c.winner.driver_name, "Rival")
+        # the winner is an AI (driver_id 3) -> canonical full name is baked in;
+        # the player is human -> the captured name is left untouched
+        self.assertEqual(c.winner.driver_name, "Fernando Alonso")
         self.assertEqual(c.winner.points, 25)
         self.assertEqual(c.player.driver_name, "You")
         self.assertEqual(c.player.is_player, True)
         self.assertEqual(c.player.team_id, 2)
         self.assertEqual(c.player.race_number, 16)
         self.assertEqual(c.winner.race_number, 1)
+
+    def test_unknown_ai_id_keeps_captured_name(self):
+        """An AI whose driver_id isn't in the appendix keeps its captured name."""
+        roster = (
+            Participant(vehicle_index=0, driver_name="You", team_id=2, driver_id=9,
+                        race_number=16, nationality_id=8, is_ai=False, is_player=True, network_id=1),
+            Participant(vehicle_index=1, driver_name="Backmarker", team_id=0, driver_id=9999,
+                        race_number=1, nationality_id=10, is_ai=True, is_player=False, network_id=0),
+        )
+        c = normalize_classification(self._packet(), roster)
+        self.assertEqual(c.winner.driver_name, "Backmarker")
 
     def test_tyre_stints_trimmed(self):
         """The tyre stint arrays are trimmed to the car's num_tyre_stints."""

@@ -13,6 +13,8 @@ is separate, user-maintained data and lives in a JSON file, not here.
 """
 from __future__ import annotations
 
+import re
+
 
 def _name(table: dict[int, str], value: int, kind: str) -> str:
     """Return a human-friendly name for ``value`` from ``table``, or a readable placeholder if unknown."""
@@ -409,9 +411,22 @@ INFRINGEMENT_NAMES: dict[int, str] = {
 }
 
 
+_TEAM_YEAR_SUFFIX = re.compile(r"\s'\d\d$")
+
+
 def team_name(team_id: int) -> str:
     """Return a human-friendly team name for ``team_id``."""
     return _name(TEAM_NAMES, team_id, "team")
+
+
+def team_display_name(team_id: int) -> str:
+    """Team name with any season-variant year suffix stripped, the way the game's results
+    screen labels a car: ``"Ferrari '26" -> "Ferrari"``, ``"Audi '26" -> "Audi"``.
+
+    Display-only; ``team_name`` stays the source of truth everywhere the exact roster
+    variant matters.
+    """
+    return _TEAM_YEAR_SUFFIX.sub("", team_name(team_id))
 
 
 def track_name(track_id: int) -> str:

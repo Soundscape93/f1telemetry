@@ -16,7 +16,14 @@ so they line up with the classification order.
 from __future__ import annotations
 
 from ..protocol.enums import ResultStatus, SessionType
-from ..protocol.reference import team_name
+from ..protocol.reference import team_display_name
+
+# Position-change glyphs (race Pos cell): filled triangles read closer to the game than
+# the arrowhead code points, and bold cleanly. Em dash = no change / unknown grid.
+_TRIANGLE_UP = "▲"     # ▲
+_TRIANGLE_DOWN = "▼"   # ▼
+_EM_DASH = "—"         # —
+_PENALTY_FLAG = "⚑"    # ⚑
 
 _RACE_TYPES = frozenset({SessionType.RACE, SessionType.RACE_2, SessionType.RACE_3})
 
@@ -119,6 +126,53 @@ def non_race_result(entry, session_type) -> str:
     return "\u2014"
 
 
+def format_position_change(grid_position: int, position: int) -> tuple[str, str]:
+    """The race Pos change indicator as ``(glyph, kind)``.
+
+    ``kind`` is one of ``gain``/``loss``/``same``/``none`` so the view can colour the glyph
+    (green up / red down / neutral dash) without this Qt-free module knowing about palettes.
+    ``grid_position <= 0`` means a pit-lane / unknown start, shown as a neutral dash.
+    """
+    if grid_position <= 0:
+        return (_EM_DASH, "none")
+    delta = grid_position - position
+    if delta > 0:
+        return (_TRIANGLE_UP, "gain")
+    if delta < 0:
+        return (_TRIANGLE_DOWN, "loss")
+    return (_EM_DASH, "same")
+
+
+def format_grid(grid_position: int) -> str:
+    """The Grid cell: the starting slot, or an em dash for a pit-lane / unknown start."""
+    return str(grid_position) if grid_position > 0 else _EM_DASH
+
+
+def format_lap_gap(entry, winner) -> str:
+    """The quali/practice Gap cell: the gap to the session's fastest lap, an em dash for the
+    leader or for a driver who set no time."""
+    if winner is None or entry is winner or entry.position == 1:
+        return _EM_DASH
+    if not entry.best_lap_time_ms or not winner.best_lap_time_ms:
+        return _EM_DASH
+    return format_gap((entry.best_lap_time_ms - winner.best_lap_time_ms) / 1000)
+
+
+def format_penalty_badge(num_penalties: int, penalties_time_s: int) -> str | None:
+    """A penalty indicator like ``⚑ ×1 (+3s)``, or None when the driver has no penalty.
+
+    The Time cell alternates between the race time and this badge for penalised finishers.
+    """
+    if num_penalties <= 0 and penalties_time_s <= 0:
+        return None
+    parts = [_PENALTY_FLAG]
+    if num_penalties > 0:
+        parts.append(f"×{num_penalties}")
+    if penalties_time_s > 0:
+        parts.append(f"(+{penalties_time_s}s)")
+    return " ".join(parts)
+
+
 def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str | None:
     """Return the race winner as ``Driver / Team`` for a race session, or None if unavailable.
 
@@ -130,5 +184,5 @@ def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str
     winner = session.classification.winner
     if winner is None:
         return None
-    return f"{name_of(winner)} / {team_name(winner.team_id)}"
+    return f"{name_of(winner)} / {team_display_name(winner.team_id)}"
 

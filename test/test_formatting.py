@@ -4,21 +4,27 @@ import unittest
 from types import SimpleNamespace
  
 from f1telemetry.src.protocol.enums import ResultStatus, SessionType
+from f1telemetry.src.protocol.reference import team_display_name
 from f1telemetry.src.ui.formatting import (
     format_gap,
+    format_grid,
+    format_lap_gap,
     format_lap_time,
+    format_penalty_badge,
+    format_position_change,
     format_race_time,
     is_race,
     non_race_result,
     race_result,
     race_winner_summary,
 )
- 
- 
-def _entry(position=1, status=ResultStatus.FINISHED, total=0.0, penalties=0, laps=57, best=0):
+
+
+def _entry(position=1, status=ResultStatus.FINISHED, total=0.0, penalties=0, laps=57, best=0,
+           num_penalties=0):
     return SimpleNamespace(position=position, result_status=status, total_race_time_s=total,
                            penalties_time_s=penalties, num_laps=laps, best_lap_time_ms=best,
-                           driver_name="Driver", team_id=1)
+                           num_penalties=num_penalties, driver_name="Driver", team_id=1)
  
  
 class FormatTest(unittest.TestCase):
@@ -126,5 +132,58 @@ class RaceWinnerSummaryTest(unittest.TestCase):
         )
  
  
+class PositionChangeTest(unittest.TestCase):
+    def test_gain_loss_same(self):
+        self.assertEqual(format_position_change(5, 1), ("▲", "gain"))
+        self.assertEqual(format_position_change(1, 5), ("▼", "loss"))
+        self.assertEqual(format_position_change(3, 3), ("—", "same"))
+
+    def test_unknown_grid_is_neutral(self):
+        # a pit-lane / unknown start (grid 0) is a neutral dash, not a huge gain
+        self.assertEqual(format_position_change(0, 8), ("—", "none"))
+
+
+class GridTest(unittest.TestCase):
+    def test_grid_and_pit_start(self):
+        self.assertEqual(format_grid(7), "7")
+        self.assertEqual(format_grid(0), "—")
+
+
+class LapGapTest(unittest.TestCase):
+    def setUp(self):
+        self.winner = _entry(position=1, best=78000)
+
+    def test_leader_has_no_gap(self):
+        self.assertEqual(format_lap_gap(self.winner, self.winner), "—")
+
+    def test_gap_to_fastest_lap(self):
+        p2 = _entry(position=2, best=78345)
+        self.assertEqual(format_lap_gap(p2, self.winner), "+0.345")
+
+    def test_no_time_is_dash(self):
+        self.assertEqual(format_lap_gap(_entry(position=8, best=0), self.winner), "—")
+
+
+class PenaltyBadgeTest(unittest.TestCase):
+    def test_no_penalty_is_none(self):
+        self.assertIsNone(format_penalty_badge(0, 0))
+
+    def test_count_and_time(self):
+        self.assertEqual(format_penalty_badge(1, 3), "⚑ ×1 (+3s)")
+
+    def test_count_only(self):
+        # a warning-style penalty with no added time still shows the flag and count
+        self.assertEqual(format_penalty_badge(2, 0), "⚑ ×2")
+
+
+class TeamDisplayNameTest(unittest.TestCase):
+    def test_year_suffix_stripped(self):
+        self.assertEqual(team_display_name(477), "Ferrari")   # "Ferrari '26"
+        self.assertEqual(team_display_name(485), "Audi")      # "Audi '26"
+
+    def test_base_team_unchanged(self):
+        self.assertEqual(team_display_name(1), "Ferrari")
+
+
 if __name__ == "__main__":
     unittest.main()

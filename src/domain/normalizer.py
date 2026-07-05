@@ -28,13 +28,14 @@ from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 
 from ..protocol.enums import (
-    Formula, 
+    Formula,
     ResultReason,
     ResultStatus,
     SessionType,
     Weather,
     safe_enum,
 )
+from ..protocol.reference import DRIVER_NAMES
 from .models import (
     Classification,
     ClassificationEntry,
@@ -175,11 +176,26 @@ def build_trace(samples: list[Sample]) -> LapTrace:
     )
 
 
+def _display_driver_name(participant: Participant) -> str:
+    """The name a results card should show for a car: an AI driver's canonical full name
+    (via ``driver_id``), or a human's captured online name left as-is.
+
+    Baking this here means every downstream consumer - the classification table AND the
+    driver standings, which both read ``ClassificationEntry.driver_name`` - gets the full
+    name without a participant join (participants aren't persisted). Falls back to the
+    captured name when the id isn't in the appendix.
+    """
+    if participant.is_ai:
+        return DRIVER_NAMES.get(participant.driver_id, participant.driver_name)
+    return participant.driver_name
+
+
 def normalize_classification(packet, roster: tuple[Participant, ...]) -> Classification:
     """Build the final classification, ordered by finishing position.
-    
+
     Driver name and team are denormalized from the roster (joined by vehicle index)
-    so a results card render self-contained. Tyre stints are trimmed per car by
+    so a results card render self-contained. AI drivers are resolved to their canonical
+    full name (see ``_display_driver_name``). Tyre stints are trimmed per car by
     that car's num_tyre_stints.
     """
     player_idx = packet.header.player_car_index
@@ -201,7 +217,7 @@ def normalize_classification(packet, roster: tuple[Participant, ...]) -> Classif
             ClassificationEntry(
                 vehicle_index=i,
                 position=car.position,
-                driver_name=participant.driver_name if participant else f"car_{i}",
+                driver_name=_display_driver_name(participant) if participant else f"car_{i}",
                 team_id=participant.team_id if participant else -1,
                 race_number=participant.race_number if participant else 0,
                 is_player=(i == player_idx),

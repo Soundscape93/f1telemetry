@@ -27,7 +27,7 @@ from ...analysis.standings import (
 )
 from ...domain.roster import LeagueRoster
 from ...domain.season import SeasonMode
-from ...protocol.reference import team_name, track_name
+from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
 from ..formatting import race_winner_summary
 from .labels import season_title
@@ -207,7 +207,7 @@ class DetailPage(QWidget):
         self._constructor_table.setRowCount(len(constructor_rows))
         for i, row in enumerate(constructor_rows):
             self._constructor_table.setItem(i, 0, cell(str(row.position)))
-            self._constructor_table.setItem(i, 1, cell(team_name(row.team_id)))
+            self._constructor_table.setItem(i, 1, cell(team_display_name(row.team_id)))
             self._constructor_table.setItem(i, 2, cell(str(row.points)))
         fit_table_height(self._constructor_table)
         self._constructor_table.setVisible(bool(constructor_rows))
