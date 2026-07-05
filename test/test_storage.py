@@ -20,14 +20,14 @@ def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=
             vehicle_index=1, position=1, driver_name="Rival", team_id=0, race_number=50,
             nationality_id=10, is_player=False,
             grid_position=1, points=25, num_laps=5, num_pit_stops=1, best_lap_time_ms=67000,
-            total_race_time_s=280.1, penalties_time_s=0, num_penalties=0,
+            best_lap_num=4, total_race_time_s=280.1, penalties_time_s=0, num_penalties=0,
             result_status=ResultStatus.FINISHED, result_reason=safe_reason(),
             tyre_stints=(TyreStint(actual_compound="16", visual_compound="16", end_lap=5),)),
         ClassificationEntry(
             vehicle_index=0, position=2, driver_name="Player", team_id=2, race_number=51,
             nationality_id=8, is_player=with_player,
             grid_position=3, points=18, num_laps=5, num_pit_stops=2, best_lap_time_ms=68000,
-            total_race_time_s=282.4, penalties_time_s=5, num_penalties=1,
+            best_lap_num=7, total_race_time_s=282.4, penalties_time_s=5, num_penalties=1,
             result_status=ResultStatus.FINISHED, result_reason=safe_reason(),
             tyre_stints=(TyreStint(actual_compound="17", visual_compound="16", end_lap=5),
                          TyreStint(actual_compound="18", visual_compound="18", end_lap=5))),
@@ -88,6 +88,7 @@ class RoundTripTest(StorageTestBase):
         self.assertEqual(classification.player.points, 18)
         self.assertEqual(classification.player.result_status, ResultStatus.FINISHED)
         self.assertEqual(classification.player.best_lap_time_ms, 68000)
+        self.assertEqual(classification.player.best_lap_num, 7)
         self.assertAlmostEqual(classification.player.total_race_time_s, 282.4, places=4)
 
     def test_tyre_stints_round_trip(self):

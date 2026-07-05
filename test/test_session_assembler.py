@@ -53,10 +53,12 @@ def _lap_entry(t, vb, sectors=None):
         lap_valid_bit_flags=vb)
 
 
-def sh_pkt(uid, entries, player=0):
+def sh_pkt(uid, entries, player=0, best_lap_num=0, car_idx=None):
     """Build a fake Session History packet for testing."""
     return SimpleNamespace(header=_hdr(PacketId.SESSION_HISTORY, uid, player=player),
-                           car_idx=player, num_laps=len(entries), lap_history_data=entries)
+                           car_idx=player if car_idx is None else car_idx,
+                           num_laps=len(entries), best_lap_time_lap_num=best_lap_num,
+                           lap_history_data=entries)
 
 
 _frame = [0]

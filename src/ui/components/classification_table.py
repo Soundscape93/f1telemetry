@@ -20,6 +20,7 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import QLabel, QTableWidget, QTableWidgetItem
 
 from ..formatting import (
+    compound_for_lap,
     format_grid,
     format_lap_gap,
     format_lap_time,
@@ -34,6 +35,7 @@ from ...protocol.enums import ResultStatus
 from ...protocol.reference import team_display_name
 from .flags import flag_icon
 from .tables import cell, fit_table_height, tidy_table
+from .tyres import tyre_pixmap
 
 # Position-change colours (Pos triangle). Chosen to read on both light and dark palettes.
 _POS_COLORS = {"gain": "#3fb950", "loss": "#f85149"}
@@ -62,6 +64,15 @@ def _pos_change_widget(position: int, glyph: str, kind: str) -> QLabel:
     label = QLabel(f"{position}&nbsp;&nbsp;{styled}")
     label.setTextFormat(Qt.TextFormat.RichText)
     label.setContentsMargins(6, 0, 6, 0)
+    label.setStyleSheet("background: transparent;")
+    return label
+
+
+def _tyre_widget(pixmap) -> QLabel:
+    """A TYRE cell holding a centred compound tyre icon."""
+    label = QLabel()
+    label.setPixmap(pixmap)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet("background: transparent;")
     return label
 
@@ -130,7 +141,11 @@ def build_classification_table(session, name_of=lambda entry: entry.driver_name)
                 penalty_cells.append((time_item, time_str, badge))
         else:
             table.setItem(i, 0, cell(str(entry.position)))
-            table.setItem(i, 3, cell(""))  # TYRE — populated in commit 3
+            table.setItem(i, 3, cell(""))
+            compound = compound_for_lap(entry.tyre_stints, entry.best_lap_num)
+            pixmap = tyre_pixmap(compound) if compound is not None else None
+            if pixmap is not None:
+                table.setCellWidget(i, 3, _tyre_widget(pixmap))
             table.setItem(i, 4, cell(non_race_result(entry, session.session_type)))
             table.setItem(i, 5, cell(format_lap_gap(entry, winner)))
 

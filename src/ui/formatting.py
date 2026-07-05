@@ -126,6 +126,22 @@ def non_race_result(entry, session_type) -> str:
     return "\u2014"
 
 
+def compound_for_lap(tyre_stints, lap_num: int) -> int | None:
+    """The visual tyre compound in use on ``lap_num`` - the fastest-lap tyre for the tyre cell.
+
+    Stints are chronological with ``end_lap`` the last lap of each (the final/current stint uses
+    a sentinel like 255), so the first stint whose ``end_lap`` reaches ``lap_num`` is the one that
+    covered it. Returns None when there's no timed lap (``lap_num == 0``) or no stint data; falls
+    back to the last stint if ``lap_num`` runs past every recorded ``end_lap``.
+    """
+    if not lap_num or not tyre_stints:
+        return None
+    for stint in tyre_stints:
+        if lap_num <= stint.end_lap:
+            return stint.visual_compound
+    return tyre_stints[-1].visual_compound
+
+
 def format_position_change(grid_position: int, position: int) -> tuple[str, str]:
     """The race Pos change indicator as ``(glyph, kind)``.
 

@@ -72,6 +72,8 @@ class ClassificationEntryRow(Base):
     num_laps: Mapped[int]
     num_pit_stops: Mapped[int]
     best_lap_time_ms: Mapped[int]
+    # server_default so ensure_schema's ADD COLUMN back-fills existing rows (see nationality_id)
+    best_lap_num: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     total_race_time_s: Mapped[int]
     penalties_time_s: Mapped[int]
     num_penalties: Mapped[int]

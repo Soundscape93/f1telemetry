@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from f1telemetry.src.protocol.enums import ResultStatus, SessionType
 from f1telemetry.src.protocol.reference import team_display_name
 from f1telemetry.src.ui.formatting import (
+    compound_for_lap,
     format_gap,
     format_grid,
     format_lap_gap,
@@ -174,6 +175,25 @@ class PenaltyBadgeTest(unittest.TestCase):
     def test_count_only(self):
         # a warning-style penalty with no added time still shows the flag and count
         self.assertEqual(format_penalty_badge(2, 0), "⚑ ×2")
+
+
+class CompoundForLapTest(unittest.TestCase):
+    def _stint(self, visual, end_lap):
+        return SimpleNamespace(visual_compound=visual, end_lap=end_lap)
+
+    def test_picks_the_stint_covering_the_lap(self):
+        stints = (self._stint(16, 5), self._stint(18, 255))   # soft to lap 5, then hard (current)
+        self.assertEqual(compound_for_lap(stints, 3), 16)     # lap 3 -> softs
+        self.assertEqual(compound_for_lap(stints, 5), 16)     # boundary lap belongs to that stint
+        self.assertEqual(compound_for_lap(stints, 40), 18)    # later lap -> hards
+
+    def test_no_lap_or_no_stints_is_none(self):
+        self.assertIsNone(compound_for_lap((), 4))
+        self.assertIsNone(compound_for_lap((self._stint(16, 5),), 0))
+
+    def test_lap_past_all_end_laps_falls_back_to_last(self):
+        stints = (self._stint(16, 3), self._stint(17, 6))     # neither reaches lap 9
+        self.assertEqual(compound_for_lap(stints, 9), 17)
 
 
 class TeamDisplayNameTest(unittest.TestCase):

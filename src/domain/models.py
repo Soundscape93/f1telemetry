@@ -157,6 +157,7 @@ class ClassificationEntry:
     num_laps: int
     num_pit_stops: int
     best_lap_time_ms: int
+    best_lap_num: int               # lap the best lap was set on; picks the fastest-lap tyre stint
     total_race_time_s: float
     penalties_time_s: int
     num_penalties: int

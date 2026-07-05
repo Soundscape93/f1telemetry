@@ -56,6 +56,7 @@ class _SessionBuilder:
         self._scaffold: SessionResult | None = None
         self._roster_by_index: dict[int, Participant] = {}  # merged across all Participants frames
         self._session_history = None            # the player's latest Session History packet
+        self._best_lap_num_by_index: dict[int, int] = {}  # car_idx -> lap the best lap was set on
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
 
@@ -88,6 +89,9 @@ class _SessionBuilder:
                     self._roster_by_index.get(idx), participant
                 )
         elif pid == PacketId.SESSION_HISTORY:
+            # Session History cycles through every car; keep each car's best-lap lap number
+            # (last-write wins) so the classification can resolve the fastest-lap tyre stint.
+            self._best_lap_num_by_index[packet.car_idx] = packet.best_lap_time_lap_num
             if packet.car_idx == packet.header.player_car_index:
                 self._session_history = packet              # last-write wins -> end-of-session bulk
         elif pid == PacketId.FINAL_CLASSIFICATION:
@@ -183,7 +187,9 @@ class _SessionBuilder:
 
         classification = None
         if self._final_classification is not None:
-            classification = normalize_classification(self._final_classification, roster)
+            classification = normalize_classification(
+                self._final_classification, roster, self._best_lap_num_by_index
+            )
 
         return dataclasses.replace(
             self._scaffold,

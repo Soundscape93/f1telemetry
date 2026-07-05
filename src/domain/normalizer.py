@@ -190,16 +190,23 @@ def _display_driver_name(participant: Participant) -> str:
     return participant.driver_name
 
 
-def normalize_classification(packet, roster: tuple[Participant, ...]) -> Classification:
+def normalize_classification(
+    packet,
+    roster: tuple[Participant, ...],
+    best_lap_num_by_index: dict[int, int] | None = None,
+) -> Classification:
     """Build the final classification, ordered by finishing position.
 
     Driver name and team are denormalized from the roster (joined by vehicle index)
     so a results card render self-contained. AI drivers are resolved to their canonical
     full name (see ``_display_driver_name``). Tyre stints are trimmed per car by
-    that car's num_tyre_stints.
+    that car's num_tyre_stints. ``best_lap_num_by_index`` maps a car's vehicle index to the
+    lap its best lap was set on (from Session History) so the fastest-lap tyre can be resolved
+    at display; absent (e.g. no history captured) it defaults to 0.
     """
     player_idx = packet.header.player_car_index
     by_index = {p.vehicle_index: p for p in roster}
+    best_lap_num_by_index = best_lap_num_by_index or {}
     
     entries = []
     for i in range(packet.num_cars):
@@ -227,6 +234,7 @@ def normalize_classification(packet, roster: tuple[Participant, ...]) -> Classif
                 num_laps=car.num_laps,
                 num_pit_stops=car.num_pit_stops,
                 best_lap_time_ms=car.best_lap_time_in_ms,
+                best_lap_num=best_lap_num_by_index.get(i, 0),
                 total_race_time_s=car.total_race_time,
                 penalties_time_s=car.penalties_time,
                 num_penalties=car.num_penalties,

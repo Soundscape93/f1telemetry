@@ -152,6 +152,17 @@ class NormalizeClassificationTest(unittest.TestCase):
         self.assertEqual(c.player.race_number, 16)
         self.assertEqual(c.winner.race_number, 1)
 
+    def test_best_lap_num_from_history_map(self):
+        """best_lap_num is taken from the per-car Session History map, by vehicle index."""
+        c = normalize_classification(self._packet(), self._roster(), {0: 3, 1: 8})
+        self.assertEqual(c.player.best_lap_num, 3)   # vehicle index 0
+        self.assertEqual(c.winner.best_lap_num, 8)   # vehicle index 1
+
+    def test_best_lap_num_defaults_to_zero(self):
+        """With no history map, best_lap_num is 0 (no fastest-lap tyre resolvable)."""
+        c = normalize_classification(self._packet(), self._roster())
+        self.assertEqual(c.winner.best_lap_num, 0)
+
     def test_unknown_ai_id_keeps_captured_name(self):
         """An AI whose driver_id isn't in the appendix keeps its captured name."""
         roster = (

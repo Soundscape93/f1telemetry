@@ -40,6 +40,7 @@ def _entry(name, number, position, points):
         num_laps=5,
         num_pit_stops=1,
         best_lap_time_ms=70000,
+        best_lap_num=0,
         total_race_time_s=300.0,
         penalties_time_s=0.0,
         num_penalties=0,
