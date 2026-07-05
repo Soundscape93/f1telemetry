@@ -64,13 +64,32 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   `%APPDATA%\…`, `~/Library/Application Support/…`) and the repo folder in dev, then route
   captures, rosters, and the DB through it *together*. `SeasonRosterFiles` already takes an
   injectable `root`, so it's ready for this.
+- **Auto-update + version-gated data backfill (two *separate* concerns).**
+  - *Auto-update (distribution):* GitHub Actions builds per-OS frozen artifacts, publishes a
+    Release; the app checks the Releases API on startup and an updater downloads/swaps the build.
+    Rougher in Python than the C#/ClickOnce world — a real option is `tufup` (TUF-based). Per-OS
+    fiddly; packaging-time work.
+  - *Data backfill:* `ensure_schema` adds a new column but can't fill a *capture-derived* value in
+    old rows (e.g. `nationality_id`, upcoming `best_lap_num`) — those need re-deriving from the
+    capture. For end users with many sessions, manual re-ingest is painful. Plan: store a
+    "backfill version" in a metadata table; on startup, if the app expects a higher version, run a
+    **background, non-blocking, idempotent** re-ingest of retained captures (reuse the
+    `IngestWorker` pattern, show progress) — *not* a startup gate. Already safe to automate: ingest
+    replaces by uid, tombstones aren't resurrected, round assignments survive (no FK). Best-effort:
+    only sessions whose capture still exists can be back-filled (surface "N of M updated").
+    Decoupled from auto-update — it matters even with manual updates. Lever: persisting more
+    capture-derived data now means fewer future columns need a capture-reparse backfill (some
+    become fast pure-SQL migrations instead).
 
 ## Storage & analysis
 - **Dense-trace persistence.** Store `LapTrace`s as Parquet/npz files referenced by the lap row
   (~5,400 samples/lap at 60 Hz — not SQLite rows), plus an ingest entry point that writes them.
-- **`storage/migrations.py` — `ensure_schema(engine)`.** Introduce when trace storage lands
-  (the next additive change): inspect tables and `ADD COLUMN` for anything missing, wired into
-  the stores after `create_all`. Covers the distributed/colleagues case too.
+- **`storage/migrations.py` — `ensure_schema(engine)`. DONE.** Landed with the first additive
+  column (`nationality_id`), not trace storage: inspects tables and `ADD COLUMN`s anything the ORM
+  defines but the DB lacks, wired into `SessionStore` after `create_all`, idempotent. New additive
+  columns must carry a `server_default` so the ADD COLUMN back-fills existing rows. Note this only
+  creates the column — filling a *capture-derived* value in old rows still needs a re-ingest (see
+  Packaging → data backfill).
 - **Alembic.** Adopt at the first *non-additive* migration (rename / type change / drop /
   backfill). Until then, additive-only + `ensure_schema`.
 - **Complete `DRIVER_NAMES`.** The AI driver-id table is partial (~11 entries); fill it from the
