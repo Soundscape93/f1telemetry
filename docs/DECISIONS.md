@@ -33,6 +33,17 @@ what would trigger revisiting it.
   aborted ones. This is why the pipeline reads the capture directly rather than via
   `FileReplaySource`, which drops `recv_time`. Sessions stored before this existed keep their
   old ingest-time stamp until their capture is re-ingested.
+- **Deleting a session tombstones its uid; re-ingest skips tombstoned uids.** A capture holds
+  every session it recorded, including aborted attempts the user deleted on purpose (a
+  crash/restart, a re-driven quali). Re-ingesting that capture — to refresh denormalized data
+  after a code change, or just to re-import — would otherwise silently resurrect them.
+  `SessionStore.delete` therefore records a `deleted_sessions` row (uid + track/type/recorded_at
+  for a future 'deleted sessions' view), and `ingest_capture` skips those uids. `restore(uid)`
+  clears the tombstone for a deliberate re-import; `save()` stays a dumb primitive (the skip is
+  policy in the orchestrator, not the store). Fresh recordings are unaffected — their uids are
+  new. The tombstone is a *new table*, so `create_all` adds it to existing DBs with no migration
+  (unlike an added column). *Revisit:* if we ever want delete-without-tombstone, it becomes a
+  second explicit action rather than the default.
 - **Enums stored as raw ints, read via `safe_enum`.** The game's enums grow across title
   updates; `safe_enum` returns the member or the raw int so an unknown value never crashes load.
 - **Captures are gzip-archived after ingest, not compressed while recording.** Recording stays

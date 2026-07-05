@@ -138,6 +138,34 @@ class DeleteTest(StorageTestBase):
         self.assertFalse(self.store.delete(4242))
 
 
+class TombstoneTest(StorageTestBase):
+    """Deleting a session records a tombstone so re-saving/re-ingesting can skip it."""
+
+    def test_delete_tombstones_the_uid(self):
+        self.store.save(make_session(uid=1001))
+        self.assertFalse(self.store.is_deleted(1001))
+        self.store.delete(1001)
+        self.assertTrue(self.store.is_deleted(1001))
+        self.assertIn(1001, self.store.deleted_uids())
+
+    def test_deleting_missing_uid_leaves_no_tombstone(self):
+        self.assertFalse(self.store.delete(4242))
+        self.assertEqual(self.store.deleted_uids(), set())
+
+    def test_restore_clears_the_tombstone(self):
+        self.store.save(make_session(uid=1001))
+        self.store.delete(1001)
+        self.assertTrue(self.store.restore(1001))
+        self.assertFalse(self.store.is_deleted(1001))
+        self.assertFalse(self.store.restore(1001))    # already cleared -> False
+
+    def test_tombstone_survives_uint64_high_bit(self):
+        big = 0x8000_0000_0000_0000
+        self.store.save(make_session(uid=big))
+        self.store.delete(big)
+        self.assertIn(big, self.store.deleted_uids())
+
+
 class NoClassificationTest(StorageTestBase):
     """Test that a session without classification can be saved and loaded."""
     def test_session_without_classification_persists_metadata(self):

@@ -280,7 +280,8 @@ class WeekendPage(QWidget):
             self,
             "Delete session",
             "Delete this session's stored results from the database?\n\n"
-            "The original recording in captures/ is kept and can be re-ingested later.",
+            "The original recording in captures/ is kept, but this session will be skipped if "
+            "you re-ingest that capture (it's remembered as deleted).",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

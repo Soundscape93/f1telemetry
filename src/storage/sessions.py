@@ -28,7 +28,7 @@ from ..protocol.enums import (
     safe_enum
 )
 
-from .schema import Base, ClassificationEntryRow, SessionRow
+from .schema import Base, ClassificationEntryRow, DeletedSessionRow, SessionRow
 
 _DEFAULT_URL = "sqlite:///f1league.db"
 
@@ -66,19 +66,50 @@ class SessionStore:
             db.add(self._to_row(result))
 
     def delete(self, session_uid: int) -> bool:
-        """Delete a stored session (and its classification entries via cascade).
+        """Delete a stored session (and its classification entries via cascade), tombstoning it.
 
         Returns True if a row was removed, False if the uid wasn't present. Only the stored
-        results are removed; the underlying capture in ``captures/`` is kept and re-ingesting
-        it re-creates the session. Any season assignment for this uid lives in the separate
-        ``season_assignments`` table (no FK) and is not touched here - callers delete only
-        unassigned sessions, so there is nothing to clean up.
+        results are removed; the underlying capture in ``captures/`` is kept. A tombstone is
+        recorded so re-ingesting that capture skips this session rather than resurrecting it
+        (see ``DeletedSessionRow`` / ``restore``). Any season assignment for this uid lives in
+        the separate ``season_assignments`` table (no FK) and is not touched here - callers
+        delete only unassigned sessions, so there is nothing to clean up.
         """
         with self._Session.begin() as db:
             row = db.get(SessionRow, str(session_uid))
             if row is None:
                 return False
+            db.merge(DeletedSessionRow(              # merge -> idempotent if already tombstoned
+                session_uid=row.session_uid,
+                deleted_at=datetime.now(timezone.utc),
+                track_id=row.track_id,
+                session_type=row.session_type,
+                recorded_at=row.recorded_at,
+            ))
             db.delete(row)                          # cascade removes its entries
+            return True
+
+    def deleted_uids(self) -> set[int]:
+        """The set of tombstoned session uids - the sessions ingest should skip re-creating."""
+        with self._Session.begin() as db:
+            return {int(uid) for uid in db.scalars(select(DeletedSessionRow.session_uid)).all()}
+
+    def is_deleted(self, session_uid: int) -> bool:
+        """Whether ``session_uid`` is tombstoned (deleted and not restored)."""
+        with self._Session.begin() as db:
+            return db.get(DeletedSessionRow, str(session_uid)) is not None
+
+    def restore(self, session_uid: int) -> bool:
+        """Clear a session's tombstone so its capture can be re-ingested again.
+
+        Returns True if a tombstone was cleared, False if the uid wasn't tombstoned. Does not
+        itself re-create the session - the caller re-ingests the capture afterwards.
+        """
+        with self._Session.begin() as db:
+            tomb = db.get(DeletedSessionRow, str(session_uid))
+            if tomb is None:
+                return False
+            db.delete(tomb)
             return True
 
     # --- read ---------------------------------------------------------------

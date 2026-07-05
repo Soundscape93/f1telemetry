@@ -43,6 +43,11 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   This action moves to (or is shared with) the Sessions surface when it lands. The picker shows
   a "Recorded" column stamped from the capture's real packet time (see DECISIONS → `recorded_at`),
   so repeated attempts of one session are separable by time — the keeper is the latest.
+- **Deleted-sessions manager** — a view listing tombstoned sessions (track / type / recorded-at,
+  already stored on `deleted_sessions`) with a Restore button. The store side is done
+  (`SessionStore.deleted_uids` / `is_deleted` / `restore`; delete tombstones by default and
+  `ingest_capture` skips tombstoned uids); only the UI is pending. Likely lives on the Sessions
+  surface.
 - **Laps** — per-lap browser feeding the analysis work below.
 - **Analytics** — overlay N laps on a shared distance grid; lap delta; ERS-deployment view.
   In-memory `LapTrace` analytics stay desktop-bound regardless of any web future.

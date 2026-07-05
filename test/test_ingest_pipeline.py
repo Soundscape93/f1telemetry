@@ -96,6 +96,23 @@ class IngestPipelineTest(unittest.TestCase):
             self.assertIsNotNone(loaded.classification, "a race should persist a classification")
             self.assertTrue(loaded.classification.entries, "race classification has no entries")
 
+    def test_reingest_skips_a_deleted_session(self):
+        """A session deleted from the store is not resurrected by re-ingesting its capture."""
+        from f1telemetry.src.pipeline import ingest_capture
+        first = ingest_capture(_FIXTURE, self.store)
+        self.assertTrue(first, "The capture produced no sessions")
+
+        victim = first[0].session_uid
+        self.store.delete(victim)
+        self.assertIsNone(self.store.load(victim))
+
+        resaved = ingest_capture(_FIXTURE, self.store)
+        self.assertNotIn(victim, {s.session_uid for s in resaved})   # skipped, not returned
+        self.assertIsNone(self.store.load(victim))                   # still gone from the store
+        # a sibling from the same capture is re-stored as normal
+        if len(first) > 1:
+            self.assertIsNotNone(self.store.load(first[1].session_uid))
+
 
 if __name__ == "__main__":
     unittest.main()

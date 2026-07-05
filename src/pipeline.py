@@ -34,6 +34,10 @@ def ingest_capture(capture_path: str, store: SessionStore) -> list[SessionResult
     one recording get distinct, chronological timestamps. We read the capture directly here
     rather than via ``FileReplaySource`` because we need each packet's ``recv_time``, which that
     source drops.
+
+    Sessions the user has deleted from the store are tombstoned (see ``SessionStore.delete``);
+    those uids are skipped here so re-ingesting a capture doesn't resurrect a deliberately
+    removed attempt. The returned list therefore covers only the sessions actually stored.
     """
     parser = PacketParser(build_registry())
     earliest: dict[int, float] = {}     # session_uid -> earliest recv_time seen
@@ -50,8 +54,11 @@ def ingest_capture(capture_path: str, store: SessionStore) -> list[SessionResult
                     earliest[uid] = record.recv_time    # uid==0 is init noise, ignored downstream
                 yield packet
 
+    tombstoned = store.deleted_uids()   # sessions the user deleted on purpose - don't resurrect
     saved: list[SessionResult] = []
     for session in assemble(parsed()):
+        if session.session_uid in tombstoned:
+            continue
         recv_time = earliest.get(session.session_uid)
         if recv_time is not None:
             session = replace(

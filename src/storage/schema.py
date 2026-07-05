@@ -79,6 +79,26 @@ class ClassificationEntryRow(Base):
     session: Mapped[SessionRow] = relationship(back_populates="entries")
 
 
+class DeletedSessionRow(Base):
+    """A tombstone for a session deleted from the store.
+
+    Re-ingesting a capture re-assembles every session it contains, which would silently
+    resurrect ones the user deleted on purpose (an aborted/crashed attempt they repeated).
+    A tombstone records that a ``session_uid`` is unwanted so ingest skips it. Keyed on the
+    uid - the ``sessions`` row is gone, so this is deliberately not a foreign key - and it
+    carries a few descriptive fields so a future 'deleted sessions' view can show what each
+    tombstone was without the capture. Cleared by ``SessionStore.restore``.
+    """
+
+    __tablename__ = "deleted_sessions"
+
+    session_uid: Mapped[str] = mapped_column(String, primary_key=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    track_id: Mapped[int | None] = mapped_column(nullable=True)
+    session_type: Mapped[int | None] = mapped_column(nullable=True)
+    recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class SeasonRow(Base):
     """A user-authored season: mode, number, optional nickname, pinned game format."""
 
