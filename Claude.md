@@ -91,7 +91,11 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
 3. **Sessions split on `header.session_uid`;** `uid == 0` frames are init noise and ignored.
 4. **`session_assignments.session_uid` is deliberately NOT a foreign key** to `sessions`, so
    re-ingesting a capture (replace-by-uid) never wipes manual round placements.
-5. **Slot (Q1/Q2/Q3/Race/Sprint) is derived from `session_type`, never stored.**
+5. **Slot (Q1/Q2/Q3/Sprint/Race) is derived, never stored** — but not from `session_type`
+   alone: the Sprint Race and the Grand Prix *both* report `session_type` RACE (15), so they're
+   told apart by their position in the weekend. `domain/season.py:weekend_slots` resolves this
+   from the game's `weekend_structure` (persisted per session), falling back to `session_link_id`
+   order for legacy rows — the Grand Prix is the weekend's final race; earlier races are Sprints.
 6. **Traces are indexed by lap DISTANCE, not time.** The header is 29 bytes. The recorder binds
    `0.0.0.0:20777` (set the game's UDP to broadcast).
 7. **League humans often capture as name `"Player"`** (online-name sharing off), so league

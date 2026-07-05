@@ -90,6 +90,8 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 weather=0,
                 game_mode=28,
                 total_laps=2,
+                num_sessions_in_weekend=0,
+                weekend_structure=[0] * 12,
             )
         )
 

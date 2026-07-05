@@ -212,7 +212,12 @@ class SessionResult:
         total_laps: int
         game_mode: int          # raw mode id; see reference.game_mode_name (used to bucket sessions into mode-based windows)
         player_vehicle_index: int   # which car is in the roster is the player's
-        
+
+        # The ordered session types that make up this weekend (from the Session packet's
+        # weekend_structure array, truncated to num_sessions_in_weekend). Empty for rows saved
+        # before it was captured. Both the Sprint Race and the Grand Prix report session_type
+        # RACE (15), so this is what tells them apart - see domain/season.py:weekend_slots.
+        weekend_structure: tuple[int, ...] = ()
 
         # content
         participants: tuple[Participant, ...] = ()

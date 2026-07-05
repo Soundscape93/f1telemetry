@@ -66,6 +66,21 @@ The own car is always fully public. For other cars, ERS / fuel / wear / damage /
 zeroed unless the driver opts into "Public". Driving channels (speed, throttle, brake, steer,
 gear, rpm, drs, temps) are always visible for every car.
 
+## Session type: Sprint Race == Race (both report 15)
+The game reports `session_type` **RACE (15)** for *both* the Sprint Race and the Grand Prix — a
+sprint weekend therefore has two type-15 sessions and there is no flag on the session that says
+which is which. What disambiguates them is the **`weekend_structure`** array on the Session packet
+(`num_sessions_in_weekend` + `weekend_structure[12]`): the ordered list of session types that make
+up the weekend, e.g. `[P1, SprintShootout×3, Race, Q1, Q2, Q3, Race]`. The **first** race entry is
+the Sprint; the **last** is the Grand Prix. `session_link_identifier` is monotonic across a weekend
+(and equals `weekend_link_identifier` for the first session, +10 per session in observed data), so
+sessions sort into true running order by it — the Sprint sits *before* Qualifying, the GP *after*.
+
+`domain/season.py:weekend_slots` persists `weekend_structure` per session and uses it to place
+each captured session (and mark still-pending ones); rows saved before it was captured fall back to
+`session_link_id` order (last race = GP). Note: both Sprint and GP award points, so both stay in
+`RACE_SESSION_TYPES` for standings — the slot distinction is a *display/Results* concern only.
+
 ## Track ids worth remembering
 Imola is **27** (in the 2025 calendar); Madrid is **42** (new in 2026, replaces Imola in that
 calendar). `official_calendar(year)` encodes the preset order for each.

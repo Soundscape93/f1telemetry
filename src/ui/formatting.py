@@ -48,8 +48,14 @@ def is_race(session_type: SessionType) -> bool:
     return session_type in _RACE_TYPES
 
 
-def slot_label(session_type) -> str:
-    """Return prettified session-type name, e.g. RACE -> Race."""
+def slot_label(session_type, is_sprint_race: bool = False) -> str:
+    """Return prettified session-type name, e.g. RACE -> Race.
+
+    ``is_sprint_race`` overrides the RACE label to "Sprint Race" - both report SessionType.RACE,
+    so only the weekend context (see domain.season.weekend_slots) can tell them apart.
+    """
+    if is_sprint_race:
+        return "Sprint Race"
     name = getattr(session_type, "name", None)
     return name.replace("_", " ").title() if name else str(session_type)
 

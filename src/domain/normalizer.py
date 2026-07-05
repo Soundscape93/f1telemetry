@@ -114,6 +114,7 @@ def normalize_session(packet: "PacketSessionData") -> SessionResult:
         total_laps=packet.total_laps,
         game_mode=packet.game_mode,
         player_vehicle_index=header.player_car_index,
+        weekend_structure=tuple(packet.weekend_structure[:packet.num_sessions_in_weekend]),
     )
 
 

@@ -23,7 +23,8 @@ def session_pkt(uid, stype=SessionType.RACE, laps=5):
         header=_hdr(PacketId.SESSION, uid),
         season_link_identifier=uid, weekend_link_identifier=uid, session_link_identifier=uid,
         track_id=7, session_type=int(stype), formula=int(Formula.F1_MODERN),
-        weather=int(Weather.CLEAR), game_mode=28, total_laps=laps)
+        weather=int(Weather.CLEAR), game_mode=28, total_laps=laps,
+        num_sessions_in_weekend=0, weekend_structure=[0] * 12)
 
 
 def participants_pkt(uid):

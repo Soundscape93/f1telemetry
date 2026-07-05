@@ -42,6 +42,9 @@ class SessionRow(Base):
     total_laps: Mapped[int]           # total laps in the session
     game_mode: Mapped[int]            # raw mode id -> reference.game_mode_name; buckets sessions into mode-based windows
     player_vehicle_index: Mapped[int]  # index of the player's vehicle in the participants list
+    # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
+    # (both report session_type 15). Additive column - [] for rows saved before it existed.
+    weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)  # timestamp of when the session was recorded
 
     entries: Mapped[list[ClassificationEntryRow]] = relationship(

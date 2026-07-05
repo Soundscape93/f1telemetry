@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...domain.roster import LeagueRoster
-from ...domain.season import SeasonMode
+from ...domain.season import SeasonMode, slot_for_session, weekend_slots
 from ...protocol.reference import track_name
 from ..components import (
     build_classification_table,
@@ -167,8 +167,21 @@ class WeekendPage(QWidget):
             empty.setStyleSheet("color: palette(mid);")
             self._assigned_body.addWidget(empty)
         else:
-            for session in sorted(round.sessions, key=lambda s: int(s.session_type)):
-                self._assigned_body.addWidget(self._session_block(session, name_of))
+            slots = weekend_slots(round.sessions)
+            # An uncaptured slot reads differently depending on where it sits: one still to come
+            # (after the latest captured session) is "not captured yet", while an earlier gap - a
+            # session deliberately skipped, e.g. Practice 3 - is "Skipped" once you've moved past
+            # it. It flips back to a real table if you later capture and assign it.
+            last_captured = max(
+                (slot.order for slot in slots if slot.session is not None), default=-1
+            )
+            for slot in slots:
+                if slot.session is not None:
+                    self._assigned_body.addWidget(self._session_block(slot, name_of))
+                else:
+                    self._assigned_body.addWidget(
+                        self._pending_slot_row(slot, skipped=slot.order < last_captured)
+                    )
         self._assigned_body.addStretch(1)
 
         self._reload_capture_picker()
@@ -184,8 +197,25 @@ class WeekendPage(QWidget):
             QMessageBox.warning(self, "League roster", f"Could not load roster:\n\n{exc}")
             return LeagueRoster()
 
-    def _session_block(self, session, name_of=lambda entry: entry.driver_name) -> QWidget:
-        """A labelled classification table for one assigned session, with an Unassign button."""
+    def _pending_slot_row(self, slot, skipped: bool = False) -> QWidget:
+        """A greyed placeholder for a weekend slot the game expects but that isn't captured.
+
+        Keeps the Sprint Race / Race (and the sessions around them) in their real running order so
+        an empty spot reads as intentional. ``skipped`` marks a slot already passed (a session you
+        chose not to record) as "Skipped"; otherwise it's an upcoming "not captured yet".
+        """
+        state = "Skipped" if skipped else "not captured yet"
+        label = QLabel(f"{slot_label(slot.session_type, slot.is_sprint_race)}  —  {state}")
+        label.setStyleSheet("color: palette(mid); font-style: italic; padding: 4px 0;")
+        return label
+
+    def _session_block(self, slot, name_of=lambda entry: entry.driver_name) -> QWidget:
+        """A labelled classification table for one assigned session, with an Unassign button.
+
+        ``slot`` is the session's :class:`WeekendSlot`, so the header reads "Sprint Race" vs
+        "Race" from the weekend context rather than the (identical) raw session type.
+        """
+        session = slot.session
         block = QWidget()
         vbox = QVBoxLayout(block)
         vbox.setContentsMargins(0, 0, 0, 0)
@@ -194,7 +224,7 @@ class WeekendPage(QWidget):
         toggle = QToolButton()
         toggle.setCheckable(True)
         toggle.setChecked(session.session_uid not in self._collapsed_session_uids)
-        toggle.setText(slot_label(session.session_type))
+        toggle.setText(slot_label(slot.session_type, slot.is_sprint_race))
         toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         toggle.setArrowType(
             Qt.ArrowType.DownArrow if toggle.isChecked() else Qt.ArrowType.RightArrow
@@ -232,15 +262,17 @@ class WeekendPage(QWidget):
     def _reload_capture_picker(self) -> None:
         """Fill the picker with captures assignable to this round."""
         show_all = self._show_all_tracks.isChecked()
+        all_sessions = self._sessions.list_sessions()
         candidates = [
-            s for s in self._sessions.list_sessions()
+            s for s in all_sessions
             if (show_all or s.track_id == self._track_id)
             and s.session_uid not in self._assigned_uids
         ]
         self._capture_table.setRowCount(len(candidates))
         for i, session in enumerate(candidates):
             drivers = len(session.classification.entries) if session.classification else 0
-            first = cell(slot_label(session.session_type))
+            slot = slot_for_session(session, all_sessions)
+            first = cell(slot_label(slot.session_type, slot.is_sprint_race))
             first.setData(Qt.ItemDataRole.UserRole, str(session.session_uid))
             self._capture_table.setItem(i, 0, first)
             self._capture_table.setItem(i, 1, cell(track_name(session.track_id)))

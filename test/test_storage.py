@@ -100,6 +100,18 @@ class RoundTripTest(StorageTestBase):
         self.assertEqual(player.tyre_stints[0].visual_compound, "16")
         self.assertEqual(player.tyre_stints[1].end_lap, 5)
 
+    def test_weekend_structure_round_trips(self):
+        """The weekend structure survives save/load as a tuple (empty stays empty)."""
+        structure = (1, 10, 11, 12, 15, 5, 6, 7, 15)
+        with_structure = SessionResult(**{**vars(make_session()), "weekend_structure": structure})
+        self.store.save(with_structure)
+        loaded = self.store.load(0x8000_0000_0000_0000)
+        self.assertEqual(loaded.weekend_structure, structure)
+        self.assertIsInstance(loaded.weekend_structure, tuple)
+
+        self.store.save(make_session(uid=0x1234))   # default: no structure captured
+        self.assertEqual(self.store.load(0x1234).weekend_structure, ())
+
 
 class UpsertTest(StorageTestBase):
     """Test that saving a session with the same session_uid replaces the existing entry."""

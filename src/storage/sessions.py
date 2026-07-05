@@ -177,6 +177,7 @@ class SessionStore:
             total_laps=result.total_laps,
             game_mode=result.game_mode,
             player_vehicle_index=result.player_vehicle_index,
+            weekend_structure=list(result.weekend_structure),
             recorded_at=result.recorded_at or datetime.now(timezone.utc),
             entries=entries,
         )
@@ -228,6 +229,7 @@ class SessionStore:
             total_laps=row.total_laps,
             game_mode=row.game_mode,
             player_vehicle_index=row.player_vehicle_index,
+            weekend_structure=tuple(row.weekend_structure or ()),
             classification=classification,
             recorded_at=row.recorded_at,
         )

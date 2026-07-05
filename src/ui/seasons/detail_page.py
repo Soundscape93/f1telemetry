@@ -26,7 +26,7 @@ from ...analysis.standings import (
     standings_for_rounds,
 )
 from ...domain.roster import LeagueRoster
-from ...domain.season import SeasonMode
+from ...domain.season import SeasonMode, grand_prix_session
 from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
 from ..formatting import race_winner_summary
@@ -319,13 +319,15 @@ class DetailPage(QWidget):
 
 
 def _round_result_summary(round, name_of=lambda entry: entry.driver_name) -> str:
-    """Return the calendar result cell: race winner/team, pending, or dash."""
-    race_results = [
-        summary for session in round.sessions
-        if (summary := race_winner_summary(session, name_of)) is not None
-    ]
-    if race_results:
-        return "; ".join(race_results)
+    """Return the calendar result cell: the Grand Prix winner/team, pending, or dash.
+
+    Only the Grand Prix counts here - a Sprint Race is a separate result and must not stand in
+    for the main race (both report ``SessionType.RACE``, so they're told apart by their position
+    in the weekend). A captured Sprint with the Grand Prix still to come reads "Race pending".
+    """
+    gp = grand_prix_session(round.sessions)
+    if gp is not None and (summary := race_winner_summary(gp, name_of)) is not None:
+        return summary
     if round.sessions:
         return "Race pending"
     return "—"
