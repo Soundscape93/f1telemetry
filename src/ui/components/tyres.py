@@ -46,7 +46,7 @@ def _draw(painter: QPainter, dim: float, letter: str, colour: str) -> None:
     painter.setPen(QPen(QColor(_TYRE_EDGE), dim * 0.05))
     painter.setBrush(QColor("#0000000"))
     painter.drawEllipse(body)
-    inset = dim * 0.24
+    inset = dim * 0.15
     painter.setPen(QPen(QColor(_RIM), dim * 0.04))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawEllipse(body.adjusted(inset, inset, -inset, -inset))
@@ -54,7 +54,7 @@ def _draw(painter: QPainter, dim: float, letter: str, colour: str) -> None:
     # coloured compound letter centred on the stripe
     font = QFont()
     font.setWeight(QFont.Weight.Black)
-    font.setPixelSize(int(dim * 0.58))
+    font.setPixelSize(int(dim * 0.46))
     painter.setFont(font)
     painter.setPen(QColor(colour))
     painter.drawText(QRectF(0, 0, dim, dim), Qt.AlignmentFlag.AlignCenter, letter)

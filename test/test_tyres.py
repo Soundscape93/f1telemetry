@@ -17,13 +17,13 @@ class TyreStyleTest(unittest.TestCase):
     def test_f2_super_soft_is_ss(self):
         self.assertEqual(_COMPOUND_STYLE[19][0], "SS")
 
-    def test_each_style_is_letter_stripe_text(self):
+    def test_each_style_is_letter_colour(self):
         for compound, style in _COMPOUND_STYLE.items():
-            self.assertEqual(len(style), 3, f"compound {compound} style must be (letter, stripe, text)")
-            letter, stripe, text = style
+            self.assertEqual(len(style), 2, f"compound {compound} style must be (letter, colour)")
+            letter, colour = style
             self.assertTrue(letter)
-            self.assertTrue(stripe.startswith("#"))
-            self.assertTrue(text.startswith("#"))
+            self.assertTrue(colour.startswith("#"))
+            self.assertTrue(colour.startswith("#"))
 
 
 if __name__ == "__main__":
