@@ -21,7 +21,7 @@ from .session.assembler import assemble
 from .storage.sessions import SessionStore
 
 
-def ingest_capture(capture_path: str, store: SessionStore) -> list[SessionResult]:
+def ingest_capture(capture_path: str, store: SessionStore, lap_store=None) -> list[SessionResult]:
     """Parse a .f1cap file, assemble its sessions, persist each, and return what was stored.
 
     A single capture can contain several sessions, (multiple weekends and/or multiple sessions),
@@ -65,5 +65,7 @@ def ingest_capture(capture_path: str, store: SessionStore) -> list[SessionResult
                 session, recorded_at=datetime.fromtimestamp(recv_time, timezone.utc)
             )
         store.save(session)
+        if lap_store is not None:
+            lap_store.save_laps(session.session_uid, session.laps)
         saved.append(session)
     return saved

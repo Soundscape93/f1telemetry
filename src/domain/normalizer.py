@@ -37,10 +37,13 @@ from ..protocol.enums import (
 )
 from ..protocol.reference import DRIVER_NAMES
 from .models import (
+    CarDamage,
     Classification,
     ClassificationEntry,
+    LapTyreContext,
     LapTrace,
     Participant,
+    Setup,
     SessionResult,
     TyreStint,
 )
@@ -92,6 +95,94 @@ def merge_participant(existing: "Participant | None", incoming: Participant) -> 
             1 if participant.race_number else 0)
     
     return incoming if _score(incoming) >= _score(existing) else existing
+
+
+def normalize_setup(setup) -> Setup:
+    """Convert the player's Car Setups entry into a domain Setup.
+    
+    `setup` is the player's CarSetupData entry (``packet.car_setups[player_car_idx]``). Ride height
+    comes from the struct's ``*_suspension_height`` fields; tyre pressures are read in wheel order
+    RL, RR, FL, FR to math the Setup contract.
+    """
+    return Setup(
+        front_wing=setup.front_wing,
+        rear_wing=setup.rear_wing,
+        on_throttle=setup.on_throttle,
+        off_throttle=setup.off_throttle,
+        front_camber=setup.front_camber,
+        rear_camber=setup.rear_camber,
+        front_toe=setup.front_toe,
+        rear_toe=setup.rear_toe,
+        front_suspension=setup.front_suspension,
+        rear_suspension=setup.rear_suspension,
+        front_anti_roll_bar=setup.front_anti_roll_bar,
+        rear_anti_roll_bar=setup.rear_anti_roll_bar,
+        front_ride_height=setup.front_suspension_height,
+        rear_ride_height=setup.rear_suspension_height,
+        brake_pressure=setup.brake_pressure,
+        brake_bias=setup.brake_bias,
+        engine_braking=setup.engine_braking,
+        tyre_pressures = (
+            setup.rear_left_tyre_pressure,
+            setup.rear_right_tyre_pressure,
+            setup.front_left_tyre_pressure,
+            setup.front_right_tyre_pressure
+        ),
+        ballast=setup.ballast,
+        fuel_load=setup.fuel_load
+    )
+
+
+def normalize_tyre_context(car_status, car_damage=None) -> LapTyreContext:
+    """Snapshot the player's tyre state at a lap boundary.
+    
+    `car_status` is the player's CarStatusData entry (compound + age); `car_damage` is the
+    player's CarDamageData entry (per-wheel wear %, damage %, blisters %). All wheel arrays are
+    read in order RL, RR, FL, FR; when no Car Damage frame has arrived yet they fall back to zeros.
+    """
+    if car_damage is not None:
+        wear = tuple(float(w) for w in car_damage.tyres_wear)
+        damage = tuple(int(d) for d in car_damage.tyres_damage)
+        blisters = tuple(int(b) for b in car_damage.tyre_blisters)
+    else:
+        wear, damage, blisters = (0.0, 0.0, 0.0, 0.0), (0, 0, 0, 0), (0, 0, 0, 0)
+    return LapTyreContext(
+        actual_compound=car_status.actual_tyre_compound,
+        visual_compound=car_status.visual_tyre_compound,
+        age_laps=car_status.tyres_age_laps,
+        wear=wear,
+        damage=damage,
+        blisters=blisters,
+    )
+
+
+def normalize_car_damage(car_damage) -> CarDamage:
+    """Convert the player's Car Damage entry into the non-tyre CarDamage snapshot.
+
+    The tyre-specific fields (wear/damage/blisters) are handled by ``normalize_tyre_context``;
+    this reads the car-body and engine fields. Brakes are read in wheel order RL, RR, FL, FR.
+    """
+    return CarDamage(
+        brakes = tuple(int(b) for b in car_damage.brakes_damage),
+        front_left_wing=car_damage.front_left_wing_damage,
+        front_right_wing=car_damage.front_right_wing_damage,
+        rear_wing=car_damage.rear_wing_damage,
+        floor=car_damage.floor_damage,
+        diffuser=car_damage.diffuser_damage,
+        sidepod=car_damage.sidepod_damage,
+        gearbox=car_damage.gearbox_damage,
+        engine=car_damage.engine_damage,
+        engine_mguh_wear=car_damage.engine_mguh_wear,
+        engine_es_wear=car_damage.engine_es_wear,
+        engine_ce_wear=car_damage.engine_ce_wear,
+        engine_ice_wear=car_damage.engine_ice_wear,
+        engine_mguk_wear=car_damage.engine_mguk_wear,
+        engine_tc_wear=car_damage.engine_tc_wear,
+        drs_fault=car_damage.drs_fault,
+        ers_fault=car_damage.ers_fault,
+        engine_blown=car_damage.engine_blown,
+        engine_seized=car_damage.engine_seized,
+    )
 
 
 def normalize_session(packet: "PacketSessionData") -> SessionResult:

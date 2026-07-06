@@ -103,7 +103,12 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=100,
                     player_car_index=0,
                 ),
-                car_status_data=[SimpleNamespace(ers_store_energy=111, ers_deploy_mode=1)],
+                car_status_data=[SimpleNamespace(
+                    ers_store_energy=111,
+                    ers_deploy_mode=1,
+                    actual_tyre_compound=16,
+                    visual_tyre_compound=16,
+                    tyres_age_laps=1,)],
             )
         )
 
@@ -173,7 +178,13 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=201,
                     player_car_index=0,
                 ),
-                car_status_data=[SimpleNamespace(ers_store_energy=222, ers_deploy_mode=2)],
+                car_status_data=[SimpleNamespace(
+                    ers_store_energy=222,
+                    ers_deploy_mode=2,
+                    actual_tyre_compound=16,
+                    visual_tyre_compound=16,
+                    tyres_age_laps=1,
+                )],
             )
         )
 

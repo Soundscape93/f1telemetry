@@ -80,6 +80,54 @@ def frames(uid, lap_num, distances, player=0):
     return out
 
 
+def status_pkt(uid, compound=16, visual=16, age=1, player=0):
+    """Fake Car Status packet: the player's tyre compound + age (and zeroed ERS)."""
+    return SimpleNamespace(
+        header=_hdr(PacketId.CAR_STATUS, uid, player=player),
+        car_status_data=[SimpleNamespace(
+            actual_tyre_compound=compound, visual_tyre_compound=visual,
+            tyres_age_laps=age, ers_store_energy=0.0, ers_deploy_mode=0)])
+
+
+def damage_pkt(uid, wear=(0.0, 0.0, 0.0, 0.0), tyre_damage=(0, 0, 0, 0), blisters=(0, 0, 0, 0),
+               brakes=(0, 0, 0, 0), player=0, **overrides):
+    """Fake Car Damage packet: per-wheel tyre wear/damage/blisters + car-body damage."""
+    fields = dict(
+        tyres_wear=list(wear), tyres_damage=list(tyre_damage), tyre_blisters=list(blisters),
+        brakes_damage=list(brakes),
+        front_left_wing_damage=0, front_right_wing_damage=0, rear_wing_damage=0,
+        floor_damage=0, diffuser_damage=0, sidepod_damage=0,
+        drs_fault=0, ers_fault=0, gearbox_damage=0, engine_damage=0,
+        engine_mguh_wear=0, engine_es_wear=0, engine_ce_wear=0, engine_ice_wear=0,
+        engine_mguk_wear=0, engine_tc_wear=0, engine_blown=0, engine_seized=0)
+    fields.update(overrides)
+    return SimpleNamespace(header=_hdr(PacketId.CAR_DAMAGE, uid, player=player),
+                           car_damage_data=[SimpleNamespace(**fields)])
+
+
+
+def _setup_entry(**overrides):
+    """A full CarSetupData entry with sane defaults; override any field (e.g. front_wing)."""
+    fields = dict(
+        front_wing=5, rear_wing=5, on_throttle=50, off_throttle=50,
+        front_camber=-3.0, rear_camber=-1.5, front_toe=0.1, rear_toe=0.2,
+        front_suspension=1, rear_suspension=1, front_anti_roll_bar=1, rear_anti_roll_bar=1,
+        front_suspension_height=3, rear_suspension_height=4,
+        brake_pressure=95, brake_bias=58, engine_braking=50,
+        rear_left_tyre_pressure=22.0, rear_right_tyre_pressure=22.0,
+        front_left_tyre_pressure=23.0, front_right_tyre_pressure=23.0,
+        ballast=0, fuel_load=10.0)
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def setup_pkt(uid, player=0, **overrides):
+    """Fake Car Setups packet for the player's car."""
+    return SimpleNamespace(
+        header=_hdr(PacketId.CAR_SETUPS, uid, player=player),
+        car_setups=[_setup_entry(**overrides)])
+
+
 class SessionSplitTest(unittest.TestCase):
     """Test cases for splitting a stream of packets into one result per session UID."""
     def test_splits_stream_into_one_result_per_session(self):
@@ -178,6 +226,72 @@ class TimingDetailTest(unittest.TestCase):
         lap = self._one_lap_session(entry)
         self.assertEqual((lap.sector1_ms, lap.sector2_ms, lap.sector3_ms), (23000, 65000, 24000))
         self.assertEqual(lap.lap_time_ms, 112000)
+
+
+class SetupHistoryTest(unittest.TestCase):
+    """The player's setup is captured as an ordered history so mid-session garage changes
+    resolve to the right lap in the detail view."""
+
+    def test_setup_changes_recorded_as_history(self):
+        stream = [session_pkt(1), participants_pkt(1), setup_pkt(1, front_wing=5)]
+        stream += frames(1, 1, [0, 1500, 3000])
+        stream += frames(1, 2, [0, 1500, 3000])
+        stream += frames(1, 3, [0])                       # enter lap 3
+        stream.append(setup_pkt(1, front_wing=9))         # setup changed while on lap 3
+        stream += frames(1, 3, [1500, 3000])
+        stream.append(sh_pkt(1, [_lap_entry(72000, 0x0F),
+                                 _lap_entry(70000, 0x0F),
+                                 _lap_entry(69000, 0x0F)]))
+        (race,) = list(assemble(stream))
+        self.assertEqual([(s.from_lap, s.setup.front_wing) for s in race.setup_history],
+                         [(0, 5), (3, 9)])
+        self.assertEqual(race.setup_for_lap(1).front_wing, 5)
+        self.assertEqual(race.setup_for_lap(2).front_wing, 5)
+        self.assertEqual(race.setup_for_lap(3).front_wing, 9)
+    
+    def test_identical_setup_not_duplicated(self):
+        stream = [session_pkt(1), participants_pkt(1),
+                  setup_pkt(1, front_wing=5), setup_pkt(1, front_wing=5)]
+        stream += frames(1, 1, [0, 1500, 3000])
+        stream += frames(1, 2, [0, 1500])
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        self.assertEqual(len(race.setup_history), 1)
+
+
+class TyreContextTest(unittest.TestCase):
+    """A lap carries a tyre snapshot (compound/age from Car Status, wear from Car Damage)
+    taken as the car crosses the line."""
+
+    def test_tyre_context_snapshotted_at_lap_boundary(self):
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += frames(1, 1, [0, 1500, 3000])
+        stream.append(status_pkt(1, compound=16, visual=16, age=2))
+        stream.append(damage_pkt(1, wear=(5.0, 6.0, 7.0, 8.0)))
+        stream += frames(1, 2, [0, 1500])                 # trailing, dropped (time 0)
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        context = race.laps[0].tyre_context
+        self.assertIsNotNone(context)
+        self.assertEqual(context.actual_compound, 16)
+        self.assertEqual(context.age_laps, 2)
+        self.assertEqual(context.wear, (5.0, 6.0, 7.0, 8.0))
+
+    def test_car_damage_snapshotted_at_lap_boundary(self):
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += frames(1, 1, [0, 1500, 3000])
+        stream.append(status_pkt(1, compound=16, age=2))
+        stream.append(damage_pkt(1, wear=(5.0, 6.0, 7.0, 8.0), tyre_damage=(2, 3, 4, 5),
+                                 brakes=(1, 2, 3, 4), rear_wing_damage=30, floor_damage=10))
+        stream += frames(1, 2, [0, 1500])
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        lap1 = race.laps[0]
+        self.assertEqual(lap1.tyre_context.damage, (2, 3, 4, 5))
+        self.assertEqual(lap1.damage.brakes, (1, 2, 3, 4))
+        self.assertEqual(lap1.damage.rear_wing, 30)
+        self.assertEqual(lap1.damage.floor, 10)
+        self.assertFalse(lap1.damage.engine_blown)
 
 
 if __name__ == "__main__":

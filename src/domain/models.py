@@ -66,7 +66,54 @@ class LapTrace:
             
     def __len__(self):
         return len(self.distance)
+
+
+@dataclass(frozen=True)
+class LapTyreContext:
+    """The player's tyre state caputred at the end of one lap (as the car crosses the line).
     
+    Wear is cumulative over the stint (a percentage per wheel), so this is a boundary snapshot,
+    not a per-frame trace channel. Compund and age come from Car Status; wear from Car Damage.
+    Wheel order is RL, RR, FL, FR throughout, matching the UDP spec.
+    """
+
+    actual_compound: int                        # see enums.ActualTyreCompound
+    visual_compound: int                        # see enums.VisualTyreCompound
+    age_laps: int                               # number of laps on this tyre set
+    wear: tuple[float, float, float, float]     # RL, RR, FL, FR (0.0..100.0 %)
+    damage: tuple[int, int, int, int] = (0, 0, 0, 0)           # per wheel a damage %
+    blisters: tuple[int, int, int, int] = (0, 0, 0, 0)          # per wheel a blister %
+
+
+@dataclass(frozen=True)
+class CarDamage:
+    """The player's non-tyre car damage, snapshotted at a lap boundary (from Car Damage).
+
+    The tyre-specific fields of the Car Damage packet (wear / damage / blisters) live on
+    LapTyreContext; this holds the rest - the car-body and engine story a damage table and the
+    body graphic render. All values are percentages unless noted; brakes are RL, RR, FL, FR.
+    """
+
+    brakes: tuple[int, int, int, int]       # per-wheel brake damage %, RL, RR, FL, FR
+    front_left_wing: int
+    front_right_wing: int
+    rear_wing: int
+    floor: int
+    diffuser: int
+    sidepod: int
+    gearbox: int
+    engine: int
+    engine_mguh_wear: int
+    engine_es_wear: int
+    engine_ce_wear: int
+    engine_ice_wear: int
+    engine_mguk_wear: int
+    engine_tc_wear: int
+    drs_fault: bool
+    ers_fault: bool
+    engine_blown: bool
+    engine_seized: bool
+
 
 @dataclass(frozen=True)
 class Lap:
@@ -79,6 +126,8 @@ class Lap:
     sector3_ms: int | None
     is_valid: bool
     trace: LapTrace | None = None   # dense samples; may be persistent seperately from timing
+    tyre_context: LapTyreContext | None = None  # tyre state at the line; None until captured/stored
+    damage: CarDamage | None = None  # non-tyre damage at the line; None until captured/stored
 
     @property
     def is_complete(self) -> bool:
@@ -110,6 +159,20 @@ class Setup:
     tyre_pressures: tuple[float, float, float, float]  # RL, RR, FL, FR (PSI)
     ballast: int                        # kg
     fuel_load: float                    # kg
+
+
+@dataclass(frozen=True)
+class SetupSnapshot:
+    """The player's car setup as it was for a given lap onward.
+    
+    A player can return to the garage mid-session and change setup, so a session carries an
+    ordered history of these rather than one static Setup. `from_lap`is the lap the setup became
+    active on; a lap's setup is the latest snapshot with `from_lap <= lap.lap_number`.
+    (see SessionResult.setup_for_lap).
+    """
+
+    from_lap: int
+    setup: Setup
 
 
 @dataclass(frozen=True)
@@ -222,7 +285,7 @@ class SessionResult:
         # content
         participants: tuple[Participant, ...] = ()
         laps: tuple[Lap, ...] = ()      # the player's completed laps (with traces)
-        setup: Setup | None = None
+        setup_history: tuple[SetupSnapshot, ...] = ()  # ordered garage-setup snapshots (mid session changes)
         classification: Classification | None = None
         recorded_at: datetime | None = None     # capture time, for chronological ordering
 
@@ -231,3 +294,13 @@ class SessionResult:
         def player_participant(self) -> Participant | None:
             """The player's participant object, or None if not found in the roster."""
             return next((p for p in self.participants if p.is_player), None)
+        
+
+        def setup_for_lap(self, lap_number: int) -> Setup | None:
+            """The setup active on a given lap; the latest snapshot taking effect on or before it.
+            
+            Returns None if no setupr was captured, or if every snapshot starts after this lap.
+            """
+            active = [snap for snap in self.setup_history if snap.from_lap <= lap_number]
+            return max(active, key=lambda snap: snap.from_lap).setup if active else None
+        

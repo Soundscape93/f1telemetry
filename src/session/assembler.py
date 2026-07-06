@@ -25,7 +25,16 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterable, Iterator
 
-from ..domain.models import Lap, LapTrace, Participant, SessionResult
+from ..domain.models import (
+    CarDamage,
+    Lap, 
+    LapTrace,
+    LapTyreContext,
+    Participant,
+    SessionResult,
+    SetupSnapshot,
+)
+
 from ..domain.normalizer import (
     Sample,
     build_trace,
@@ -33,6 +42,9 @@ from ..domain.normalizer import (
     merge_participant,
     normalize_participants,
     normalize_session,
+    normalize_setup,
+    normalize_tyre_context,
+    normalize_car_damage,
     telemetry_sample,
 )
 from ..protocol.enums import PacketId
@@ -59,6 +71,12 @@ class _SessionBuilder:
         self._best_lap_num_by_index: dict[int, int] = {}  # car_idx -> lap the best lap was set on
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
+
+        self._last_car_damage = None            # the player's latest Car Damage entry (tyre wear)
+        self._last_setup = None                 # the player's latest normalized Setup (for change-diff)
+        self._setup_history: list[SetupSnapshot] = []  # ordered garage-setup snapshots
+        self._tyre_context: dict[int, LapTyreContext] = {}  # lap_number -> tyre state at the line
+        self._damage: dict[int, CarDamage] = {}  # lap_number -> non-tyre damage at the line
 
         self._traces: dict[int, LapTrace] = {}  # lap_number -> captured trace
 
@@ -101,6 +119,16 @@ class _SessionBuilder:
             if idx >= len(packet.car_status_data):  # player not in the array this frame (lobby/spectator)
                 return
             self._last_car_status = packet.car_status_data[idx]
+        elif pid == PacketId.CAR_DAMAGE:
+            idx = packet.header.player_car_index
+            if idx >= len(packet.car_damage_data):  # player not in the array this frame (lobby/spectator)
+                return
+            self._last_car_damage = packet.car_damage_data[idx]
+        elif pid == PacketId.CAR_SETUPS:
+            idx = packet.header.player_car_index
+            if idx >= len(packet.car_setups):   # player not in the array this frame (lobby/spectator)
+                return
+            self._record_setup(normalize_setup(packet.car_setups[idx]))
         elif pid == PacketId.LAP_DATA:
             idx = packet.header.player_car_index
             if idx >= len(packet.lap_data):         # player not in the array this frame (lobby/spectator)
@@ -137,6 +165,7 @@ class _SessionBuilder:
             self._cur_lap = lap_num
         elif lap_num != self._cur_lap:
             self._store_trace(self._cur_lap)
+            self._snapshot_lap_state(self._cur_lap)
             self._cur_lap = lap_num
             self._buffer = []
         self._buffer.append(telemetry_sample(lap_data, car_telemetry, self._last_car_status))
@@ -150,6 +179,30 @@ class _SessionBuilder:
         if samples[0].distance > _MAX_LAP_START_DISTANCE_M:
             return
         self._traces[lap_number] = build_trace(samples)
+
+    def _record_setup(self, setup) -> None:
+        """Append a setup snapshot when the setup changes, deduping consecutive identical ones.
+        
+        `from_lap` is the lap the change was seen on (0 before the first lap starts), so the lap
+        detail resolves a lap's setup as the latest snapshot with from lap <= lap_number. First
+        implementation stays dumb (record-on-change); debouncing garage-visit flicker can be added
+        later without touching the model or storage.
+        """
+        if setup == self._last_setup:
+            return
+        self._last_setup = setup
+        self._setup_history.append(SetupSnapshot(from_lap=self._cur_lap or 0, setup=setup))
+
+    def _snapshot_lap_state(self, lap_number: int) -> None:
+        """Snapshot the player's tyre state and car damage at a lap boundary (as the car crosses
+        the line). Tyre context needs a Car Status frame; damage needs a Car Damage frame; each is
+        recorded only once its source has been seen."""
+        if self._last_car_status is not None:
+            self._tyre_context[lap_number] = normalize_tyre_context(
+                self._last_car_status, self._last_car_damage
+            )
+        if self._last_car_damage is not None:
+            self._damage[lap_number] = normalize_car_damage(self._last_car_damage)
 
     def _build_laps(self) -> tuple[Lap, ...]:
         """Join captured traces with Session History timing, by lap number."""
@@ -171,6 +224,8 @@ class _SessionBuilder:
                     sector3_ms=_sector_ms(entry.sector3_time_minutes_part, entry.sector3_time_ms_part) or None,
                     is_valid=bool(entry.lap_valid_bit_flags & _LAP_VALID_BIT),
                     trace=self._traces[lap_number],
+                    tyre_context=self._tyre_context.get(lap_number),
+                    damage=self._damage.get(lap_number)
                 )
             )
         return tuple(laps)
@@ -182,6 +237,7 @@ class _SessionBuilder:
         # capture the final (trailing) lap's trace; its time comes from Session History
         if self._cur_lap is not None:
             self._store_trace(self._cur_lap)
+            self._snapshot_lap_state(self._cur_lap)
 
         roster = tuple(self._roster_by_index[i] for i in sorted(self._roster_by_index))
 
@@ -196,6 +252,7 @@ class _SessionBuilder:
             participants=roster,
             laps=self._build_laps(),
             classification=classification,
+            setup_history=tuple(self._setup_history)
         )
 
 class SessionAssembler:

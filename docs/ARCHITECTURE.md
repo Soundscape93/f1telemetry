@@ -77,6 +77,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     splits laps on `current_lap_num`, keeps a trace only if it started near the line;
   - takes lap **timing from Session History** (authoritative), not live Lap Data;
   - carries the player's latest Car Status ERS fields forward into each sample;
+  - *(lap-view iteration 1a — incoming)* diffs the player's **Car Setups** packet to build a
+    `setup_history` (a new snapshot stamped with the current lap whenever the setup changes), and
+    snapshots per-lap **tyre context** at each lap boundary (compound/age from Car Status, wear
+    from Car Damage — both packets are parsed today but currently dropped in `feed()`);
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -89,6 +93,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
   re-ingest never wipes manual placements.
+- **`laps.py`** *(lap-view iteration 1a — incoming)* — `LapStore`: persists the player's laps and
+  their per-lap tyre context, with each lap's dense `LapTrace` written to a **Parquet file**
+  referenced by the lap row (not SQLite rows — see DECISIONS). The session's setup **history**
+  (`setup_history`) is a JSON column on the session row rather than a lap concern. Follows the
+  repository-per-aggregate pattern (its own table cluster; `schema.py` stays the shared layer).
 - Stores are context managers (dispose the engine on exit).
 
 ### analysis/ — derived facts
@@ -100,6 +109,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   roster and display via `league_display_name`; non-league seasons stay name-keyed. Constructor
   standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
   in-memory and desktop-bound.
+- **`traces.py`** *(lap-view iteration 1a — incoming)* — trace preparation for plotting: resample /
+  align a `LapTrace` onto a shared distance grid, compute lap-to-lap delta, and downsample for the
+  chart. Built **N-series-aware** (operates on a list of traces) from the start, so the iteration-2
+  overlay is a UI-wiring addition rather than a rewrite of this module.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.

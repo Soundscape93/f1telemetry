@@ -45,6 +45,9 @@ class SessionRow(Base):
     # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
     # (both report session_type 15). Additive column - [] for rows saved before it existed.
     weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # ordered garage-setup snapshots for the player; JSON list of {from_lap, setup{...}}.
+    # Additive column - [] for rows saved before setup history existed.
+    setup_history: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)  # timestamp of when the session was recorded
 
     entries: Mapped[list[ClassificationEntryRow]] = relationship(
@@ -85,6 +88,37 @@ class ClassificationEntryRow(Base):
     tyre_stints: Mapped[list] = mapped_column(JSON)  # list of tyre stint dicts, denormalized for simplicity
 
     session: Mapped[SessionRow] = relationship(back_populates="entries")
+
+
+class LapRow(Base):
+    """One of the player's completed laps: timing, per-lap tyre context, and a Parquet trace ref.
+    
+    Deliberately NOT a foreign key to ``sessions``(mirrors ``season_assignments``): the LapStore
+    manages labs by ``session_uid``explicitly - replace-by-uid on a re-save, delete-by-uid on
+    session delete - so a lap persistence never depends on cross-store cascade behaviour. The dense
+    ~5400-sample trace lives in a Parquet file at ``trace_path``(relative to the store's trace
+    dir), never in the database. Tyte context is lap-boundary snapshot: compound/age from Car
+    Status, cumulative wear % from Car Damage (RL, RR, FL, FR).
+    """
+
+    __tablename__ = "laps"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_uid: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    lap_number: Mapped[int]
+    lap_time_ms: Mapped[int | None] = mapped_column(nullable=True)
+    sector1_ms: Mapped[int | None] = mapped_column(nullable=True)
+    sector2_ms: Mapped[int | None] = mapped_column(nullable=True)
+    sector3_ms: Mapped[int | None] = mapped_column(nullable=True)
+    is_valid: Mapped[bool]
+    trace_path: Mapped[str | None] = mapped_column(String, nullable=True)  # Parquet , relative to trace dir
+    tyre_actual_compound: Mapped[int | None] = mapped_column(nullable=True)
+    tyre_visual_compound: Mapped[int | None] = mapped_column(nullable=True)
+    tyre_age_laps: Mapped[int | None] = mapped_column(nullable=True)
+    tyre_wear: Mapped[list | None] = mapped_column(JSON, nullable=True)      # per-wheel wear %, RL,RR,FL,FR
+    tyre_damage: Mapped[list | None] = mapped_column(JSON, nullable=True)    # per-wheel tyre damage %
+    tyre_blisters: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel blister %
+    damage: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # non-tyre CarDamage snapshot
 
 
 class DeletedSessionRow(Base):

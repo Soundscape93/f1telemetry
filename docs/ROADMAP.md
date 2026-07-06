@@ -48,9 +48,22 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   (`SessionStore.deleted_uids` / `is_deleted` / `restore`; delete tombstones by default and
   `ingest_capture` skips tombstoned uids); only the UI is pending. Likely lives on the Sessions
   surface.
-- **Laps** — per-lap browser feeding the analysis work below.
-- **Analytics** — overlay N laps on a shared distance grid; lap delta; ERS-deployment view.
-  In-memory `LapTrace` analytics stay desktop-bound regardless of any web future.
+- **Laps** — per-lap browser + lap detail; the next surface to build, and the driver for the
+  dense-trace persistence below. Scoped into iterations (see DECISIONS → the Laps/Analytics split):
+  - *1a — persistence backbone (no UI).* Assembler captures the player's setup **history** and
+    per-lap tyre context; new `laps.py` store persists lap rows + Parquet trace files + setup
+    history; ingest writes the trace files. Verified by an ingest→load round-trip + the suite.
+  - *1b — lap view.* Foldable lap cards (track+flag / time / session) + filter/search, and a lap
+    detail page (lap #, sectors, tyre compound/age/wear, setup panel, simple 4-box tyre graphic,
+    single-lap telemetry graphs). Reusable card / plot / tyre / setup widgets in `ui/components/`.
+  - *2 — same-context overlay.* Overlay best-lap / same-session / same-weekend laps on the shared
+    distance grid + delta trace. Built on the N-series-aware trace-prep module from 1a.
+  - *2b — g-force channel.* Additive `LapTrace` channel (Motion frame-join; 2026 int16/1000),
+    once overlay works.
+- **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
+  lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
+  single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
+  `LapTrace` analytics stay desktop-bound regardless of any web future.
 - **Dashboard** — recent sessions / summaries (the record header already lives above it).
 
 ## Packaging (before sharing a built app with colleagues)
@@ -82,8 +95,10 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     become fast pure-SQL migrations instead).
 
 ## Storage & analysis
-- **Dense-trace persistence.** Store `LapTrace`s as Parquet/npz files referenced by the lap row
-  (~5,400 samples/lap at 60 Hz — not SQLite rows), plus an ingest entry point that writes them.
+- **Dense-trace persistence (in progress — lap-view iteration 1a).** Store `LapTrace`s as
+  **Parquet** files referenced by the lap row (~5,400 samples/lap at 60 Hz — not SQLite rows; npz
+  was the alternative, Parquet chosen — see DECISIONS), plus an ingest entry point that writes
+  them. Lands with the new `laps.py` store, per-lap tyre context, and the session setup history.
 - **`storage/migrations.py` — `ensure_schema(engine)`. DONE.** Landed with the first additive
   column (`nationality_id`), not trace storage: inspects tables and `ADD COLUMN`s anything the ORM
   defines but the DB lacks, wired into `SessionStore` after `create_all`, idempotent. New additive

@@ -8,6 +8,8 @@ stay empty until its added in the future.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, select
@@ -17,6 +19,8 @@ from ..domain.models import (
     Classification,
     ClassificationEntry,
     SessionResult,
+    Setup,
+    SetupSnapshot,
     TyreStint,
 )
 from ..protocol.enums import (
@@ -32,6 +36,18 @@ from .migrations import ensure_schema
 from .schema import Base, ClassificationEntryRow, DeletedSessionRow, SessionRow
 
 _DEFAULT_URL = "sqlite:///f1league.db"
+
+
+def _setup_to_dict(setup: Setup) -> dict:
+    """A JSON-serializable dict for a Setup (tyre_pressures flattend to a list)."""
+    data = dataclasses.asdict(setup)
+    data["tyre_pressures"] = list(setup.tyre_pressures)
+    return data
+
+
+def _setup_from_dict(data: dict) -> Setup:
+    """Rebuild a Setup from its stored dict (tyre_pressures list -> tuple)."""
+    return Setup(**{**data, "tyre_pressures": tuple(data["tyre_pressures"])})
 
 
 class SessionStore:
@@ -178,6 +194,10 @@ class SessionStore:
             game_mode=result.game_mode,
             player_vehicle_index=result.player_vehicle_index,
             weekend_structure=list(result.weekend_structure),
+            setup_history=[
+                {"from_lap": snap.from_lap, "setup": _setup_to_dict(snap.setup)}
+                for snap in result.setup_history
+            ],
             recorded_at=result.recorded_at or datetime.now(timezone.utc),
             entries=entries,
         )
@@ -230,6 +250,11 @@ class SessionStore:
             game_mode=row.game_mode,
             player_vehicle_index=row.player_vehicle_index,
             weekend_structure=tuple(row.weekend_structure or ()),
+            setup_history=tuple(
+                SetupSnapshot(from_lap=item["from_lap"],
+                              setup=_setup_from_dict(item["setup"]))
+                for item in (row.setup_history or [])
+            ),
             classification=classification,
             recorded_at=row.recorded_at,
         )

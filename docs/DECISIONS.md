@@ -16,8 +16,38 @@ what would trigger revisiting it.
 - **SQLite via SQLAlchemy 2.0, kept engine-agnostic.** The shipped desktop app stays on SQLite;
   the schema avoids engine-specific features so it *could* move to Postgres only if a central
   hosted server is ever built.
-- **Dense per-lap traces stored as files (Parquet/npz) referenced by the lap row, not as SQLite
-  rows.** ~5,400 samples per 90 s lap at 60 Hz — wrong shape for row storage. (Not yet built.)
+- **Dense per-lap traces stored as Parquet files referenced by the lap row, not as SQLite
+  rows.** ~5,400 samples per 90 s lap at 60 Hz — wrong shape for row storage. **Parquet over
+  npz** (both were on the table): columnar, compresses well, self-describing, and inspectable /
+  queryable later without loading the whole array; the cost is a `pyarrow` dependency, which is a
+  size consideration for the frozen colleague build but acceptable. One file per lap, path
+  referenced from the `laps` row; written during ingest into a writable trace directory (see
+  `data_root()`, ROADMAP → Packaging). (Lap-view iteration 1a.)
+- **Laps, per-lap tyre context, and setup are persisted (lap-view iteration 1a).** The assembler
+  already builds `Lap`s + dense `LapTrace`s and can populate setup/tyre data, but `SessionStore`
+  historically kept only the classification + session metadata and dropped the rest. A new
+  `laps.py` store (repository-per-aggregate) persists the lap rows + Parquet trace refs; per-lap
+  tyre context (compound/age from Car Status; wear/damage/blisters from Car Damage) **and the full
+  non-tyre car damage** (wings, floor, diffuser, sidepod, brakes, gearbox, engine + engine
+  sub-wears, fault/blown/seized flags) are snapshotted at each lap boundary and stored on the lap
+  row. *Why snapshot at the lap boundary:* wear/damage are cumulative over a stint, so a lap's
+  "usage" is the reading as the car crosses the line, not a per-frame channel. *Why the full Car
+  Damage now (not just tyres):* the packet is already parsed and already snapshotted, so capturing
+  all of it is a normalizer/storage-only change — deferring it would just cost a second additive
+  migration later. It's split by UI consumer: tyre fields live on `LapTyreContext` (tyre
+  widget/graphic), the rest on a `CarDamage` value object (car-body graphic + damage table), with
+  no field in both.
+- **Setup is a per-session change *history*, not one static snapshot.** A player can return to the
+  garage mid-session and change setup (laps 1–5 setup A, 6–10 setup B); a single stored setup
+  would mislabel every lap after the change in the lap detail view. So `SessionResult` carries an
+  ordered `setup_history` of `SetupSnapshot(from_lap, setup)` values; the assembler diffs the
+  player's Car Setups packet (a frozen-dataclass `==`) and appends a snapshot stamped with the
+  current lap whenever it changes. The lap detail resolves the active setup as the latest snapshot
+  with `from_lap <= lap_number` — not duplicated per lap. Stored as a JSON column on the session
+  row (small, session-scoped, same pattern as `tyre_stints`), so no extra table. *First
+  implementation stays dumb:* record-on-change + dedupe consecutive identical setups; if the game
+  emits transitional values during a garage visit we may get an extra snapshot or two — acceptable,
+  and debouncing can be added later without touching the model or schema.
 - **Repository-per-aggregate.** One store file per aggregate root, named after it
   (`sessions.py`, `seasons.py`, future `laps.py`), each owning its table cluster; `schema.py` is
   the shared table layer. No mega-repository, no per-table files, and no abstract base until a
@@ -145,6 +175,17 @@ what would trigger revisiting it.
   layouts (39/40/41) are offered in the sandbox. *League cap:* left **open-ended** — EA's Racenet
   documents no maximum and its league pages are login-gated, so no limit is enforced; revisit if a
   real cap surfaces.
+
+- **Single-lap telemetry graphs and same-context overlay live in the Laps surface; only
+  cross-session trends stay in Analytics.** The ROADMAP originally filed "overlay N laps on a
+  shared distance grid / lap delta / ERS view" under Analytics. In practice those graphs are most
+  useful right where you're inspecting a lap, so the Laps surface owns single-lap graphs (iter 1b)
+  and same-context overlay — best lap / same session / same weekend (iter 2). Analytics keeps the
+  genuinely *cross-session* work: same-track-different-season comparison and higher-level trends
+  (lap-time trends, AI-difficulty, team performance). The trace-preparation analysis module is
+  built **N-series-aware from iteration 1a** so the overlay is later a UI-wiring addition, not a
+  rewrite. g-force is a deferred additive `LapTrace` channel (iteration 2b, after overlay works;
+  needs a Motion frame-join and the 2026 int16/1000 scaling).
 
 ## Conventions
 - **Module-level constants use a single leading underscore.** A double underscore name-mangles

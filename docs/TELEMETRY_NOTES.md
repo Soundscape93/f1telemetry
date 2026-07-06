@@ -66,6 +66,34 @@ The own car is always fully public. For other cars, ERS / fuel / wear / damage /
 zeroed unless the driver opts into "Public". Driving channels (speed, throttle, brake, steer,
 gear, rpm, drs, temps) are always visible for every car.
 
+## Lap-view data sources (iteration 1a)
+The lap detail view pulls from packets the assembler historically ignored. All are parsed and
+registered already; the work is routing them in `feed()` and snapshotting at the right moment.
+
+- **Tyre compound & age come from Car Status (7):** `actual_tyre_compound` / `visual_tyre_compound`
+  (see the tyre enums) and `tyres_age_laps`. These are current-state fields, so read the player's
+  entry at the lap boundary.
+- **Tyre wear comes from Car Damage (id not in the MVP subset — but parsed):** `tyres_wear[4]` is a
+  **cumulative percentage over the stint**, not a per-lap value — so "tyre usage for this lap" is
+  the wear reading *as the car crosses the line* (an end-of-lap snapshot), not a trace channel. The
+  four entries are **RL, RR, FL, FR** (the universal wheel order) — keep that order through the UI's
+  tyre graphic. `tyres_damage[4]` (puncture/damage %) and `tyre_blisters[4]` are separate from wear.
+- **The rest of Car Damage is captured too** (iteration 1a): `brakes_damage[4]` (RL,RR,FL,FR), the
+  three wings, `floor`/`diffuser`/`sidepod`, `gearbox`/`engine`, the six `engine_*_wear` fields, and
+  the `drs_fault`/`ers_fault`/`engine_blown`/`engine_seized` flags — for the future car-body graphic
+  and a damage table. Field names are **identical across 2025 and 2026**, so the normalizer reads
+  either without branching. Split by consumer: per-wheel tyre fields → `LapTyreContext`; everything
+  else → the `CarDamage` value object.
+- **Setup comes from Car Setups (5), and is a *history* not a snapshot.** The packet streams the
+  player's setup continuously; a mid-session garage change shows up as a value diff. The assembler
+  diffs it (frozen-dataclass `==`) and records a `SetupSnapshot(from_lap, setup)` on change, so the
+  lap detail can resolve the setup active for a given lap (latest `from_lap <= lap_number`). Restricted
+  telemetry doesn't bite here — the own car's setup is always fully public.
+- **G-force (deferred to iteration 2b)** lives in Motion (0): `g_force_lateral/longitudinal/vertical`.
+  In 2026 these are `int16` and must be divided by 1000.0 (2025 is already `float`) — the only
+  format divergence in this channel. Adding it means a Motion frame-join alongside Lap Data + Car
+  Telemetry and an additive `LapTrace` channel.
+
 ## Session type: Sprint Race == Race (both report 15)
 The game reports `session_type` **RACE (15)** for *both* the Sprint Race and the Grand Prix — a
 sprint weekend therefore has two type-15 sessions and there is no flag on the session that says
