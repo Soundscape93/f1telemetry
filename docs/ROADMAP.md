@@ -50,16 +50,24 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   surface.
 - **Laps** — per-lap browser + lap detail; the next surface to build, and the driver for the
   dense-trace persistence below. Scoped into iterations (see DECISIONS → the Laps/Analytics split):
-  - *1a — persistence backbone (no UI).* Assembler captures the player's setup **history** and
-    per-lap tyre context; new `laps.py` store persists lap rows + Parquet trace files + setup
-    history; ingest writes the trace files. Verified by an ingest→load round-trip + the suite.
-  - *1b — lap view.* Foldable lap cards (track+flag / time / session) + filter/search, and a lap
-    detail page (lap #, sectors, tyre compound/age/wear, setup panel, simple 4-box tyre graphic,
-    single-lap telemetry graphs). Reusable card / plot / tyre / setup widgets in `ui/components/`.
+  - *1a — persistence backbone (no UI). DONE (commit 73d2c35).* Assembler captures the player's
+    setup **history** and per-lap tyre context + full car damage; `laps.py` store persists lap rows
+    + Parquet trace files + setup history; `ingest_capture` writes the trace files.
+  - *1b — lap view. DONE.* `analysis/traces.py` (N-series-aware trace prep); reusable lap widgets in
+    `ui/components/` (tyre box, damage/setup key-value tables, `TracePlot`); the `ui/laps/` surface
+    (foldable per-session cards + filter → single-lap detail page); `LapStore.list`/`load` read API;
+    and the app-side ingest wiring (`IngestWorker` builds a `LapStore`). Track-country flag on cards
+    deferred — no `track_id → country` map exists. *Next here: iteration 2 (overlay).*
   - *2 — same-context overlay.* Overlay best-lap / same-session / same-weekend laps on the shared
     distance grid + delta trace. Built on the N-series-aware trace-prep module from 1a.
-  - *2b — g-force channel.* Additive `LapTrace` channel (Motion frame-join; 2026 int16/1000),
-    once overlay works.
+  - *2b — g-force channel + track-layout view.* Both come from routing the **Motion** packet
+    (frame-join like Car Status), so do them together: g-force as an additive `LapTrace` channel
+    (2026 int16/1000), plus `pos_x`/`pos_z` (world coords) channels driving a track-map panel — an
+    equal-aspect plotted **XY path from telemetry** (no per-track image assets; works for any
+    circuit). Hover a trace (distance) → nearest sample index → highlight that point on the map
+    (pyqtgraph `SignalProxy` crosshair). Store raw world coords, normalise at render; `distance`
+    stays the hover index. Channels auto-flow into Parquet via `LapTrace.CHANNELS`; old laps lack
+    position/g-force until re-ingested (detail page already omits absent regions).
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory

@@ -1,0 +1,72 @@
+"""Tests for the pure row/layout logic behind the lap-detail components (Qt-free assertions).
+
+The widgets themselves are thin Qt shells; the bug-prone parts - wheel-order placement and the
+damage/setup row formatting - are plain functions, tested here without a QApplication.
+"""
+from __future__ import annotations
+
+import unittest
+
+from f1telemetry.src.domain.models import CarDamage, Setup
+from f1telemetry.src.ui.components.damage_panel import damage_rows
+from f1telemetry.src.ui.components.setup_panel import setup_rows
+from f1telemetry.src.ui.components.tyre_box import wheel_grid_cells
+
+
+def make_damage():
+    return CarDamage(
+        brakes=(1, 2, 3, 4), front_left_wing=5, front_right_wing=6, rear_wing=30,
+        floor=10, diffuser=0, sidepod=0, gearbox=0, engine=15,
+        engine_mguh_wear=1, engine_es_wear=2, engine_ce_wear=3, engine_ice_wear=4,
+        engine_mguk_wear=5, engine_tc_wear=6,
+        drs_fault=False, ers_fault=True, engine_blown=False, engine_seized=False,
+    )
+
+
+def make_setup():
+    return Setup(
+        front_wing=5, rear_wing=7, on_throttle=50, off_throttle=55,
+        front_camber=-3.0, rear_camber=-1.5, front_toe=0.1, rear_toe=0.2,
+        front_suspension=1, rear_suspension=2, front_anti_roll_bar=3, rear_anti_roll_bar=4,
+        front_ride_height=3, rear_ride_height=4, brake_pressure=95, brake_bias=58,
+        engine_braking=50, tyre_pressures=(22.0, 22.5, 23.0, 23.5), ballast=0, fuel_load=10.0,
+    )
+
+
+class WheelGridTest(unittest.TestCase):
+    def test_maps_udp_order_onto_the_on_car_layout(self):
+        # RL,RR,FL,FR tuple indices 0,1,2,3 -> FL FR (top), RL RR (bottom)
+        cells = wheel_grid_cells()
+        self.assertEqual({(r, c, idx, lbl) for r, c, idx, lbl in cells}, {
+            (0, 0, 2, "FL"), (0, 1, 3, "FR"),
+            (1, 0, 0, "RL"), (1, 1, 1, "RR"),
+        })
+
+    def test_every_wheel_placed_once(self):
+        cells = wheel_grid_cells()
+        self.assertEqual(sorted(idx for _, _, idx, _ in cells), [0, 1, 2, 3])
+        self.assertEqual(len({(r, c) for r, c, _, _ in cells}), 4)   # distinct grid cells
+
+
+class DamageRowsTest(unittest.TestCase):
+    def test_sections_and_values(self):
+        rows = dict(damage_rows(make_damage()))
+        self.assertIsNone(rows["Aero"])            # section headers carry no value
+        self.assertIsNone(rows["Faults"])
+        self.assertEqual(rows["Rear wing"], "30%")
+        self.assertEqual(rows["Brake FR"], "4%")   # brakes tuple RL,RR,FL,FR -> FR is index 3
+        self.assertEqual(rows["ERS"], "⚠ yes")
+        self.assertEqual(rows["DRS"], "—")
+
+
+class SetupRowsTest(unittest.TestCase):
+    def test_sections_and_values(self):
+        rows = dict(setup_rows(make_setup()))
+        self.assertIsNone(rows["Tyres"])
+        self.assertEqual(rows["Front wing"], "5")
+        self.assertEqual(rows["Brake bias"], "58")
+        self.assertEqual(rows["Pressure Front Right"], "23.5 psi")  # tuple RL,RR,FL,FR -> FR is index 3
+
+
+if __name__ == "__main__":
+    unittest.main()

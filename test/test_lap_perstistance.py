@@ -102,6 +102,23 @@ class LapStoreRoundTripTest(unittest.TestCase):
         np.testing.assert_allclose(laps[0].trace.distance, make_trace().distance)
         np.testing.assert_array_equal(laps[0].trace.gear, make_trace().gear)
 
+    def test_list_omits_traces_but_keeps_metadata(self):
+        self.store.save_laps(123, (make_lap(1), make_lap(2)))
+        laps = self.store.list(123)
+        self.assertEqual([lap.lap_number for lap in laps], [1, 2])  # ordered, cheap
+        self.assertEqual(all(lap.trace is None for lap in laps), True)  # no Parquet read
+        self.assertEqual(laps[0].lap_time_ms, 80001, "metadata preserved")
+        self.assertEqual(laps[0].tyre_context.wear, (5.0, 6.0, 7.0, 8.0), "tyre context preserved") # metadata still
+        self.assertEqual(laps[0].damage.rear_wing, 30, "damage preserved")
+
+    def test_load_single_lap_hydrates_trace(self):
+        self.store.save_laps(123, (make_lap(1), make_lap(2)))
+        lap = self.store.load(123, 2)
+        self.assertEqual(lap.lap_number, 2)
+        self.assertEqual(len(lap.trace), 5)     # trace hydrated
+        np.testing.assert_array_equal(lap.trace.gear, make_trace().gear)
+        self.assertIsNone(self.store.load(123, 999), "nonexistent lap returns None")    # missing lap -> None
+
     def test_resave_replaces_laps(self):
         self.store.save_laps(123, (make_lap(1), make_lap(2), make_lap(3)))
         self.store.save_laps(123, (make_lap(1),))          # fewer laps -> no orphans

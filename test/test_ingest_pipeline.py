@@ -16,6 +16,7 @@ and run it against each; the assertions are invariants, so they hold for any rea
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
 from datetime import datetime
@@ -49,10 +50,15 @@ class IngestPipelineTest(unittest.TestCase):
         fd, self.db_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         self.store = SessionStore(f"sqlite:///{self.db_path}")
+        from f1telemetry.src.storage.laps import LapStore
+        self.trace_dir = tempfile.mkdtemp(prefix="_traces")
+        self.lap_store = LapStore(f"sqlite:///{self.db_path}", trace_dir=self.trace_dir)
 
     def tearDown(self):
         """Clean up the temporary SQLite database."""
+        self.lap_store.close()
         os.unlink(self.db_path)
+        shutil.rmtree(self.trace_dir, ignore_errors=True)
 
     def test_capture_ingest_and_round_trips(self):
         """Test that a capture can be ingested and its sessions round-trip through the store."""
@@ -112,6 +118,26 @@ class IngestPipelineTest(unittest.TestCase):
         # a sibling from the same capture is re-stored as normal
         if len(first) > 1:
             self.assertIsNotNone(self.store.load(first[1].session_uid))
+
+    def test_ingest_with_lap_store_persists_laps_and_traces(self):
+        """With a LapStore supplied, ingest writes the player's laps + their traces (the app path).
+
+        Mirrors what the IngestWorker now does: pass a LapStore to ingest_capture, then confirm a
+        session that assembled laps has them (with a dense trace) readable back out of the store.
+        """
+        from f1telemetry.src.pipeline import ingest_capture
+        sessions = ingest_capture(_FIXTURE, self.store, lap_store=self.lap_store)
+        self.assertTrue(sessions, "The capture produced no sessions")
+
+        with_laps = [s for s in sessions if s.laps]
+        if not with_laps:
+            self.skipTest("this fixture assembled no player laps")
+        session = with_laps[0]
+        stored = self.lap_store.list(session.session_uid)
+        self.assertEqual(len(stored), len(session.laps), "not every assembled lap was persisted")
+        hydrated = self.lap_store.load(session.session_uid, stored[0].lap_number)
+        self.assertIsNotNone(hydrated.trace, "a persisted lap has no dense trace")
+        self.assertGreater(len(hydrated.trace), 0, "the persisted trace is empty")
 
 
 if __name__ == "__main__":

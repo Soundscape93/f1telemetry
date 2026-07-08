@@ -131,10 +131,14 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   container coordinating one widget per page via navigation signals. The custom-calendar picker
   is live: `create_page.py` embeds the reusable `ui/components/calendar_picker.py`, driven by
   `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
-  Grand Prix/League = reorderable sandbox with duplicates). Dashboard / Sessions / Laps /
-  Analytics are placeholders.
-- **Next:** the Laps / Analytics surfaces and dense-trace persistence; an edit-calendar action
-  reusing the picker on the detail page. See `docs/ROADMAP.md`.
+  Grand Prix/League = reorderable sandbox with duplicates).
+  The **Laps** surface is now real: `ui/laps/` (foldable per-session lap cards + track/session
+  filter → a lap detail page with tyre box, damage/setup tables and stacked single-lap telemetry
+  graphs), built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable
+  lap widgets in `ui/components/`. Dashboard / Sessions / Analytics remain placeholders.
+- **Next:** lap-view **iteration 2** — same-context overlay (best-lap / same-session / same-weekend
+  N laps on the shared distance grid + delta trace), built on `analysis/traces.py`; then **2b**
+  g-force. Also pending: the Analytics surface and an edit-calendar action. See `docs/ROADMAP.md`.
 
 ## Where to look
 

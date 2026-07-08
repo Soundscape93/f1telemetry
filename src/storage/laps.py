@@ -93,6 +93,34 @@ class LapStore:
                 .order_by(LapRow.lap_number)).all()
             return tuple(self._to_domain(row) for row in rows)
         
+    def list(self, session_uid: str) -> tuple[Lap, ...]:
+        """A session's laps WITHOUT their dense traces, ordered by lap number.
+        
+        The cheap listing for the lap overview: reads only the DB rows (timing + tyre context "
+        damage), never the Parquet trace files, so browsing a session's laps costs one query.
+        Each returned lap has ``trace=None``; call ``load``to hydrate a single lap's trace.
+        """
+        with self._Session.begin() as db:
+            rows = db.scalars(
+                select(LapRow)
+                .where(LapRow.session_uid == str(session_uid))
+                .order_by(LapRow.lap_number)).all()
+            return tuple(self._to_domain(row, with_trace=False) for row in rows)
+        
+    def load(self, session_uid: str, lap_number: int) -> Lap | None:
+        """One fully-hydrated lap (timing + tyre context + damage + its dense trace), or None.
+        
+        The detail page loads a single lap this way rather than a whole session's traces, and the
+        iteration-2 overlay loads its N laps by calling this once per selected laps - so no path
+        reads every Parquet file in a session just to show one.
+        """
+        with self._Session.begin() as db:
+            row = db.scalar(
+                select(LapRow).where(
+                    LapRow.session_uid == str(session_uid),
+                    LapRow.lap_number == lap_number))
+            return self._to_domain(row, with_trace=True) if row else None
+        
     # --- domain <-> row conversion --------------------------------------------
     @staticmethod
     def _to_row(session_uid: str, lap: Lap, trace_rel: str | None) -> LapRow:
@@ -115,7 +143,7 @@ class LapStore:
             damage=dataclasses.asdict(lap.damage) if lap.damage else None,
         )
     
-    def _to_domain(self, row: LapRow) -> Lap:
+    def _to_domain(self, row: LapRow, with_trace: bool = True) -> Lap:
         tyre_context = None
         if row.tyre_actual_compound is not None:
             tyre_context = LapTyreContext(
@@ -129,7 +157,9 @@ class LapStore:
         damage = None
         if row.damage is not None:
             damage = CarDamage(**{**row.damage, "brakes": tuple(row.damage["brakes"])})
-        trace = read_trace(str(self._trace_dir / row.trace_path)) if row.trace_path else None
+        trace = None
+        if with_trace and row.trace_path:
+            trace = read_trace(str(self._trace_dir / row.trace_path))
         return Lap(
             lap_number=row.lap_number,
             lap_time_ms=row.lap_time_ms,

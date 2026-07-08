@@ -186,6 +186,18 @@ what would trigger revisiting it.
   built **N-series-aware from iteration 1a** so the overlay is later a UI-wiring addition, not a
   rewrite. g-force is a deferred additive `LapTrace` channel (iteration 2b, after overlay works;
   needs a Motion frame-join and the 2026 int16/1000 scaling).
+- **Lap detail composes reusable components over the 1a data split; visuals follow the game HUD.**
+  The lap detail page (`ui/laps/detail_page.py`) is assembly only — it maps the 1a model straight to
+  widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order), full `CarDamage`
+  → `build_damage_table`, `SessionResult.setup_for_lap(n)` → `build_setup_table`, `LapTrace` →
+  `TracePlot`. Damage/setup use a shared key/value table (`build_kv_table`) so no view rebuilds one.
+  Tyre `_wear_color` thresholds mirror the F1 HUD: **<60 % green, 60–79 % orange, ≥80 % red**. Setup
+  fields that are raw game values (differential on/off-throttle, engine braking, brake pressure,
+  brake bias) are shown as plain numbers, **not** percentages. The elaborate car-body render stays
+  deferred; 1b is the simple 4-box + table form.
+- **pyqtgraph is a hand-managed runtime dep, like pyarrow.** There's no requirements file; both are
+  installed by hand. `TracePlot` lazy-imports pyqtgraph and shows an install hint if it's missing, so
+  the app and the test suite stay importable without it. (pyqtgraph is now installed in the dev env.)
 
 ## Conventions
 - **Module-level constants use a single leading underscore.** A double underscore name-mangles

@@ -77,10 +77,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     splits laps on `current_lap_num`, keeps a trace only if it started near the line;
   - takes lap **timing from Session History** (authoritative), not live Lap Data;
   - carries the player's latest Car Status ERS fields forward into each sample;
-  - *(lap-view iteration 1a — incoming)* diffs the player's **Car Setups** packet to build a
-    `setup_history` (a new snapshot stamped with the current lap whenever the setup changes), and
-    snapshots per-lap **tyre context** at each lap boundary (compound/age from Car Status, wear
-    from Car Damage — both packets are parsed today but currently dropped in `feed()`);
+  - *(lap-view iteration 1a)* diffs the player's **Car Setups** packet to build a `setup_history`
+    (a new snapshot stamped with the current lap whenever the setup changes), and snapshots per-lap
+    **tyre context** + full non-tyre **car damage** at each lap boundary (compound/age from Car
+    Status, wear/damage from Car Damage);
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -93,11 +93,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
   re-ingest never wipes manual placements.
-- **`laps.py`** *(lap-view iteration 1a — incoming)* — `LapStore`: persists the player's laps and
+- **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
   their per-lap tyre context, with each lap's dense `LapTrace` written to a **Parquet file**
-  referenced by the lap row (not SQLite rows — see DECISIONS). The session's setup **history**
-  (`setup_history`) is a JSON column on the session row rather than a lap concern. Follows the
-  repository-per-aggregate pattern (its own table cluster; `schema.py` stays the shared layer).
+  referenced by the lap row (not SQLite rows — see DECISIONS). Write: `save_laps` (replace-by-uid,
+  rows + files) / `delete`. Read: `list(uid)` returns a session's laps **without** their traces
+  (cheap, for the overview), `load(uid, lap_number)` returns one fully-hydrated lap **with** its
+  trace (detail page; the iter-2 overlay calls it per selected lap), `load_laps(uid)` the full set.
+  The session's setup **history** (`setup_history`) is a JSON column on the session row, not a lap
+  concern. Repository-per-aggregate (own table cluster; `schema.py` stays the shared layer).
 - Stores are context managers (dispose the engine on exit).
 
 ### analysis/ — derived facts
@@ -109,10 +112,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   roster and display via `league_display_name`; non-league seasons stay name-keyed. Constructor
   standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
   in-memory and desktop-bound.
-- **`traces.py`** *(lap-view iteration 1a — incoming)* — trace preparation for plotting: resample /
-  align a `LapTrace` onto a shared distance grid, compute lap-to-lap delta, and downsample for the
-  chart. Built **N-series-aware** (operates on a list of traces) from the start, so the iteration-2
-  overlay is a UI-wiring addition rather than a rewrite of this module.
+- **`traces.py`** *(lap-view iteration 1b)* — trace preparation for plotting, pure numpy: an
+  `AlignedTrace` value object plus `shared_distance_grid` / `resample` / `align` (resample N traces
+  onto one shared distance grid; discrete channels — gear/DRS/ERS mode — are rounded), `elapsed_time`
+  / `time_delta` / `time_deltas` (the racing "gap" trace, integrated from speed over distance), and
+  `downsample` (stride-decimate parallel arrays for the chart). **N-series-aware** (every entry point
+  takes a *list* of traces), so the iteration-2 overlay is UI wiring over this same API, not a rewrite.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.
@@ -132,6 +137,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   (race vs best-lap columns) — plus `display_name_fn(roster)`, the roster→name resolver passed
   as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
   surfaces reuse the same builder.
+  The lap-detail widgets also live here: `tyre_box.py` (`TyreBox` — the 4-box RL/RR/FL/FR tyre
+  graphic mapped to the on-car FL FR / RL RR layout, `wheel_grid_cells()` the tested placement),
+  `damage_panel.py` / `setup_panel.py` (`build_damage_table` / `build_setup_table` over the Qt-free
+  `damage_rows` / `setup_rows`, rendered via `tables.build_kv_table` — a shared key/value table with
+  bold section headers), and `trace_plot.py` (`TracePlot` — stacked, distance-linked single-lap
+  telemetry via pyqtgraph, lazily imported so it degrades to an install hint if absent).
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
@@ -149,9 +160,20 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
   names through `display_name_fn` (captured public alias first, roster `online_names` fallback)
   injected into `race_winner_summary` and the classification tables built via `components/`.
-- **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s); `IngestWorker` builds its
-  own store in-thread and gzip-archives the capture after a successful ingest (archive failure
-  is reported, never fatal).
+- **`laps/`** — the Laps surface, same thin-container pattern as `seasons/`: `view.py` (`LapsView`)
+  owns a `QStackedWidget` of two pages and wires their navigation signals. `overview_page.py` lists
+  foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →
+  the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
+  filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
+  lap via `LapStore.load` and composes the `components/` lap widgets — lap info + tyre box, the
+  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`.
+  Session uids travel through signals as `str` (uint64-safe). Track-country flags are deferred (no
+  `track_id → country` map exists yet).
+- **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
+  `SessionStore` **and** `LapStore` in-thread (SQLite dislikes cross-thread connections) and passes
+  the `LapStore` into `ingest_capture`, so app-side ingest writes laps + Parquet traces (under an
+  injectable `trace_dir`, default `lap_traces/` at the CWD) — not just the classification. Then it
+  gzip-archives the capture after a successful ingest (archive failure is reported, never fatal).
 - **`formatting.py`** — Qt-free presentation helpers (winner time / gap / +laps / status;
   best-lap-or-status; `is_race`, `slot_label`), unit-testable without importing PySide6.
 - **`pipeline.py`** (`src/pipeline.py`) — `ingest_capture(path, store)`, extracted so ingest is

@@ -57,23 +57,38 @@ class IngestWorker(QThread):
     done = Signal(list, str, str)  # list[str] human readable session descriptions, archive path, archive error
     failed = Signal(str)    # error message
 
-    def __init__(self, capture_path: str, db_url: str, parent=None) -> None:
-        """Initialize the ingest worker thread."""
+    def __init__(self, capture_path: str, db_url: str, trace_dir: str = "lap_traces",
+                 parent=None) -> None:
+        """Initialize the ingest worker thread.
+        
+        ``trace_dir``is where each lap's dense Parquet trace is written (as a
+        ``<session_uid>/lap_<n>.parquet`` tree beneath it); it defaults to ``lap_traces`` at
+        CWD, a sibling of ``captures/`` and ``rosters/``.
+        """
         super().__init__(parent)
         self._capture_path = capture_path
         self._db_url = db_url
-
+        self._trace_dir = trace_dir
+    
     def run(self) -> None:
         """ Run the parse -> assemble -> persist pipeline in its own thread.
         Heavy imports are done here so the app starts quickly and only pulls them in
         when a capture is actually processed.
         """
         from ..pipeline import ingest_capture
+        from ..storage.laps import LapStore
         from ..storage.sessions import SessionStore
 
         try:
             store = SessionStore(self._db_url)
-            sessions = ingest_capture(self._capture_path, store)
+            # Own the LapStore for this thread only (SQL dislikes a connection shared accross
+            # threads); it writes each lap's Parquet trace under trace_dir. Without it, ingest
+            # persists classification + setup historey but leaves the laps table empty.
+            lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            try:
+                sessions = ingest_capture(self._capture_path, store, lap_store=lap_store)
+            finally:
+                lap_store.close()
             archive_path = ""
             archive_error = ""
             if sessions:

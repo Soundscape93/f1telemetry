@@ -48,3 +48,30 @@ def fit_table_height(table: QTableWidget) -> None:
     for i in range(table.rowCount()):
         height += table.rowHeight(i)
     table.setFixedHeight(height)
+
+
+def build_kv_table(rows: list[tuple[str, str | None]]) -> QTableWidget:
+    """A read-only key/value (2-column) table with the bold section header rows.
+    
+    Each row is ``(label, value)``; a row whose ``value``is ``None`` is a section header - the
+    label is bolded and spans both columns. Values are right-aligned. Shared by the lap damage and
+    setup panels (and any future two-column readout), styled and sized like every other table here.
+    """
+    table = QTableWidget(len(rows), 2)
+    table.horizontalHeader().setVisible(False)
+    tidy_table(table)
+    for i, (label, value) in enumerate(rows):
+        if value is None:               # section header
+            head = cell(label)
+            font = head.font()
+            font.setBold(True)
+            head.setFont(font)
+            table.setItem(i, 0, head)
+            table.setSpan(i, 0, 1, 2)
+        else:
+            table.setItem(i, 0, cell(label))
+            val = cell(value)
+            val.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            table.setItem(i, 1, val)
+    fit_table_height(table)
+    return table

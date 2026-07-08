@@ -32,11 +32,14 @@ from PySide6.QtWidgets import (
 from .workers import IngestWorker, RecorderWorker
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
+from ..storage.laps import LapStore
 from .seasons import SeasonsView
+from .laps import LapsView
 
 # Defaults; these become user settings later.
 _CAPTURE_DIR = Path("captures")
 _DB_URL = "sqlite:///f1league.db"
+_TRACE_DIR = "lap_traces"  # where each lap's dense Parquet trace is written
 _HOST = "0.0.0.0"
 _PORT = 20777
 
@@ -77,6 +80,9 @@ class MainWindow(QMainWindow):
         # same database file.
         self._session_store = SessionStore(_DB_URL)
         self._season_store = SeasonStore(_DB_URL)
+        # The UI reads laps/traces on the GUI thread from its own LapStore (same DB file and
+        # trace_dir the IngestWorker writes to). Consumed by the Laps View; disposed on close.
+        self._lap_store = LapStore(_DB_URL, trace_dir=_TRACE_DIR)
 
         self.setCentralWidget(self._build_central())
 
@@ -149,8 +155,8 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._seasons_view)
         self._stack.addWidget(_PlaceholderPage(
             "Sessions", "The sessions will be listed here, with details and lap times."))
-        self._stack.addWidget(_PlaceholderPage(
-            "Laps", "The laps will be listed here, with details and telemetry."))
+        self._laps_view = LapsView(self._session_store, self._lap_store)
+        self._stack.addWidget(self._laps_view)
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
         self._stack.addWidget(_PlaceholderPage(
@@ -226,7 +232,7 @@ class MainWindow(QMainWindow):
 
     def _start_ingest(self, capture_path: str) -> None:
         """Start ingesting the capture file in a background thread."""
-        self._ingest = IngestWorker(capture_path, _DB_URL)
+        self._ingest = IngestWorker(capture_path, _DB_URL, trace_dir=_TRACE_DIR)
         self._ingest.done.connect(self._on_ingest_done)
         self._ingest.failed.connect(self._on_failed)
         self._ingest.start()
@@ -248,9 +254,12 @@ class MainWindow(QMainWindow):
         else:
             self._status.setText("Capture saved, but no complete session(s) found.")
 
-        # a freshly-stored session may belong to an open season; refresh if it's on screen.
-        if self._stack.currentWidget() is self._seasons_view:
+        # a freshly-stored session may be on an open surface; refresh whichever is showing.
+        current = self._stack.currentWidget()
+        if current is self._seasons_view:
             self._seasons_view.refresh()
+        elif current is self._laps_view:
+            self._laps_view.refresh()
 
     def _on_failed(self, message: str) -> None:
         """Handle a failure from either the RecorderWorker or IngestWorker; reset the button and show the error."""
@@ -276,6 +285,7 @@ class MainWindow(QMainWindow):
             self._ingest.wait()
         self._session_store.close()
         self._season_store.close()
+        self._lap_store.close()
         super().closeEvent(event)
 
 

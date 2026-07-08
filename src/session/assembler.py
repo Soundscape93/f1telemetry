@@ -27,8 +27,7 @@ from collections.abc import Iterable, Iterator
 
 from ..domain.models import (
     CarDamage,
-    Lap, 
-    LapTrace,
+    Lap,
     LapTyreContext,
     Participant,
     SessionResult,
@@ -55,10 +54,102 @@ _MAX_LAP_START_DISTANCE_M = 200  # meters
 
 _LAP_VALID_BIT = 0x08  # bit 3 of lap_valid_bit_flags = whole lap valid
 
+# lapDistance (m_lapDistance) is NEGATIVE before the car crosses the start/finish line and only
+# becomes 0..track-length on the lap proper. The formation lap (race lap 1) and out-laps share their
+# current_lap_num with the timed lap that follows, so a lap's raw buffer can carry a pre-line segment
+# (negative, or a whole formation/out lap) in front of the real 0..L pass. A backward jump larger
+# than this marks such a boundary within one buffer (the s/f line reset).
+_LAP_RESET_DROP_M = 300  # meters
+
 
 def _sector_ms(minutes_part: int, ms_part: int) -> int:
     """Recombine the spec's split sector time (minutes + millisecond remainder)."""
     return minutes_part * 60_000 + ms_part
+
+
+def _drop_leading_negatives(run: list[Sample]) -> list[Sample]:
+    """Drop a run's leading pre-line (negative lapDistance) samples so it starts at the s/f line."""
+    i = 0
+    while i < len(run) and run[i].distance < 0:
+        i += 1
+    return run[i:]
+
+
+def _split_runs(samples: list[Sample]) -> list[list[Sample]]:
+    """Split a lap buffer into runs at each s/f line reset, each starting at the line.
+
+    A raw buffer can carry more than one 0..track-length pass under a single current_lap_num: a
+    formation/out lap in front (pre-line, negative lapDistance), a post-finish slow-down/in-lap
+    behind, and - in qualifying, where the game keeps one lap number across an in-lap, the
+    following out-lap and the next flying lap - several full laps. Each is separated from the next
+    by a large backward jump in lapDistance (the s/f line reset); a small backward blip
+    (< ``_LAP_RESET_DROP_M``) is treated as noise, not a boundary, so clean laps are never split.
+    Each run's leading pre-line (negative) samples are dropped; runs left empty are omitted.
+    """
+    if not samples:
+        return []
+    runs: list[list[Sample]] = [[samples[0]]]
+    for i in range(1, len(samples)):
+        if samples[i].distance < samples[i - 1].distance - _LAP_RESET_DROP_M:
+            runs.append([samples[i]])                   # a line reset starts a new run
+        else:
+            runs[-1].append(samples[i])
+    return [clipped for run in runs if (clipped := _drop_leading_negatives(run))]
+
+
+def _longest_run(runs: list[list[Sample]]) -> list[Sample]:
+    """The run covering the most distance; ties -> the later run (timed lap follows an out-lap)."""
+    best: list[Sample] = []
+    best_span = -1.0
+    for run in runs:
+        span = run[-1].distance - run[0].distance
+        if span >= best_span:
+            best, best_span = run, span
+    return best
+
+
+def _estimate_lap_ms(run: list[Sample]) -> float:
+    """Estimate a run's duration by integrating dt = distance / speed over its samples.
+
+    Speed is km/h; converting to m/s yields seconds. This is independent of the sample rate, so it
+    can be compared against a Session History lap time to tell which run is the timed lap: over the
+    same distance an in-lap or out-lap takes noticeably longer than the flying lap.
+    """
+    total_s = 0.0
+    for a, b in zip(run, run[1:]):
+        dd = b.distance - a.distance
+        v = (a.speed + b.speed) / 2.0 * (1000.0 / 3600.0)  # km/h -> m/s
+        if dd > 0 and v > 0:
+            total_s += dd / v
+    return total_s * 1000.0
+
+
+def _select_timed_run(runs: list[list[Sample]], target_ms: int | None) -> list[Sample]:
+    """Pick the run that is the lap Session History timed at ``target_ms``.
+
+    With a known lap time and more than one full run (qualifying's in/out/flying laps share one
+    current_lap_num), choose the run whose estimated duration is closest to it - the flying lap,
+    not the slower in/out laps. Without a time, or with a single run, fall back to the longest run
+    (the full 0..L pass) - the right choice for a normal race lap and its trailing slow-down.
+    """
+    if not runs:
+        return []
+    if target_ms and len(runs) > 1:
+        return min(runs, key=lambda r: abs(_estimate_lap_ms(r) - target_ms))
+    return _longest_run(runs)
+
+
+def _trim_to_timed_lap(samples: list[Sample]) -> list[Sample]:
+    """Trim a raw lap buffer to the timed lap's 0..track-length pass, without a target time.
+
+    Splits the buffer at s/f line resets, drops each run's pre-line (negative) samples, and keeps
+    the longest run - discarding a leading formation/out lap and a trailing post-finish slow-down.
+    A clean lap is a single run and is returned unchanged; a pure out-lap (all pre-line) trims to
+    nothing. The assembler prefers the time-aware ``_select_timed_run`` when a lap time is known
+    (see _build_laps, needed to disambiguate qualifying in/out/flying laps); this is the timing-free
+    fallback and is what the unit tests pin.
+    """
+    return _longest_run(_split_runs(samples))
 
 
 class _SessionBuilder:
@@ -78,7 +169,9 @@ class _SessionBuilder:
         self._tyre_context: dict[int, LapTyreContext] = {}  # lap_number -> tyre state at the line
         self._damage: dict[int, CarDamage] = {}  # lap_number -> non-tyre damage at the line
 
-        self._traces: dict[int, LapTrace] = {}  # lap_number -> captured trace
+        # lap_number -> candidate runs from that lap's buffer; the timed run is chosen at build
+        # time (see _build_laps), once the Session History lap time is known.
+        self._lap_runs: dict[int, list[list[Sample]]] = {}
 
         # current-lap accumulation:
         self._cur_lap: int | None = None
@@ -171,14 +264,16 @@ class _SessionBuilder:
         self._buffer.append(telemetry_sample(lap_data, car_telemetry, self._last_car_status))
 
     def _store_trace(self, lap_number: int) -> None:
-        """Stash the current buffer as a lap_number's trace, unless it was an out-lap
-        or joined mid-lap (didn't start near the start line)."""
-        samples = self._buffer
-        if not samples:
-            return
-        if samples[0].distance > _MAX_LAP_START_DISTANCE_M:
-            return
-        self._traces[lap_number] = build_trace(samples)
+        """Stash the current buffer's candidate runs for a lap_number.
+
+        The buffer is split into runs at each s/f line reset (pre-line samples dropped); which run
+        is the timed lap is decided at build time by ``_build_laps``/``_select_timed_run``, once the
+        Session History lap time - which alone tells qualifying's in/out/flying laps apart - is
+        known. (At stream time here that time is still 0.)
+        """
+        runs = _split_runs(self._buffer)
+        if runs:
+            self._lap_runs[lap_number] = runs
 
     def _record_setup(self, setup) -> None:
         """Append a setup snapshot when the setup changes, deduping consecutive identical ones.
@@ -208,12 +303,18 @@ class _SessionBuilder:
         """Join captured traces with Session History timing, by lap number."""
         sh = self._session_history
         laps = []
-        for lap_number in sorted(self._traces):
+        for lap_number in sorted(self._lap_runs):
             if sh is None or not (1 <= lap_number <= sh.num_laps):
                 continue
             entry = sh.lap_history_data[lap_number - 1]
             total = entry.lap_time_in_ms
             if total <= 0:          # lap not completed (in-lap / current partial)
+                continue
+            # now that the lap time is known, pick the run it belongs to (qualifying can leave an
+            # in-lap, out-lap and flying lap under one lap number) and build only that trace. A run
+            # still starting well past the line (joined mid-lap) or none at all is skipped.
+            samples = _select_timed_run(self._lap_runs[lap_number], total)
+            if not samples or samples[0].distance > _MAX_LAP_START_DISTANCE_M:
                 continue
             laps.append(
                 Lap(
@@ -223,7 +324,7 @@ class _SessionBuilder:
                     sector2_ms=_sector_ms(entry.sector2_time_minutes_part, entry.sector2_time_ms_part) or None,
                     sector3_ms=_sector_ms(entry.sector3_time_minutes_part, entry.sector3_time_ms_part) or None,
                     is_valid=bool(entry.lap_valid_bit_flags & _LAP_VALID_BIT),
-                    trace=self._traces[lap_number],
+                    trace=build_trace(samples),
                     tyre_context=self._tyre_context.get(lap_number),
                     damage=self._damage.get(lap_number)
                 )
