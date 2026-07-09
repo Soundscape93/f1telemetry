@@ -57,7 +57,11 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     `ui/components/` (tyre box, damage/setup key-value tables, `TracePlot`); the `ui/laps/` surface
     (foldable per-session cards + filter → single-lap detail page); `LapStore.list`/`load` read API;
     and the app-side ingest wiring (`IngestWorker` builds a `LapStore`). Track-country flag on cards
-    deferred — no `track_id → country` map exists. *Next here: iteration 2 (overlay).*
+    deferred — no `track_id → country` map exists. Detail-view polish: the lap timing is a single
+    compact row (tyre+lap · sectors · lap time · valid); trace graph zoom/pan removed (plots are
+    full-height, always fit to the whole lap); throttle/brake has a colour-blind palette toggle
+    (green/red ↔ Okabe-Ito blue/orange) persisted via `QSettings` (new `ui/settings.py`).
+    *Next here: iteration 2 (overlay).*
   - *2 — same-context overlay.* Overlay best-lap / same-session / same-weekend laps on the shared
     distance grid + delta trace. Built on the N-series-aware trace-prep module from 1a.
   - *2b — g-force channel + track-layout view.* Both come from routing the **Motion** packet

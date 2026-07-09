@@ -16,6 +16,8 @@ from .main_window import MainWindow
 
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setApplicationName("f1telemetry")
+    app.setOrganizationName("f1telemetry")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

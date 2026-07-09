@@ -33,6 +33,9 @@ _PENS = {
     "speed": "#e10600", "throttle": "#3fb950", "brake": "#f85149",
     "gear": "#58a6ff", "steer": "#d29922", "ers_store_energy": "#a371f7",
 }
+# Colour-blind-safe override fo the throttle/brake pair (Okabe-Ito): the default green/red is
+# the classic red-green-confusion pair, so blue/orange reads clearly for all CVD types.
+CB_PENS = {"throttle": "#0072b2", "brake": "#e69f00"}   # blue / orange
 
 # Stable per-channel y-range, keyed on the row's first channel. A ``None`` bound means "fit the
 # lap's data on that side"; a number pins it (and panning can't cross it). Gear sets its own range
@@ -53,8 +56,11 @@ _LEFT_AXIS_WIDTH = 76  # wide enough for the ERS store energy ticks; shared so t
 class TracePlot(QWidget):
     """Stacked single-lap telemetry plots; a graceful placeholder when pyqtgraph is absent."""
 
-    def __init__(self, trace: LapTrace | None = None, parent=None) -> None:
+    def __init__(self, trace: LapTrace | None = None, parent=None, *,
+                 colorblind: bool = False) -> None:
         super().__init__(parent)
+        self._colorblind = colorblind
+        self._trace: LapTrace | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -77,9 +83,11 @@ class TracePlot(QWidget):
 
     def set_trace(self, trace: LapTrace) -> None:
         """Draw (or redraw) the stacked channel plots for one Lap."""
+        self._trace = trace
         if self._pg is None or self._glw is None:
             return
         pg = self._pg
+        pens = {**_PENS, **(CB_PENS if self._colorblind else {})}
         self._glw.clear()
         x = np.asarray(trace.distance, dtype=float)
         link = None
@@ -87,6 +95,9 @@ class TracePlot(QWidget):
         for i, (channels, title, unit) in enumerate(_ROWS):
             plot = self._glw.addPlot(row=i, col=0)
             plot.setMinimumHeight(_ROW_HEIGHT)
+            plot.setMouseEnabled(x=False, y=False)  # pan/zoom distance only
+            plot.setMenuEnabled(False)  # no right-click context menu
+            plot.hideButtons()  # no auto-scale or reset buttons
             total += _ROW_HEIGHT
             plot.showGrid(x=True, y=True, alpha=0.2)
             plot.setLabel("left", title, units=unit or None)
@@ -99,7 +110,7 @@ class TracePlot(QWidget):
             for name in channels:
                 y = np.asarray(getattr(trace, name), dtype=float)
                 dx, dy = trace_prep.downsample(x, y, max_points=_MAX_POINTS)
-                plot.plot(dx, dy, pen=pg.mkPen(_PENS.get(name, "#8b949e"), width=2))
+                plot.plot(dx, dy, pen=pg.mkPen(pens.get(name, "#8b949e"), width=2))
             if "gear" in channels:
                 self._style_gear_axis(plot, trace.gear)
             else:
@@ -110,7 +121,15 @@ class TracePlot(QWidget):
         # clips the lower rows rather than shrinking them (this is what hid Steering and ERS).
         self._glw.setFixedHeight(total)
         self.setMinimumHeight(total)
-
+    
+    def set_colorblind(self, enabled: bool) -> None:
+        """Switch the throttle/brake palette (default green/red vs colour-blind blue/orange)."""
+        if enabled == self._colorblind:
+            return
+        self._colorblind = enabled
+        if self._trace is not None:
+            self.set_trace(self._trace)  # redraw with the new palette
+    
     @staticmethod
     def _apply_yrange(plot, channels, trace) -> None:
         """Pin a channel's y-range per _Y_RANGES so scales are stable and never cross a floor.
