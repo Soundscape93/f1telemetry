@@ -20,10 +20,11 @@ def _setting() -> QSettings:
 
 
 def trace_colorblind() -> bool:
-    """Whether the throttle/brake trace uses the colour-blind palette (default False)."""
+    """Whether the telemetry traces use the colour-blind palette - both the single-lap throttle/brake
+    pair and the overlay's per-lap colours (default False)."""
     return _setting().value(_TRACE_COLORBLIND, False, type=bool)
 
 
 def set_trace_colorblind(enabled: bool) -> None:
-    """Persist the throttle/brake trace palette preference."""
+    """Persist the throttle/brake trace palette preference (single-lap + overlay)."""
     _setting().setValue(_TRACE_COLORBLIND, enabled)

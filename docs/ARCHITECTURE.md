@@ -117,7 +117,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   onto one shared distance grid; discrete channels — gear/DRS/ERS mode — are rounded), `elapsed_time`
   / `time_delta` / `time_deltas` (the racing "gap" trace, integrated from speed over distance), and
   `downsample` (stride-decimate parallel arrays for the chart). **N-series-aware** (every entry point
-  takes a *list* of traces), so the iteration-2 overlay is UI wiring over this same API, not a rewrite.
+  takes a *list* of traces) — exactly what the iteration-2 overlay is built on: the overlay/delta are
+  pure UI wiring over `align` + `time_deltas`, with no change to this module.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.
@@ -141,8 +142,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   graphic mapped to the on-car FL FR / RL RR layout, `wheel_grid_cells()` the tested placement),
   `damage_panel.py` / `setup_panel.py` (`build_damage_table` / `build_setup_table` over the Qt-free
   `damage_rows` / `setup_rows`, rendered via `tables.build_kv_table` — a shared key/value table with
-  bold section headers), and `trace_plot.py` (`TracePlot` — stacked, distance-linked single-lap
-  telemetry via pyqtgraph, lazily imported so it degrades to an install hint if absent).
+  bold section headers), and `trace_plot.py` (`TracePlot` — stacked, distance-linked telemetry via
+  pyqtgraph, lazily imported so it degrades to an install hint if absent). `set_traces` draws either
+  one lap (per-channel colours, the 1b look) or an **overlay** of several: aligned on a shared grid,
+  coloured *and* dash-styled per lap, with a legend row above the plots and a bottom Δ-time row;
+  `set_colorblind` swaps in the Okabe-Ito palette (persisted via `ui/settings.py`) for both modes.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
@@ -166,9 +170,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
   filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
   lap via `LapStore.load` and composes the `components/` lap widgets — lap info + tyre box, the
-  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`.
-  Session uids travel through signals as `str` (uint64-safe). Track-country flags are deferred (no
-  `track_id → country` map exists yet).
+  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`. Its
+  "Compare ▾" menu (iteration 2) lists candidate laps from `comparison.py` and drives `TracePlot`'s
+  overlay; `comparison.py` (Qt-free, unit-tested) enumerates them by scope — weekend-fastest,
+  same-session, same-weekend — as `LapRef`s loaded on demand via `LapStore.load`. Session uids travel
+  through signals as `str` (uint64-safe). Track-country flags are deferred (no `track_id → country`
+  map exists yet).
 - **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
   `SessionStore` **and** `LapStore` in-thread (SQLite dislikes cross-thread connections) and passes
   the `LapStore` into `ingest_capture`, so app-side ingest writes laps + Parquet traces (under an

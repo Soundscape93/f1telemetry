@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QScrollArea,
     QTableWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget
 )
@@ -36,6 +38,15 @@ from ..components import (
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
 from ..settings import set_trace_colorblind, trace_colorblind
+from .comparison import (
+    SCOPE_BEST,
+    SCOPE_SESSION,
+    SCOPE_WEEKEND,
+    best_lap_label,
+    candidate_laps,
+)
+
+_MAX_COMPARE = 5    # base lap + up to this many overlaid laps (kept ≤ TracePlot's palette)
 
 
 class DetailPage(QWidget):
@@ -49,6 +60,10 @@ class DetailPage(QWidget):
         self._laps = lap_store
         self._colorblind = trace_colorblind()  # throttle/brake palette reference, persisted
         self._plot: TracePlot | None = None
+        self._base_trace = None
+        self._base_lap_number: int | None = None
+        self._base_label = ""
+        self._compare_actions: list = []        # checkable menu actions carrying LapRefs
 
         outer = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -103,27 +118,36 @@ class DetailPage(QWidget):
         cols_host.setLayout(columns)
         self._body.addWidget(cols_host)
 
-        # bottom: single-lap telemetry graphs, with a colour-blind palette toggle in the header
+        # bottom: telemetry graphs, with a compare picker + colour-blind toggle in the header
+        self._base_trace = lap.trace
+        self._base_lap_number = lap.lap_number
+        self._base_label = best_lap_label(self._sessions, uid, lap.lap_number)
+        self._compare_actions = []
+        self._plot = TracePlot(lap.trace, colorblind=self._colorblind) if lap.trace is not None else None
+
         caption_host = QWidget()
         caption_row = QHBoxLayout(caption_host)
         caption_row.setContentsMargins(0, 0, 0, 0)
         caption = QLabel("Telemetry")
         caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
         caption_row.addWidget(caption)
+        if lap.trace is not None:
+            compare = self._build_compare_menu(uid, lap)
+            if compare is not None:
+                caption_row.addSpacing(12)
+                caption_row.addWidget(compare)
         caption_row.addStretch(1)
-        self._plot = None
         if lap.trace is not None:
             toggle = QCheckBox("Colour-blind palette")
             toggle.setChecked(self._colorblind)
             toggle.toggled.connect(self._on_colorblind_toggled)
             caption_row.addWidget(toggle)
         self._body.addWidget(caption_host)
-        if lap.trace is not None:
-            plot = TracePlot(lap.trace, colorblind=self._colorblind)    # sizes itself; QScrollArea scrolls
-            self._plot = plot
-            self._body.addWidget(plot)
+
+        if self._plot is not None:
+            self._body.addWidget(self._plot)       # sizes itself; the QScrollArea scrolls
         else:
-            missing = QLabel("No telemetry trace stored for this lap")
+            missing = QLabel("No telemetry trace stored for this lap.")
             missing.setStyleSheet("color: palette(mid);")
             self._body.addWidget(missing)
         self._body.addStretch(1)
@@ -134,6 +158,53 @@ class DetailPage(QWidget):
         set_trace_colorblind(enabled)
         if self._plot is not None:
             self._plot.set_colorblind(enabled)
+
+    def _build_compare_menu(self, uid: str, lap) -> QWidget | None:
+        """A 'Compare ▾' button whose checkable menu lists laps to overlay, or None if there are none.
+        
+        Candidates come from ``comparison.candidate_laps`` grouped by scope (best / same session / weekend):
+        ticking any extras rebuilds the overlay via ``_on_compare_changed``.
+        """
+        groups = candidate_laps(self._sessions, self._laps, uid, lap.lap_number)
+        if not groups:
+            return None
+        button = QToolButton()
+        button.setText("Compare ▾")
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        button.setStyleSheet("QToolButton { padding: 2px 6px; }")
+        menu = QMenu(button)
+        self._compare_actions = []
+        for scope in (SCOPE_BEST, SCOPE_SESSION, SCOPE_WEEKEND):
+            refs = groups.get(scope)
+            if not refs:
+                continue
+            menu.addSection(scope)
+            for ref in refs:
+                action = menu.addAction(ref.label)
+                action.setCheckable(True)
+                action.setData(ref)
+                action.toggled.connect(self._on_compare_changed)
+                self._compare_actions.append(action)
+        button.setMenu(menu)
+        return button
+    
+    def _on_compare_changed(self, checked: bool = False) -> None:
+        """Reload the plot from the base lap plus every ticked comparison lap (or single if none)."""
+        if self._plot is None or self._base_trace is None:
+            return
+        refs = [a.data() for a in self._compare_actions if a.isChecked()][:_MAX_COMPARE]
+        if not refs:
+            self._plot.set_trace(self._base_trace)
+            return
+        traces = [self._base_trace]
+        labels = [self._base_label]
+        for ref in refs:
+            other = self._laps.load(ref.session_uid, ref.lap_number)
+            if other is None or other.trace is None:
+                continue
+            traces.append(other.trace)
+            labels.append(ref.label)
+        self._plot.set_traces(traces, labels)
 
     @staticmethod
     def _panel(caption: str, widget: QWidget) -> QWidget:

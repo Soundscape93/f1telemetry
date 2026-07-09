@@ -133,12 +133,16 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
   Grand Prix/League = reorderable sandbox with duplicates).
   The **Laps** surface is now real: `ui/laps/` (foldable per-session lap cards + track/session
-  filter → a lap detail page with tyre box, damage/setup tables and stacked single-lap telemetry
-  graphs), built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable
-  lap widgets in `ui/components/`. Dashboard / Sessions / Analytics remain placeholders.
-- **Next:** lap-view **iteration 2** — same-context overlay (best-lap / same-session / same-weekend
-  N laps on the shared distance grid + delta trace), built on `analysis/traces.py`; then **2b**
-  g-force. Also pending: the Analytics surface and an edit-calendar action. See `docs/ROADMAP.md`.
+  filter → a lap detail page with tyre box, damage/setup tables and stacked telemetry graphs),
+  built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable lap
+  widgets in `ui/components/`. **Lap-view iteration 2 (same-context overlay) is done:** the detail
+  page's "Compare ▾" menu overlays the weekend's fastest lap / same-session / same-weekend laps on
+  the shared distance grid, each channel coloured *and* line-styled per lap with a legend, plus a
+  Δ-time (racing-gap) row; candidate laps are enumerated by `ui/laps/comparison.py`, and the
+  colour-blind palette covers the overlay too. Dashboard / Sessions / Analytics remain placeholders.
+- **Next:** lap-view **2b** — route the **Motion** packet once to add a g-force `LapTrace` channel
+  *and* a track-layout (XY-path) view. Also pending: the Analytics surface and an edit-calendar
+  action. See `docs/ROADMAP.md`.
 
 ## Where to look
 

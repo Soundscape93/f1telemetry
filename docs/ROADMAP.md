@@ -61,9 +61,15 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     compact row (tyre+lap · sectors · lap time · valid); trace graph zoom/pan removed (plots are
     full-height, always fit to the whole lap); throttle/brake has a colour-blind palette toggle
     (green/red ↔ Okabe-Ito blue/orange) persisted via `QSettings` (new `ui/settings.py`).
-    *Next here: iteration 2 (overlay).*
-  - *2 — same-context overlay.* Overlay best-lap / same-session / same-weekend laps on the shared
-    distance grid + delta trace. Built on the N-series-aware trace-prep module from 1a.
+  - *2 — same-context overlay. DONE.* The lap detail page's "Compare ▾" menu overlays laps on the
+    shared distance grid: scopes are the weekend's **fastest lap**, **same-session** laps, and
+    **same-weekend** laps (other sessions sharing the `weekend_link_id` — same track). Every channel
+    is drawn per lap with a legend (in its own row above the plots) plus a bottom **Δ-time** row (the
+    racing gap vs the viewed lap, from `time_deltas`). `ui/laps/comparison.py` enumerates candidates
+    (a `LapRef` per lap, labelled `Lap N - Slot`); the "Fastest" scope spans the whole weekend and is
+    omitted when the viewed lap *is* the fastest. Overlaid laps differ by both **colour and line
+    style** (solid/dash/dot/…) and honour the persisted colour-blind palette (Okabe-Ito). All UI
+    wiring over the N-series `analysis/traces.py` — no analysis rewrite. *Next here: iteration 2b.*
   - *2b — g-force channel + track-layout view.* Both come from routing the **Motion** packet
     (frame-join like Car Status), so do them together: g-force as an additive `LapTrace` channel
     (2026 int16/1000), plus `pos_x`/`pos_z` (world coords) channels driving a track-map panel — an

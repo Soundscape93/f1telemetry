@@ -5,11 +5,14 @@ Draws speed, throttle/brake, gear, steering and ERS as stacked plots sharing one
 if it isn't installed the widget shows an install hint instead of failing, so the app and the test
 suite stay importable. Point-count is capped via ``analysis.traces.downsample``.
 
-Overlay (N laps) is iteration 2 and lives elsewhere; this is the single-lap 1b view.
+Overlay (N laps) is handled via ``set_traces``.
 """
 from __future__ import annotations
 
+from  collections.abc import Sequence
+
 import numpy as np
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...analysis import traces as trace_prep
@@ -51,6 +54,25 @@ _ROW_HEIGHT = 240   # px per stacked channel plot - tall enough to read without 
                     # detail page scrolls through the stack (total = rows * this + a little pad)
 _AXIS_PAD = 28      # extra height so the bottom row's distance axis + label aren't clipped
 _LEFT_AXIS_WIDTH = 76  # wide enough for the ERS store energy ticks; shared so titles line up
+# Overlay (comparison) mode colours bay *lap*, not by channel, so up to this many laps stay legible
+# in the legen; the referen lap (the one being viewed) is index 0. A synthetic bottom row shows
+# each other lap's cumulative time delta (the racing gap) to that reference.
+_LAP_PENS = ("#e10600", "#58a6ff", "#3fb950", "#d29922", "#a371f7",
+             "#f778ba", "#79c0ff", "#ffa657")
+# Colour-blind-safe lap palette (Okabe-Ito, minus black - invisible on the dark plots). These stay
+# distinct under red-green (and other) colour-vision deficiencies; paired with _LAP_STYLES so laps
+# also differ by line pattern, not colour alone.
+_CB_LAP_PENS = ("#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2",
+                "#d55e00", "#cc79a7", "#ffffff")
+# Per-lap line pattern, cycled alongside the colour so overlaid laps differ two ways at once. The
+# reference lap (index 0) is solid. Used on single-channel rows + the Δ row; the throttle/brake row
+# keeps solid=throttle / dashed=brake for its channel distinction.
+_LAP_STYLES = (Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine, Qt.PenStyle.DotLine,
+               Qt.PenStyle.DashDotLine, Qt.PenStyle.DashDotDotLine)
+_MAX_OVERLAY = len(_LAP_PENS)
+_LEGEND_HEIGHT = 34     # the overlay's lap-name legend sits in its own row above the plots
+_DELTA_ROW: tuple[tuple[str, ...], str, str] = (("_delta",), "Δ vs ref", "s")
+
 
 
 class TracePlot(QWidget):
@@ -60,7 +82,8 @@ class TracePlot(QWidget):
                  colorblind: bool = False) -> None:
         super().__init__(parent)
         self._colorblind = colorblind
-        self._trace: LapTrace | None = None
+        self._trace: list[LapTrace] = []        # current lap(s): 1 = single view, >1 = overlay
+        self._labels: list[str | None] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -80,35 +103,65 @@ class TracePlot(QWidget):
         layout.addWidget(self._glw)
         if trace is not None:
             self.set_trace(trace)
-
+    
     def set_trace(self, trace: LapTrace) -> None:
-        """Draw (or redraw) the stacked channel plots for one Lap."""
-        self._trace = trace
-        if self._pg is None or self._glw is None:
+        """Draw one lap (single-lap view). Convenience for ``set_traces`` with one lap."""
+        self.set_traces([trace])
+
+    def set_traces(self, traces: Sequence[LapTrace], labels: Sequence[str] | None = None) -> None:
+        """Draw one lap, or overlay several for comparison.
+        
+        One trace keeps the original single-lap look: each channel in its own colour, no legend and
+        no delta row. Two or more are aligned on a shared distance grid (``analysis.traces.align``),
+        colour *per lap* with a legend, and gain a bottom Δ-time row - each lap's racing gap to the
+        reference (``traces[0]``, with the lap being viewed). Laps past the palette are dropped.
+        """
+        traces = list(traces)
+        self._trace = traces
+        self._labels = list(labels) if labels is not None else [None] * len(traces)
+        if self._pg is None or self._glw is None or not traces:
             return
-        pg = self._pg
-        pens = {**_PENS, **(CB_PENS if self._colorblind else {})}
         self._glw.clear()
-        x = np.asarray(trace.distance, dtype=float)
+        if len(traces) == 1:
+            self._draw_single(traces[0])
+        else:
+            self._draw_overlay(traces, self._labels)
+    
+    def set_colorblind(self, enabled: bool) -> None:
+        """Switch to/from the colour-blind palette and redraw the current lap(s) in place.
+
+        Affects both views: the single-lap throttle/brake pair and the overlay's per-lap colours.
+        """
+        if enabled == self._colorblind:
+            return
+        self._colorblind = enabled
+        if self._trace:
+            self.set_traces(self._trace, self._labels)
+    
+    def _draw_single(self, trace: LapTrace) -> None:
+        """The single-lap render: one stacked plot per channel group, each in its own colour."""
+        pg = self._pg
+        pens ={**_PENS, **(CB_PENS if self._colorblind else {})}
+        x = np.asanyarray(trace.distance, dtype=float)
         link = None
         total = _AXIS_PAD
         for i, (channels, title, unit) in enumerate(_ROWS):
             plot = self._glw.addPlot(row=i, col=0)
             plot.setMinimumHeight(_ROW_HEIGHT)
-            plot.setMouseEnabled(x=False, y=False)  # pan/zoom distance only
-            plot.setMenuEnabled(False)  # no right-click context menu
-            plot.hideButtons()  # no auto-scale or reset buttons
+            plot.setMouseEnabled(x=False, y=False)      # pan/zoom distance only
+            plot.setMenuEnabled(False)                  # no right click context menu
+            plot.hideButtons()                          # no auto-scale or reset buttons
             total += _ROW_HEIGHT
             plot.showGrid(x=True, y=True, alpha=0.2)
             plot.setLabel("left", title, units=unit or None)
-            plot.getAxis("left").setWidth(_LEFT_AXIS_WIDTH)  # align titles, room for wide ticks (ERS)
-            plot.setLabel("bottom", "Distance", units="m")  # distance on every row (visible while scrolling)
+            plot.getAxis("left").setWidth(_LEFT_AXIS_WIDTH)      # align titles, room for wide ticks (ERS)
+            plot.setLabel("bottom", "Distance", units="m")      # distance on every row (visible while scrolling)
             if link is None:
                 link = plot
             else:
-                plot.setXLink(link)                     # pan/zoom distance together
+                plot.setXLink(link)         # pan/zoom distance together
             for name in channels:
-                y = np.asarray(getattr(trace, name), dtype=float)
+                y = np.asanyarray(getattr(trace, name), dtype=float)
                 dx, dy = trace_prep.downsample(x, y, max_points=_MAX_POINTS)
                 plot.plot(dx, dy, pen=pg.mkPen(pens.get(name, "#8b949e"), width=2))
             if "gear" in channels:
@@ -117,39 +170,113 @@ class TracePlot(QWidget):
                 self._apply_yrange(plot, channels, trace)
         # Fix the whole stack's height so every row gets its full height and none are clipped;
         # the detail page's QScrollArea handles scrolling. A plain minimum isn't enough - the
-        # GraphicsLayoutWidget's weak sizeHint lets an ancestor allocate it too little and pyqtgraph
-        # clips the lower rows rather than shrinking them (this is what hid Steering and ERS).
+        # GraphicsLayoutWidget weak sizeHint lets an ancestor allocate it too littel and pyqtgraph
+        # clips the lower rows rather han shrinking them.
         self._glw.setFixedHeight(total)
-        self.setMinimumHeight(total)
+        self.setMaximumHeight(total)
     
-    def set_colorblind(self, enabled: bool) -> None:
-        """Switch the throttle/brake palette (default green/red vs colour-blind blue/orange)."""
-        if enabled == self._colorblind:
+    def _draw_overlay(self, traces: list[LapTrace], labels: list[str | None]) -> None:
+        """Overlay several laps: align on a shared grid, colour per lap, add a Δ-time row."""
+        pg = self._pg
+        lap_pens = _CB_LAP_PENS if self._colorblind else _LAP_PENS
+        n = min(len(traces), _MAX_OVERLAY)
+        traces, labels = traces[:n], labels[:n]
+        try:
+            aligned = trace_prep.align(traces, labels=labels)
+        except ValueError:
+            # No shared distance overlap (e.g. badly trimmed) - say so instead of crashing.
+            self._glw.addLabel("These laps don't share a common distance range to overlay",
+                               row=0, col=0)
+            self._glw.setFixedHeight(_ROW_HEIGHT)
+            self.setMaximumHeight(_ROW_HEIGHT)
             return
-        self._colorblind = enabled
-        if self._trace is not None:
-            self.set_trace(self._trace)  # redraw with the new palette
+        x = aligned[0].distance
+        deltas = trace_prep.time_deltas(aligned[0], aligned[1:])    # one gap trace per non-ref lap
+        rows = _ROWS + (_DELTA_ROW,)
+
+        # A horizontal legend in its own layout row above the plots, so the lap names never sit on
+        # top of the traces. Plots start at row 1; each lap's speed curve is registered onto it below.
+        legend = pg.LegendItem(horizontal=True, offset=None, brush=pg.mkBrush(20, 20, 20, 200),
+                               pen=pg.mkPen(90, 90, 90), labelTextColor="#f0f0f0")
+        self._glw.addItem(legend, row=0, col=0)
+
+        link = None
+        total = _AXIS_PAD + _LEGEND_HEIGHT
+        for i, (channels, title, unit) in enumerate(rows):
+            plot = self._glw.addPlot(row=i + 1, col=0)      # row 0 is the legend
+            plot.setMinimumHeight(_ROW_HEIGHT)
+            plot.setMouseEnabled(x=False, y=False)      # pan/zoom distance only
+            plot.setMenuEnabled(False)                  # no right click context menu
+            plot.hideButtons()                          # no auto-scale or reset buttons
+            total += _ROW_HEIGHT
+            plot.showGrid(x=True, y=True, alpha=0.2)
+            plot.setLabel("left", title, units=unit or None)
+            plot.getAxis("left").setWidth(_LEFT_AXIS_WIDTH)      # align titles, room for wide ticks (ERS)
+            plot.setLabel("bottom", "Distance", units="m")      # distance on every row (visible while scrolling)
+            if link is None:
+                link = plot
+            else:
+                plot.setXLink(link)         # pan/zoom distance together
+            if channels[0] == "_delta":
+                self._draw_delta_row(plot, x, deltas, lap_pens)
+                continue
+            for li, at in enumerate(aligned):
+                color = lap_pens[li % len(lap_pens)]
+                for ci, name in enumerate(channels):
+                    y = at.channel(name)
+                    dx, dy = trace_prep.downsample(x, y, max_points=_MAX_POINTS)
+                    # colour by lap; a 2nd channel sharing the row (brake) is dashed to tell it apart
+                    style = Qt.PenStyle.DashLine if ci else Qt.PenStyle.SolidLine
+                    curve = plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2, style=style))
+                    if i == 0 and ci == 0:              # one legend entry per lap, from the speed row
+                        legend.addItem(curve, at.label or f"Lap {li + 1}")
+            if "gear" in channels:
+                self._style_gear_axis(
+                    plot, np.concatenate([at.channel("gear") for at in aligned]))
+            else:
+                self._apply_yrange_arrays(
+                    plot, channels, [at.channel(c) for at in aligned for c in channels])
+        self._glw.setFixedHeight(total)
+        self.setMaximumHeight(total)
+
+    def _draw_delta_row(self, plot, x, deltas, lap_pens) -> None:
+        """Δ-time row: one non-reference lap's cumulative gap to the reference (0-line = ref)."""
+        pg = self._pg
+        plot.addLine(y=0, pen=pg.mkPen(lap_pens[0], width=1, style=Qt.PenStyle.DashLine))
+        for li, d in enumerate(deltas, start=1):
+            color = lap_pens[li % len(lap_pens)]
+            dx, dy = trace_prep.downsample(x, d, max_points=_MAX_POINTS)
+            plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2))
+        plot.getViewBox().enableAutoRange(axis="y")     # gaps are small + signed - just fit them
     
     @staticmethod
     def _apply_yrange(plot, channels, trace) -> None:
-        """Pin a channel's y-range per _Y_RANGES so scales are stable and never cross a floor.
-
-        A ``None`` bound fits this lap's data (with a little headroom); a fixed bound is exact and
-        also caps panning, so e.g. speed and ERS can never be dragged below 0.
+        """Pin a single lap's y-range per _Y_Ranges (stable scales; fixed bounds also cap panning)."""
+        TracePlot._apply_yrange_arrays(plot, channels, [getattr(trace, c) for c in channels])
+    
+    @staticmethod
+    def _apply_yrange_arrays(plot, channels, arrays) -> None:
+        """Pin the row's y-range per _Y_RANGES, fitting any open side across the given data arrays.
+        
+        A ``None`` bound fits the data (with headroom) across *every* array passed - for an overlay
+        that's every lap, so one scale holds them all; a fixed bound is exact and also caps panning
+        (e.g. speend and ERS can never be dragged below 0).
         """
         spec = _Y_RANGES.get(channels[0])
         if spec is None:
             return
         lo, hi = spec
-        if lo is None or hi is None:                    # fit the open side(s) to this lap's data
-            data = np.concatenate([np.asarray(getattr(trace, c), dtype=float) for c in channels])
+        if lo is None or hi is None:            # fit the open side(s) to the data
+            data = np.concatenate([np.asanyarray(a, dtype=float) for a in arrays])
             span = (float(data.max()) - float(data.min())) or 1.0
             lo = float(data.min()) - span * 0.05 if lo is None else lo
             hi = float(data.max()) + span * 0.05 if hi is None else hi
-        plot.setYRange(lo, hi, padding=0)
-        vb = plot.getViewBox()                          # keep panning/zoom inside the sensible range
+        plot.setYRange(lo, hi, padding=0)       # no extra headroom
+        vb = plot.getViewBox()                  # keep panning/zooming inside the sensible range
         vb.setLimits(yMin=spec[0] if spec[0] is not None else None,
                      yMax=spec[1] if spec[1] is not None else None)
+
+        
 
     @staticmethod
     def _style_gear_axis(plot, gear) -> None:

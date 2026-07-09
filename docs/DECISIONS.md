@@ -180,12 +180,24 @@ what would trigger revisiting it.
   cross-session trends stay in Analytics.** The ROADMAP originally filed "overlay N laps on a
   shared distance grid / lap delta / ERS view" under Analytics. In practice those graphs are most
   useful right where you're inspecting a lap, so the Laps surface owns single-lap graphs (iter 1b)
-  and same-context overlay — best lap / same session / same weekend (iter 2). Analytics keeps the
-  genuinely *cross-session* work: same-track-different-season comparison and higher-level trends
-  (lap-time trends, AI-difficulty, team performance). The trace-preparation analysis module is
-  built **N-series-aware from iteration 1a** so the overlay is later a UI-wiring addition, not a
-  rewrite. g-force is a deferred additive `LapTrace` channel (iteration 2b, after overlay works;
-  needs a Motion frame-join and the 2026 int16/1000 scaling).
+  and same-context overlay — weekend-fastest / same session / same weekend (**iter 2, done**).
+  Analytics keeps the genuinely *cross-session* work: same-track-different-season comparison and
+  higher-level trends (lap-time trends, AI-difficulty, team performance). Building the
+  trace-preparation module **N-series-aware from iteration 1a** paid off: iter 2 was pure UI wiring
+  over `align` + `time_deltas` (overlay + delta row) plus `ui/laps/comparison.py` (candidate
+  enumeration), with no change to `analysis/traces.py`. g-force is a deferred additive `LapTrace`
+  channel (iteration 2b, next; needs a Motion frame-join and the 2026 int16/1000 scaling).
+- **The overlay separates laps by colour *and* line style, and reuses the persisted colour-blind
+  setting.** Telling 5+ laps apart by colour alone is hard — especially for red-green colour-vision
+  deficiency — so each overlaid lap carries both a palette colour and a line pattern
+  (solid/dash/dot/dash-dot/…); the reference (viewed) lap is solid. Under the colour-blind toggle the
+  default palette's red+green is replaced by the **Okabe-Ito** set, and the *same* `laps/trace_colorblind`
+  QSetting drives both the single-lap throttle/brake pair and the overlay (one preference, persisted,
+  applied live by redrawing). The two-channel throttle/brake row keeps solid=throttle / dashed=brake
+  for its channel distinction and leans on colour for the lap; every single-channel row uses the
+  per-lap line style. The lap-name legend sits in its **own layout row above the plots** (not
+  anchored inside a viewbox) so it never covers a trace. "Fastest" spans the whole weekend and is
+  hidden when you're already viewing that lap — a lap can't overlay itself.
 - **Lap detail composes reusable components over the 1a data split; visuals follow the game HUD.**
   The lap detail page (`ui/laps/detail_page.py`) is assembly only — it maps the 1a model straight to
   widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order), full `CarDamage`
