@@ -195,8 +195,12 @@ class TracePlot(QWidget):
         rows = _ROWS + (_DELTA_ROW,)
 
         # A horizontal legend in its own layout row above the plots, so the lap names never sit on
-        # top of the traces. Plots start at row 1; each lap's speed curve is registered onto it below.
-        legend = pg.LegendItem(horizontal=True, offset=None, brush=pg.mkBrush(20, 20, 20, 200),
+        # top of the traces. pyqtgraph's LegendItem has no `horizontal` flag - it lays entries out in
+        # a grid, so `colCount=n` puts all n lap names in one row. (The default colCount=1 stacks them
+        # vertically; that column grew with the lap count and, against the fixed-height plot stack,
+        # clipped the bottom Δ row once 3+ laps were overlaid.) Plots start at row 1; each lap's speed
+        # curve is registered onto the legend below.`
+        legend = pg.LegendItem(colCount=n, offset=None, brush=pg.mkBrush(20, 20, 20, 200),
                                pen=pg.mkPen(90, 90, 90), labelTextColor="#f0f0f0")
         self._glw.addItem(legend, row=0, col=0)
 
