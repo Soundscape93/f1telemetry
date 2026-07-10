@@ -115,5 +115,31 @@ class DownsampleTest(unittest.TestCase):
         np.testing.assert_array_equal(dy, x * 3)
 
 
+class OptionalMotionChannelsTest(unittest.TestCase):
+    """align/resample default to LapTrace.CHANNELS (nine), so the 2b motion channels are ignored
+    unless explicitly requested - the iteration-2 overlay is unaffected by adding them."""
+
+    def test_align_ignores_motion_channels_by_default(self):
+        import dataclasses
+        t = dataclasses.replace(
+            make_trace([0, 100, 200], [100, 150, 200]),
+            pos_x=np.zeros(3), pos_z=np.zeros(3), g_lat=np.zeros(3), g_long=np.zeros(3))
+        [aligned] = traces.align((t,), num=11)
+        for name in LapTrace.CHANNELS:
+            self.assertEqual(len(aligned.channel(name)), 11)   # the nine required are resampled
+        with self.assertRaises(KeyError):
+            aligned.channel("g_lat")                           # motion channel not aligned
+
+    def test_align_can_include_motion_when_asked(self):
+        import dataclasses
+        t = dataclasses.replace(
+            make_trace([0, 100, 200], [100, 150, 200]),
+            pos_x=np.zeros(3), pos_z=np.zeros(3),
+            g_lat=np.array([0.0, 1.0, 2.0]), g_long=np.zeros(3))
+        [aligned] = traces.align(
+            (t,), num=11, channels=LapTrace.CHANNELS + ("g_lat", "g_long"))
+        self.assertEqual(len(aligned.channel("g_lat")), 11)    # opt-in, as _draw_overlay does
+
+
 if __name__ == "__main__":
     unittest.main()

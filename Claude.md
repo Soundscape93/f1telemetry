@@ -135,14 +135,24 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   The **Laps** surface is now real: `ui/laps/` (foldable per-session lap cards + track/session
   filter → a lap detail page with tyre box, damage/setup tables and stacked telemetry graphs),
   built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable lap
-  widgets in `ui/components/`. **Lap-view iteration 2 (same-context overlay) is done:** the detail
-  page's "Compare ▾" menu overlays the weekend's fastest lap / same-session / same-weekend laps on
-  the shared distance grid, each channel coloured *and* line-styled per lap with a legend, plus a
-  Δ-time (racing-gap) row; candidate laps are enumerated by `ui/laps/comparison.py`, and the
-  colour-blind palette covers the overlay too. Dashboard / Sessions / Analytics remain placeholders.
-- **Next:** lap-view **2b** — route the **Motion** packet once to add a g-force `LapTrace` channel
-  *and* a track-layout (XY-path) view. Also pending: the Analytics surface and an edit-calendar
-  action. See `docs/ROADMAP.md`.
+  widgets in `ui/components/`. **Lap-view iterations 2 (overlay) and 2b (Motion) are done:** the
+  detail page's "Compare ▾" menu overlays the weekend's fastest / same-session / same-weekend laps on
+  the shared distance grid (each channel coloured *and* line-styled per lap with a legend, plus a
+  Δ-time racing-gap row; candidates from `ui/laps/comparison.py`, colour-blind palette included), and
+  routing the **Motion** packet added a g-force `TracePlot` row plus a `TrackMap` XY-path panel with
+  a hover marker (`cursor_moved`). The map un-mirrors the left-handed world frame and closes the loop
+  so a race lap 1 draws whole; absolute rotation follows the game frame, not F1.com map art (no
+  per-track assets). The map still uses the *selected lap's* raw line, so its shape varies lap to
+  lap — a canonical layout is the next refinement. Dashboard / Sessions / Analytics remain placeholders.
+- **Next:** lap-view **2b.1 — canonical track-map refinement.** Make the map a clean, identical
+  shape per track: a **distance-resampled median racing line** over the track's stored laps (fixed
+  `0..track_length` grid, per-point `nanmedian` of `pos_x`/`pos_z`), decoupled from the driven line.
+  Hover still uses distance-along-lap mapping onto that canonical layout. **No Motion Ex needed** for
+  the median line; a true geometric centerline (needs Motion Ex / track-edge/width) stays deferred.
+  Optional sector colouring only if we add the Lap Data per-frame `sector` field (a small additive
+  trace channel) — sector *distances* aren't stored today. Then **2c** — a car-body graphic
+  (colour-coded tyre + damage zones; only new ingest is tyre/brake temps). Also pending: the
+  Analytics surface and an edit-calendar action. See `docs/ROADMAP.md`.
 
 ## Where to look
 

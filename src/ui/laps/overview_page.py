@@ -101,7 +101,7 @@ class OverviewPage(QWidget):
             uid = str(session.session_uid)
             laps = self._laps.list(uid)
             if self._valid_only:
-                laps = tuple(lap for lap in laps if lap.valid)
+                laps = tuple(lap for lap in laps if lap.is_valid)
             if not laps:
                 continue
             slot = slot_for_session(session, all_sessions)

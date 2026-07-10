@@ -3,6 +3,8 @@ and the session setup-history round-trip on SessionStore.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import os
 import shutil
 import tempfile
@@ -36,6 +38,17 @@ def make_trace(n=5):
         drs=np.zeros(n, dtype=int),
         ers_store_energy=np.zeros(n, dtype=int),
         ers_deploy_mode=np.zeros(n, dtype=int),
+    )
+
+
+def make_motion_trace(n=5):
+    """A trace carrying the four optional 2b motion channels."""
+    return dataclasses.replace(
+        make_trace(n),
+        pos_x=np.linspace(0.0, 100.0, n),
+        pos_z=np.linspace(0.0, 200.0, n),
+        g_lat=np.linspace(-1.0, 1.0, n),
+        g_long=np.linspace(0.0, 2.0, n),
     )
 
 
@@ -118,6 +131,21 @@ class LapStoreRoundTripTest(unittest.TestCase):
         self.assertEqual(len(lap.trace), 5)     # trace hydrated
         np.testing.assert_array_equal(lap.trace.gear, make_trace().gear)
         self.assertIsNone(self.store.load(123, 999), "nonexistent lap returns None")    # missing lap -> None
+    
+    def test_motion_channels_round_trip(self):
+        lap = dataclasses.replace(make_lap(1), trace=make_motion_trace())
+        self.store.save_laps(321, (lap,))
+        loaded = self.store.load(321, 1)
+        self.assertTrue(loaded.trace.has_motion)
+        np.testing.assert_allclose(loaded.trace.pos_x, make_motion_trace().pos_x)
+        np.testing.assert_allclose(loaded.trace.g_lat, make_motion_trace().g_lat)
+
+    def test_pre_2b_lap_loads_without_motion(self):
+        # make_lap uses make_trace (no motion) -> the file has no motion columns, loads with None
+        self.store.save_laps(55, (make_lap(1),))
+        loaded = self.store.load(55, 1)
+        self.assertIsNone(loaded.trace.pos_x)
+        self.assertFalse(loaded.trace.has_motion)
 
     def test_resave_replaces_laps(self):
         self.store.save_laps(123, (make_lap(1), make_lap(2), make_lap(3)))
@@ -134,6 +162,36 @@ class LapStoreRoundTripTest(unittest.TestCase):
         big = 0x8000_0000_0000_0000
         self.store.save_laps(big, (make_lap(1),))
         self.assertEqual([lap.lap_number for lap in self.store.load_laps(big)], [1])
+
+
+@unittest.skipUnless(_HAS_PYARROW, "pyarrow required for Parquet trace storage")
+class TraceFileMotionTest(unittest.TestCase):
+    """trace_files writes motion columns only when present and reads pre-2b files without them."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(suffix="_tf")
+        self.addCleanup(shutil.rmtree, self._dir, True)
+
+    def _path(self, name):
+        return os.path.join(self._dir, name)
+
+    def test_motion_columns_written_and_read(self):
+        from f1telemetry.src.storage.trace_files import write_trace, read_trace
+        p = self._path("motion.parquet")
+        write_trace(p, make_motion_trace())
+        back = read_trace(p)
+        self.assertTrue(back.has_motion)
+        np.testing.assert_allclose(back.pos_z, make_motion_trace().pos_z)
+
+    def test_pre_2b_file_has_no_motion_columns_and_loads(self):
+        import pyarrow.parquet as pq
+        from f1telemetry.src.storage.trace_files import write_trace, read_trace, _REQUIRED
+        p = self._path("legacy.parquet")
+        write_trace(p, make_trace())                       # no motion -> nine-channel schema
+        self.assertEqual(set(pq.read_table(p).column_names), set(_REQUIRED))
+        back = read_trace(p)
+        self.assertIsNone(back.pos_x)
+        self.assertFalse(back.has_motion)
 
 
 class SetupHistoryStorageTest(unittest.TestCase):

@@ -185,8 +185,8 @@ what would trigger revisiting it.
   higher-level trends (lap-time trends, AI-difficulty, team performance). Building the
   trace-preparation module **N-series-aware from iteration 1a** paid off: iter 2 was pure UI wiring
   over `align` + `time_deltas` (overlay + delta row) plus `ui/laps/comparison.py` (candidate
-  enumeration), with no change to `analysis/traces.py`. g-force is a deferred additive `LapTrace`
-  channel (iteration 2b, next; needs a Motion frame-join and the 2026 int16/1000 scaling).
+  enumeration), with no change to `analysis/traces.py`. G-force + track position are now additive
+  `LapTrace` channels from the Motion packet (**iteration 2b, done**; 2026 g-force is int16/1000).
 - **The overlay separates laps by colour *and* line style, and reuses the persisted colour-blind
   setting.** Telling 5+ laps apart by colour alone is hard — especially for red-green colour-vision
   deficiency — so each overlaid lap carries both a palette colour and a line pattern
@@ -198,6 +198,35 @@ what would trigger revisiting it.
   per-lap line style. The lap-name legend sits in its **own layout row above the plots** (not
   anchored inside a viewbox) so it never covers a trace. "Fastest" spans the whole weekend and is
   hidden when you're already viewing that lap — a lap can't overlay itself.
+- **The track map is an asset-free plotted XY path, un-mirrored and loop-closed (iteration 2b).**
+  `TrackMap` draws the circuit from the lap's own `pos_x`/`pos_z` telemetry rather than sourcing a
+  per-track image/mini-map — so it works for every circuit (including league/custom) with zero
+  assets, and lives in the same coordinate space as the hover marker, making highlighting exact.
+  Two corrections make it read right: (1) F1's world frame is **left-handed**, so a raw `(X, Z)`
+  top-down plot is *mirrored* — the lap runs the wrong way round (CW vs CCW); negating one axis
+  restores true handedness. (2) A race **lap 1** starts at the grid slot, past the S/F line, so its
+  trace misses the line→grid straight; **closing the path loop** fills that gap generally (a no-op
+  for a full flying lap). *Deliberate limitation:* absolute rotation follows the game's world frame,
+  **not** the F1.com broadcast art — matching that orientation would require a per-track rotation
+  constant, which contradicts the asset-free goal. *Revisit:* add an optional per-track rotation
+  table only if broadcast-matching orientation is explicitly wanted; direction + shape are already
+  correct without it. Store **raw** world coords (normalise/transform only at render) so no
+  information is thrown away.
+- **Canonical track map is a distance-resampled *median racing line*, not one lap's line (iteration
+  2b.1, planned).** 2b draws the *selected lap's* raw `pos_x`/`pos_z`, so the shape shifts lap to lap
+  (defending, missed apex, off-track, a wider line). 2b.1 makes the map identical-and-clean per track
+  by aggregating: resample each of the track's stored (valid) laps onto a fixed `0..track_length`
+  distance grid (out-of-range → NaN) and take the per-point `nanmedian`. This is robust to
+  single-lap excursions and self-heals the lap-1 S/F gap (other laps cover it). It's valid *without*
+  any alignment step because **F1 track world coordinates are fixed geometry** — the same point is
+  the same `pos_x`/`pos_z` across laps and sessions. **No Motion Ex needed:** this is a *median
+  racing line*, the honest achievable version; a *true geometric centerline* would need track-edge /
+  track-width data (Motion Ex) and stays deferred. Hover is unchanged for the user — both the viewed
+  lap and the canonical layout are distance-indexed, so `cursor_moved` (a distance) snaps the marker
+  to the canonical layout's nearest index. *Sector colouring* is gated on having sector-boundary
+  **distances**, which we don't store (only sector *times*); the reliable source is the Lap Data
+  per-frame `sector` field as a small additive channel — until then the track stays one colour.
+  *Fallback:* too few laps (or a first-lap/custom track) → the selected lap's raw line.
 - **Lap detail composes reusable components over the 1a data split; visuals follow the game HUD.**
   The lap detail page (`ui/laps/detail_page.py`) is assembly only — it maps the 1a model straight to
   widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order), full `CarDamage`
@@ -206,7 +235,9 @@ what would trigger revisiting it.
   Tyre `_wear_color` thresholds mirror the F1 HUD: **<60 % green, 60–79 % orange, ≥80 % red**. Setup
   fields that are raw game values (differential on/off-throttle, engine braking, brake pressure,
   brake bias) are shown as plain numbers, **not** percentages. The elaborate car-body render stays
-  deferred; 1b is the simple 4-box + table form.
+  deferred to **iteration 2c** (a car silhouette with colour-coded tyre + damage zones); ~90 % of
+  its data is already stored (`LapTyreContext` + `CarDamage`), so its only new ingest is tyre
+  carcass/surface + brake temperatures — until then, 1b's simple 4-box + table form stands.
 - **pyqtgraph is a hand-managed runtime dep, like pyarrow.** There's no requirements file; both are
   installed by hand. `TracePlot` lazy-imports pyqtgraph and shows an install hint if it's missing, so
   the app and the test suite stay importable without it. (pyqtgraph is now installed in the dev env.)

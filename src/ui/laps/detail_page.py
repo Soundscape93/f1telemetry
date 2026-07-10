@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ...protocol.reference import track_name
 from ..components import (
     TracePlot,
+    TrackMap,
     TyreBox,
     build_damage_table,
     build_setup_table,
@@ -124,6 +125,14 @@ class DetailPage(QWidget):
         self._base_label = best_lap_label(self._sessions, uid, lap.lap_number)
         self._compare_actions = []
         self._plot = TracePlot(lap.trace, colorblind=self._colorblind) if lap.trace is not None else None
+
+        # track map: only when this lap carries Motion; hover on the traces moves its marker
+        if lap.trace is not None and lap.trace.has_motion:
+            track_map = TrackMap(lap.trace)
+            self._body.addWidget(self._panel("Track map", track_map))
+            if self._plot is not None:
+                self._plot.cursor_moved.connect(track_map.set_cursor_distance)
+
 
         caption_host = QWidget()
         caption_row = QHBoxLayout(caption_host)

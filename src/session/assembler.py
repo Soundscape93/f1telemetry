@@ -37,6 +37,7 @@ from ..domain.models import (
 from ..domain.normalizer import (
     Sample,
     build_trace,
+    motion_sample,
     normalize_classification,
     merge_participant,
     normalize_participants,
@@ -162,6 +163,7 @@ class _SessionBuilder:
         self._best_lap_num_by_index: dict[int, int] = {}  # car_idx -> lap the best lap was set on
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
+        self._last_motion = None                # the player's latest normalized MotionSample
 
         self._last_car_damage = None            # the player's latest Car Damage entry (tyre wear)
         self._last_setup = None                 # the player's latest normalized Setup (for change-diff)
@@ -212,6 +214,12 @@ class _SessionBuilder:
             if idx >= len(packet.car_status_data):  # player not in the array this frame (lobby/spectator)
                 return
             self._last_car_status = packet.car_status_data[idx]
+        elif pid == PacketId.MOTION:
+            idx = packet.header.player_car_index
+            if idx >= len(packet.car_motion_data):  # player not in the array this frame
+                return
+            self._last_motion = motion_sample(
+                packet.car_motion_data[idx], packet.header.packet_format)
         elif pid == PacketId.CAR_DAMAGE:
             idx = packet.header.player_car_index
             if idx >= len(packet.car_damage_data):  # player not in the array this frame (lobby/spectator)
@@ -261,7 +269,7 @@ class _SessionBuilder:
             self._snapshot_lap_state(self._cur_lap)
             self._cur_lap = lap_num
             self._buffer = []
-        self._buffer.append(telemetry_sample(lap_data, car_telemetry, self._last_car_status))
+        self._buffer.append(telemetry_sample(lap_data, car_telemetry, self._last_car_status, self._last_motion))
 
     def _store_trace(self, lap_number: int) -> None:
         """Stash the current buffer's candidate runs for a lap_number.

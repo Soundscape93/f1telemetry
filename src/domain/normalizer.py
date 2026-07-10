@@ -185,6 +185,31 @@ def normalize_car_damage(car_damage) -> CarDamage:
     )
 
 
+class MotionSample(NamedTuple):
+    """The player's motion channels for one frame, already unit-normalized."""
+
+    pos_x: float
+    pos_z: float
+    g_lat: float
+    g_long: float
+
+
+def motion_sample(entry, packet_format: int) -> MotionSample:
+    """Read the player's CarMotionData entry into normalized position + g-force.
+    
+    World position is a float in both formats. G-force is the one channel that diverges:
+    2026 quantisises it to int16 (/1000 to get g); 2025 is already float g. We branch on 
+    ``packet_format`` here - the single place this channel's format diffrence is handled.
+    """
+    scale = 1000.0 if packet_format == 2026 else 1.0
+    return MotionSample(
+        pos_x=entry.world_position_x,
+        pos_z=entry.world_position_z,
+        g_lat=entry.g_force_lateral / scale,
+        g_long=entry.g_force_longitudinal / scale,
+    )
+
+
 def normalize_session(packet: "PacketSessionData") -> SessionResult:
     """A sessjonResult scaffold: metadata and the persistent hierarchy keys.
 
@@ -222,15 +247,19 @@ class Sample(NamedTuple):
     drs: int
     ers_store_energy: int
     ers_deploy_mode: int
+    pos_x: float = float('nan')     # word coords / g-force filled when a Motion frame is present
+    pos_z: float = float('nan')
+    g_lat: float = float('nan')
+    g_long: float = float('nan')
 
 
-def telemetry_sample(lap_data, car_telemetry, car_status=None) -> Sample:
+def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> Sample:
     """Combine one frame's player rows into a single trace sample.
     
     `lap_data` / `car_telemetry` are the player's entries from the Lap Data and
-    Car Telemetry packets. `car_status` is the player's Car Status entry:
-    when omitted, the ERS channels are placeholdered with zeros and filled in
-    once the Car Status join is added.
+    Car Telemetry packets. `car_status` is the player's Car Status entry (ERS; zeros when
+    omitted). `motion` is the normalized ``MotionSample`` for the frame - position + g-force -
+    or None (older streams / no Motion), in which case those channels are NaN placeholders.
     """
     if car_status is not None:
         ers_store_energy = car_status.ers_store_energy
@@ -238,6 +267,10 @@ def telemetry_sample(lap_data, car_telemetry, car_status=None) -> Sample:
     else:
         ers_store_energy = 0
         ers_deploy_mode = 0
+    if motion is not None:
+        pos_x, pos_z, g_lat, g_long = motion
+    else:
+        pos_x = pos_z = g_lat = g_long = float('nan')
     return Sample(
         distance=lap_data.lap_distance,
         speed=car_telemetry.speed,
@@ -249,11 +282,21 @@ def telemetry_sample(lap_data, car_telemetry, car_status=None) -> Sample:
         drs=car_telemetry.drs,
         ers_store_energy=ers_store_energy,
         ers_deploy_mode=ers_deploy_mode,
+        pos_x=pos_x,
+        pos_z=pos_z,
+        g_lat=g_lat,
+        g_long=g_long
     )
 
 
 def build_trace(samples: list[Sample]) -> LapTrace:
-    """Transpose a lap's buffered samples into the parallel numpy arrays of a LapTrace."""
+    """Transpose a lap's buffered samples into the parallel numpy arrays of a LapTrace.
+    
+    The four motion channels are collapsed to None when no frame carried Motion (all-NaN), so
+    stream without the Motion packet stores a plain nine-channel trace.
+    """
+    pos_x = np.array([s.pos_x for s in samples], dtype=float)
+    has_motion = pos_x.size > 0 and not np.isnan(pos_x).all()
     return LapTrace(
         distance=np.array([s.distance for s in samples], dtype=float),
         speed=np.array([s.speed for s in samples], dtype=int),
@@ -264,7 +307,11 @@ def build_trace(samples: list[Sample]) -> LapTrace:
         engine_rpm=np.array([s.engine_rpm for s in samples], dtype=int),
         drs=np.array([s.drs for s in samples], dtype=int),
         ers_store_energy=np.array([s.ers_store_energy for s in samples], dtype=int),
-        ers_deploy_mode=np.array([s.ers_deploy_mode for s in samples], dtype=int)
+        ers_deploy_mode=np.array([s.ers_deploy_mode for s in samples], dtype=int),
+        pos_x=pos_x if has_motion else None,
+        pos_z=np.array([s.pos_z for s in samples], dtype=float) if has_motion else None,
+        g_lat=np.array([s.g_lat for s in samples], dtype=float) if has_motion else None,
+        g_long=np.array([s.g_long for s in samples], dtype=float) if has_motion else None,
     )
 
 

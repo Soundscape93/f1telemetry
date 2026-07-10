@@ -52,6 +52,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`models.py`** — frozen dataclasses: `SessionResult` (metadata, hierarchy keys, roster,
   laps, classification, `game_mode`), `Participant`, `Classification`, `ClassificationEntry`
   (incl. `race_number`), `TyreStint`, `Lap`, `LapTrace` (parallel numpy arrays, distance-indexed).
+  `LapTrace` also carries four **optional** motion channels — `pos_x`, `pos_z`, `g_lat`, `g_long`
+  (iteration 2b) — None on laps captured without the Motion packet (`OPTIONAL_CHANNELS`, kept
+  distinct from the nine required `CHANNELS` so `analysis/traces.py` and the overlay are unaffected).
 - **`normalizer.py`** — pure, stateless: `normalize_session`, `normalize_participants`,
   `normalize_classification`, `merge_participant` (roster union across frames),
   `telemetry_sample`, `build_trace`, and the `Sample` tuple. Reads struct fields by name; the
@@ -77,6 +80,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     splits laps on `current_lap_num`, keeps a trace only if it started near the line;
   - takes lap **timing from Session History** (authoritative), not live Lap Data;
   - carries the player's latest Car Status ERS fields forward into each sample;
+  - *(lap-view iteration 2b)* carries the player's latest **Motion** entry forward into each sample
+    (world position + g-force, format-normalized via `motion_sample`), adding the track-map /
+    g-force `LapTrace` channels; carry-forward (not a hard frame-join) so a Motion-less stream
+    still builds laps;
   - *(lap-view iteration 1a)* diffs the player's **Car Setups** packet to build a `setup_history`
     (a new snapshot stamped with the current lap whenever the setup changes), and snapshots per-lap
     **tyre context** + full non-tyre **car damage** at each lap boundary (compound/age from Car
@@ -147,6 +154,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   one lap (per-channel colours, the 1b look) or an **overlay** of several: aligned on a shared grid,
   coloured *and* dash-styled per lap, with a legend row above the plots and a bottom Δ-time row;
   `set_colorblind` swaps in the Okabe-Ito palette (persisted via `ui/settings.py`) for both modes.
+  A g-force row is appended when the lap carries Motion, and `TracePlot` emits `cursor_moved` (the
+  mouse-x mapped to a lap distance, via a pyqtgraph `SignalProxy`). `track_map.py` (`TrackMap`,
+  iteration 2b) is the track-layout panel: an equal-aspect XY path plotted from a lap's
+  `pos_x`/`pos_z` (no track-image assets — works for any circuit), with a marker driven by
+  `cursor_moved`. It negates one axis to correct the left-handed world frame's mirror and closes the
+  path loop so a race lap 1 (grid past the S/F line) still draws a complete outline.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
@@ -170,7 +183,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
   filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
   lap via `LapStore.load` and composes the `components/` lap widgets — lap info + tyre box, the
-  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`. Its
+  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`.
+  When the lap carries Motion it also shows a `TrackMap` panel, wired to the plot's `cursor_moved`
+  signal so hovering a trace moves the marker round the circuit (iteration 2b). Its
   "Compare ▾" menu (iteration 2) lists candidate laps from `comparison.py` and drives `TracePlot`'s
   overlay; `comparison.py` (Qt-free, unit-tested) enumerates them by scope — weekend-fastest,
   same-session, same-weekend — as `LapRef`s loaded on demand via `LapStore.load`. Session uids travel

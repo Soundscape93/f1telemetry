@@ -13,6 +13,7 @@ from .setup_panel import build_setup_table
 from .tables import build_kv_table, cell, clear_layout, fit_table_height, tidy_table
 from .trace_plot import TracePlot
 from .tyre_box import TyreBox
+from .track_map import TrackMap
 
 __all__ = [
     "build_classification_table",
@@ -26,4 +27,5 @@ __all__ = [
     "tidy_table",
     "TracePlot",
     "TyreBox",
+    "TrackMap"
 ]

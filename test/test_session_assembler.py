@@ -89,6 +89,32 @@ def status_pkt(uid, compound=16, visual=16, age=1, player=0):
             tyres_age_laps=age, ers_store_energy=0.0, ers_deploy_mode=0)])
 
 
+def motion_pkt(uid, pos_x, pos_z, g_lat, g_long, frame, player=0):
+    """Fake Motion packet for the player's car (2025 header: g-force already float g)."""
+    return SimpleNamespace(
+        header=_hdr(PacketId.MOTION, uid, frame=frame, player=player),
+        car_motion_data=[SimpleNamespace(
+            world_position_x=pos_x, world_position_y=0.0, world_position_z=pos_z,
+            g_force_lateral=g_lat, g_force_longitudinal=g_long)])
+
+
+def motion_frames(uid, lap_num, points, player=0):
+    """Like `frames`, but each point is (distance, pos_x, pos_z, g_lat, g_long) and a Motion
+    packet precedes the frame's Lap Data + Car Telemetry (same frame id)."""
+    out = []
+    for d, x, z, gl, gL in points:
+        _frame[0] += 1
+        f = _frame[0]
+        out.append(motion_pkt(uid, x, z, gl, gL, frame=f, player=player))
+        out.append(SimpleNamespace(header=_hdr(PacketId.LAP_DATA, uid, frame=f, player=player),
+                                   lap_data=[SimpleNamespace(current_lap_num=lap_num, lap_distance=d)]))
+        out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
+                                   car_telemetry_data=[SimpleNamespace(
+                                       speed=200, throttle=1.0, brake=0.0, steer=0.0,
+                                       gear=7, engine_rpm=10000, drs=0)]))
+    return out
+
+
 def damage_pkt(uid, wear=(0.0, 0.0, 0.0, 0.0), tyre_damage=(0, 0, 0, 0), blisters=(0, 0, 0, 0),
                brakes=(0, 0, 0, 0), player=0, **overrides):
     """Fake Car Damage packet: per-wheel tyre wear/damage/blisters + car-body damage."""
@@ -292,6 +318,54 @@ class TyreContextTest(unittest.TestCase):
         self.assertEqual(lap1.damage.rear_wing, 30)
         self.assertEqual(lap1.damage.floor, 10)
         self.assertFalse(lap1.damage.engine_blown)
+
+
+class MotionChannelsTest(unittest.TestCase):
+    """Iteration 2b: Motion is carried forward into each sample (not a hard frame-join), so a
+    stream with Motion gets position/g-force channels and one without still builds laps."""
+
+    def test_stream_with_motion_populates_channels(self):
+        pts = [(0, 10.0, 20.0, 0.5, -0.2),
+               (1500, 11.0, 21.0, 1.5, 0.3),
+               (3000, 12.0, 22.0, -0.4, 0.8)]
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += motion_frames(1, 1, pts)
+        stream += frames(1, 2, [0, 1500])                 # trailing, dropped (time 0)
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        trace = race.laps[0].trace
+        self.assertTrue(trace.has_motion)
+        self.assertEqual(len(trace.pos_x), len(trace))    # parallel to the distance axis
+        self.assertEqual(trace.pos_x.tolist(), [10.0, 11.0, 12.0])
+        self.assertEqual(trace.pos_z.tolist(), [20.0, 21.0, 22.0])
+        self.assertEqual(trace.g_lat.tolist(), [0.5, 1.5, -0.4])
+
+    def test_stream_without_motion_still_builds(self):
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += frames(1, 1, [0, 1500, 3000])
+        stream += frames(1, 2, [0, 1500])
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        trace = race.laps[0].trace
+        self.assertIsNotNone(trace)                       # lap still built
+        self.assertFalse(trace.has_motion)
+        self.assertIsNone(trace.pos_x)
+
+    def test_motion_carried_forward_not_joined(self):
+        # Motion only on frame 1; the next two frames have no Motion packet of their own. A hard
+        # 3-way join would drop them (no matching Motion) - carry-forward keeps every sample and
+        # reuses the last position, proving the join is Lap+Telemetry only.
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += motion_frames(1, 1, [(0, 10.0, 20.0, 0.5, -0.2)])
+        stream += frames(1, 1, [1500, 3000])              # no Motion on these frames
+        stream += frames(1, 2, [0, 1500])
+        stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
+        (race,) = list(assemble(stream))
+        trace = race.laps[0].trace
+        self.assertEqual(len(trace), 3)                   # all three frames joined, none dropped
+        self.assertTrue(trace.has_motion)
+        self.assertEqual(trace.pos_x.tolist(), [10.0, 10.0, 10.0])   # carried forward
+
 
 
 if __name__ == "__main__":

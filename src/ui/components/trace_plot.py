@@ -12,7 +12,7 @@ from __future__ import annotations
 from  collections.abc import Sequence
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...analysis import traces as trace_prep
@@ -35,7 +35,12 @@ _ROWS: tuple[tuple[tuple[str, ...], str, str], ...] = (
 _PENS = {
     "speed": "#e10600", "throttle": "#3fb950", "brake": "#f85149",
     "gear": "#58a6ff", "steer": "#d29922", "ers_store_energy": "#a371f7",
+    "g_lat": "#58a6ff", "g_long": "#f778ba",
 }
+# optional g-force row, appended after ERS when the lap carries Motion. Lateral
+# longitudinal share on row like throttle/brake: solid = lateral, dashed = longitudinal.
+_GFORCE_ROW: tuple[tuple[str, ...], str, str] = (("g_lat", "g_long"), "G-Force", "g")
+
 # Colour-blind-safe override fo the throttle/brake pair (Okabe-Ito): the default green/red is
 # the classic red-green-confusion pair, so blue/orange reads clearly for all CVD types.
 CB_PENS = {"throttle": "#0072b2", "brake": "#e69f00"}   # blue / orange
@@ -76,7 +81,12 @@ _DELTA_ROW: tuple[tuple[str, ...], str, str] = (("_delta",), "Δ vs ref", "s")
 
 
 class TracePlot(QWidget):
-    """Stacked single-lap telemetry plots; a graceful placeholder when pyqtgraph is absent."""
+    """Stacked single-lap telemetry plots; a graceful placeholder when pyqtgraph is absent.
+    
+    Emits the distance (m) under the mouse as it moves over any plot, so a linked view
+    can move its marker. -1.0 when the curser leaves the plot area.
+    """
+    cursor_moved = Signal(float)      # distance under the mouse, or -1.0 when outside the plot area
 
     def __init__(self, trace: LapTrace | None = None, parent=None, *,
                  colorblind: bool = False) -> None:
@@ -84,6 +94,8 @@ class TracePlot(QWidget):
         self._colorblind = colorblind
         self._trace: list[LapTrace] = []        # current lap(s): 1 = single view, >1 = overlay
         self._labels: list[str | None] = []
+        self._link = None                       # the shared-x plot (source of cursor distance)
+        self._proxy = None                      # kept alive so the mouse SignalProxy isn't GC'd
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -144,8 +156,9 @@ class TracePlot(QWidget):
         pens ={**_PENS, **(CB_PENS if self._colorblind else {})}
         x = np.asanyarray(trace.distance, dtype=float)
         link = None
+        rows = _ROWS + ((_GFORCE_ROW,) if trace.g_lat is not None else ())
         total = _AXIS_PAD
-        for i, (channels, title, unit) in enumerate(_ROWS):
+        for i, (channels, title, unit) in enumerate(rows):
             plot = self._glw.addPlot(row=i, col=0)
             plot.setMinimumHeight(_ROW_HEIGHT)
             plot.setMouseEnabled(x=False, y=False)      # pan/zoom distance only
@@ -174,6 +187,7 @@ class TracePlot(QWidget):
         # clips the lower rows rather han shrinking them.
         self._glw.setFixedHeight(total)
         self.setMaximumHeight(total)
+        self._install_cursor(link)
     
     def _draw_overlay(self, traces: list[LapTrace], labels: list[str | None]) -> None:
         """Overlay several laps: align on a shared grid, colour per lap, add a Δ-time row."""
@@ -181,8 +195,10 @@ class TracePlot(QWidget):
         lap_pens = _CB_LAP_PENS if self._colorblind else _LAP_PENS
         n = min(len(traces), _MAX_OVERLAY)
         traces, labels = traces[:n], labels[:n]
+        g_ok = any(t.g_lat is not None for t in traces)
+        chans = LapTrace.CHANNELS + (("g_lat", "g_long") if g_ok else ())
         try:
-            aligned = trace_prep.align(traces, labels=labels)
+            aligned = trace_prep.align(traces, labels=labels, channels=chans)
         except ValueError:
             # No shared distance overlap (e.g. badly trimmed) - say so instead of crashing.
             self._glw.addLabel("These laps don't share a common distance range to overlay",
@@ -192,7 +208,7 @@ class TracePlot(QWidget):
             return
         x = aligned[0].distance
         deltas = trace_prep.time_deltas(aligned[0], aligned[1:])    # one gap trace per non-ref lap
-        rows = _ROWS + (_DELTA_ROW,)
+        rows = _ROWS + ((_GFORCE_ROW,) if g_ok else ()) + (_DELTA_ROW,)
 
         # A horizontal legend in its own layout row above the plots, so the lap names never sit on
         # top of the traces. pyqtgraph's LegendItem has no `horizontal` flag - it lays entries out in
@@ -242,6 +258,7 @@ class TracePlot(QWidget):
                     plot, channels, [at.channel(c) for at in aligned for c in channels])
         self._glw.setFixedHeight(total)
         self.setMaximumHeight(total)
+        self._install_cursor(link)
 
     def _draw_delta_row(self, plot, x, deltas, lap_pens) -> None:
         """Δ-time row: one non-reference lap's cumulative gap to the reference (0-line = ref)."""
@@ -252,6 +269,23 @@ class TracePlot(QWidget):
             dx, dy = trace_prep.downsample(x, d, max_points=_MAX_POINTS)
             plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2))
         plot.getViewBox().enableAutoRange(axis="y")     # gaps are small + signed - just fit them
+
+    def _install_cursor(self, link) -> None:
+        """Track the mouse over the linked-x plots and emit its distance for a linked view."""
+        self._link = link
+        if link is None:
+            self._proxy = None
+            return
+        pg = self._pg
+        self._proxy = pg.SignalProxy(
+            self._glw.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_move)
+        
+    def _on_mouse_move(self, event) -> None:
+        pos = event[0]  # SignalProxy wraps the original signal in a tuple
+        if self._link is None:
+            return
+        vb = self._link.getViewBox()
+        self.cursor_moved.emit(float(vb.mapSceneToView(pos).x()))
     
     @staticmethod
     def _apply_yrange(plot, channels, trace) -> None:

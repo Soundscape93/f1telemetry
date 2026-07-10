@@ -48,11 +48,22 @@ class LapTrace:
     ers_store_energy: np.ndarray    # joules
     ers_deploy_mode: np.ndarray     # see enums.ERSDeployMode
 
-    # channel field names excluding the distance axis (for storage columns / iteration)
+    # optional motion channels, from the Motion packet. None on laps captured without Motion data;
+    # present laps carry all four together. pos_x/pos_z are world coords (F1's gound plane is X/Z, Y is up)
+    # for the track-map view; g_lat/g_long are g-force (2026 int16 / 1000 at ingest, so already in g here).
+    pos_x: np.ndarray | None = None
+    pos_z: np.ndarray | None = None
+    g_lat: np.ndarray | None = None
+    g_long: np.ndarray | None = None
+
+    # required channel field names excluding the distance axis (storage columns / iteration)
     CHANNELS: ClassVar[tuple[str, ...]] = (
         'speed', 'throttle', 'brake', 'steer', 'gear',
         'engine_rpm', 'drs', 'ers_store_energy', 'ers_deploy_mode'
     )
+
+    # additive motion channels; each is either None (absent) of the same length as 'distance'.
+    OPTIONAL_CHANNELS: ClassVar[tuple[str, ...]] = ('pos_x', 'pos_z', 'g_lat', 'g_long')
 
     def __post_init__(self):
         """Validate that all channels are the same length as the distance axis."""
@@ -63,7 +74,17 @@ class LapTrace:
                 raise ValueError(f"Channel '{name}' has length {length},expected {n} "
                                  f"to match the distance axis."
                                 )
-            
+        for name in self.OPTIONAL_CHANNELS:
+            values = getattr(self, name)
+            if values is not None and len(values) != n:
+                raise ValueError(f"Optional channel '{name}' has length {len(values)}, "
+                                 f"expected {n} to match the distance axis.")
+    
+    @property
+    def has_motion(self) -> bool:
+        """True if the Motion channels (position + g-force) were captured for this lap."""
+        return self.pos_x is not None
+    
     def __len__(self):
         return len(self.distance)
 

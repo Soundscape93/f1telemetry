@@ -69,15 +69,44 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     (a `LapRef` per lap, labelled `Lap N - Slot`); the "Fastest" scope spans the whole weekend and is
     omitted when the viewed lap *is* the fastest. Overlaid laps differ by both **colour and line
     style** (solid/dash/dot/…) and honour the persisted colour-blind palette (Okabe-Ito). All UI
-    wiring over the N-series `analysis/traces.py` — no analysis rewrite. *Next here: iteration 2b.*
-  - *2b — g-force channel + track-layout view.* Both come from routing the **Motion** packet
-    (frame-join like Car Status), so do them together: g-force as an additive `LapTrace` channel
-    (2026 int16/1000), plus `pos_x`/`pos_z` (world coords) channels driving a track-map panel — an
-    equal-aspect plotted **XY path from telemetry** (no per-track image assets; works for any
-    circuit). Hover a trace (distance) → nearest sample index → highlight that point on the map
-    (pyqtgraph `SignalProxy` crosshair). Store raw world coords, normalise at render; `distance`
-    stays the hover index. Channels auto-flow into Parquet via `LapTrace.CHANNELS`; old laps lack
-    position/g-force until re-ingested (detail page already omits absent regions).
+    wiring over the N-series `analysis/traces.py` — no analysis rewrite. *Next here: iteration 2b.1.*
+  - *2b — g-force channel + track-layout view. DONE.* Routes the **Motion** packet (carried forward
+    into each sample, like Car Status — not a hard frame-join, so a Motion-less stream still builds).
+    Adds four optional `LapTrace` channels: `g_lat`/`g_long` (2026 int16 ÷ 1000; the lone
+    format-divergent channel) drawn as a new `TracePlot` row, and `pos_x`/`pos_z` (world coords)
+    driving a new `TrackMap` panel — an equal-aspect plotted **XY path from telemetry** (no per-track
+    image assets; works for any circuit). Hover a trace → nearest sample → marker on the map (via
+    `TracePlot.cursor_moved` + a pyqtgraph `SignalProxy`). `read_trace` tolerates pre-2b files, so
+    old laps degrade gracefully (map/g-row omitted) without re-ingest. *Map orientation:* the
+    left-handed world frame is un-mirrored by negating one axis (fixes CW/CCW); the loop is closed so
+    a race lap 1 (grid past the S/F line) still draws whole. **Absolute rotation follows the game's
+    world frame, not the F1.com map art** — matching broadcast orientation would need a per-track
+    rotation constant, deliberately not shipped (kept asset-free); a possible later opt-in. *The map
+    still uses the selected lap's raw line (varies lap to lap) — a canonical layout is 2b.1, next.*
+  - *2b.1 — canonical track-map refinement.* Make the map look the **same clean shape every time**
+    for a given track, decoupled from the driven line, while keeping hover. Approach: a **canonical
+    centerline = distance-resampled median racing line** over the track's stored (valid) laps —
+    resample each lap's `pos_x`/`pos_z` onto a fixed `0..track_length` grid (out-of-range → NaN),
+    then per-point `nanmedian`. Robust to excursions/defending/missed apexes, and self-heals the
+    lap-1 S/F gap (other laps cover it). Valid because F1 track world coords are fixed geometry —
+    laps aggregate in raw world space with no per-lap alignment. **No Motion Ex needed** for this
+    median-line version; a *true geometric* centerline would need Motion Ex / track-edge / track-width
+    data and stays deferred. New work: a track-keyed lap query (join laps↔sessions on `track_id`), a
+    pure-numpy builder in `analysis/`, a cache (in-memory; optional persisted `track_layouts/` file,
+    keyed by `(track_id, game_format)`), and a `TrackMap` that takes a *layout* + a separate marker
+    *distance*. **Hover unchanged for the user:** `cursor_moved` still emits a distance; the marker
+    snaps to the nearest index on the canonical layout (both are distance-indexed, same world frame),
+    so it rides the clean line at the right spot. *Optional sector colouring:* only if sector-boundary
+    **distances** are available — they are NOT stored today (we keep sector *times*, not distances);
+    the reliable source is the Lap Data per-frame `sector` field (0/1/2), which would be a small
+    additive trace channel (like the 2b motion channels). Without it, keep the track a single colour.
+    Fallback to the selected lap's raw `pos` when a track has too few laps (or a brand-new/custom
+    circuit on its first lap).
+  - *2c — car-body graphic.* A car silhouette with colour-coded tyre + damage zones. ~90% of the
+    data is already stored (tyre wear/damage/blisters on `LapTyreContext`; full car damage on
+    `CarDamage`) — the only new ingest is **tyre carcass/surface + brake temperatures** (Car
+    Telemetry `tyres_surface_temperature`/`tyres_inner_temperature`/`brakes_temperature`, snapshotted
+    at the lap boundary like tyre context). UI-weighted iteration.
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory

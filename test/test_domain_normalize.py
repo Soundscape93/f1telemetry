@@ -8,6 +8,7 @@ from f1telemetry.src.domain.models import Lap, Participant
 from f1telemetry.src.domain.normalizer import (
     Sample,
     build_trace,
+    motion_sample,
     normalize_classification,
     normalize_participants,
     normalize_session,
@@ -108,6 +109,32 @@ class BuildTraceTest(unittest.TestCase):
         self.assertEqual(trace.speed.tolist(), [100, 120])
         self.assertEqual(trace.gear.tolist(), [3, 4])
         self.assertEqual(trace.ers_deploy_mode.tolist(), [1, 2])
+
+
+class MotionSampleTest(unittest.TestCase):
+    """motion_sample reads a CarMotionData entry: world position is float in both formats;
+    g-force is the one format-divergent channel (2026 int16 ÷ 1000, 2025 already float g)."""
+
+    def _entry(self, x=100.0, z=200.0, g_lat=1500, g_long=-750):
+        # world_position_y is present in the struct but unused (Y is 'up'; the map uses X/Z)
+        return SimpleNamespace(
+            world_position_x=x, world_position_y=5.0, world_position_z=z,
+            g_force_lateral=g_lat, g_force_longitudinal=g_long)
+
+    def test_2026_gforce_int16_divided_by_1000(self):
+        m = motion_sample(self._entry(g_lat=1500, g_long=-750), packet_format=2026)
+        self.assertAlmostEqual(m.g_lat, 1.5)
+        self.assertAlmostEqual(m.g_long, -0.75)
+
+    def test_2025_gforce_float_passes_through(self):
+        m = motion_sample(self._entry(g_lat=1.5, g_long=-0.75), packet_format=2025)
+        self.assertAlmostEqual(m.g_lat, 1.5)
+        self.assertAlmostEqual(m.g_long, -0.75)
+
+    def test_world_position_x_z_mapped(self):
+        m = motion_sample(self._entry(x=123.0, z=456.0), packet_format=2026)
+        self.assertAlmostEqual(m.pos_x, 123.0)
+        self.assertAlmostEqual(m.pos_z, 456.0)   # ground plane is X/Z, not X/Y
 
 
 class NormalizeClassificationTest(unittest.TestCase):
