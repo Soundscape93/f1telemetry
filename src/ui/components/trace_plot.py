@@ -40,6 +40,7 @@ _PENS = {
 # optional g-force row, appended after ERS when the lap carries Motion. Lateral
 # longitudinal share on row like throttle/brake: solid = lateral, dashed = longitudinal.
 _GFORCE_ROW: tuple[tuple[str, ...], str, str] = (("g_lat", "g_long"), "G-Force", "g")
+_GFORCE_LABELS = {"g_lat": "Lateral", "g_long": "Longitudinal"}  # single-lap g-force legend entries
 
 # Colour-blind-safe override fo the throttle/brake pair (Okabe-Ito): the default green/red is
 # the classic red-green-confusion pair, so blue/orange reads clearly for all CVD types.
@@ -173,10 +174,19 @@ class TracePlot(QWidget):
                 link = plot
             else:
                 plot.setXLink(link)         # pan/zoom distance together
+            # The g-force row carries two channels told apart by colour; in single-lap mode add a
+            # small in-plot legend so the colours are labelled (lateral vs longitudinal). Overlay
+            # mode skips it - the per-lap legend up top would balloon with N laps x 2 channels.
+            legend = None
+            if channels == _GFORCE_ROW[0]:
+                legend = plot.addLegend(offset=(-10, 10), brush=pg.mkBrush(20, 20, 20, 200),
+                                        pen=pg.mkPen(90, 90, 90), labelTextColor="#f0f0f0")
             for name in channels:
                 y = np.asanyarray(getattr(trace, name), dtype=float)
                 dx, dy = trace_prep.downsample(x, y, max_points=_MAX_POINTS)
-                plot.plot(dx, dy, pen=pg.mkPen(pens.get(name, "#8b949e"), width=2))
+                curve = plot.plot(dx, dy, pen=pg.mkPen(pens.get(name, "#8b949e"), width=2))
+                if legend is not None:
+                    legend.addItem(curve, _GFORCE_LABELS.get(name, name))
             if "gear" in channels:
                 self._style_gear_axis(plot, trace.gear)
             else:
@@ -240,13 +250,18 @@ class TracePlot(QWidget):
             if channels[0] == "_delta":
                 self._draw_delta_row(plot, x, deltas, lap_pens)
                 continue
+            multi = len(channels) > 1       # throttle/brake or g-force row: one plot per channel, but share the y-axis
             for li, at in enumerate(aligned):
                 color = lap_pens[li % len(lap_pens)]
+                lap_style = _LAP_STYLES[li % len(_LAP_STYLES)] # per-lap pattern; index 0 = solid ref
                 for ci, name in enumerate(channels):
                     y = at.channel(name)
                     dx, dy = trace_prep.downsample(x, y, max_points=_MAX_POINTS)
-                    # colour by lap; a 2nd channel sharing the row (brake) is dashed to tell it apart
-                    style = Qt.PenStyle.DashLine if ci else Qt.PenStyle.SolidLine
+                    # single-channel rows; pattern *by lap* alongside he colour, so laps differ two
+                    # wasy at once (reabable in color-blind mode). Mulit-channel rows instead keep
+                    # solid/dashed to separate the channels (throttle vs brake), where colour already
+                    # tells the laps apart
+                    style = (Qt.PenStyle.DashLine if ci else Qt.PenStyle.SolidLine)
                     curve = plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2, style=style))
                     if i == 0 and ci == 0:              # one legend entry per lap, from the speed row
                         legend.addItem(curve, at.label or f"Lap {li + 1}")
@@ -261,13 +276,19 @@ class TracePlot(QWidget):
         self._install_cursor(link)
 
     def _draw_delta_row(self, plot, x, deltas, lap_pens) -> None:
-        """Δ-time row: one non-reference lap's cumulative gap to the reference (0-line = ref)."""
+        """Δ-time row: one non-reference lap's cumulative gap to the reference (0-line = ref).
+        
+        Each gap trace carries the same per-lap colour *and* pattern as the channel rows, so a lap
+        is identified the same way in every row (and stays legible under colour-vision deficiency).
+        """
         pg = self._pg
-        plot.addLine(y=0, pen=pg.mkPen(lap_pens[0], width=1, style=Qt.PenStyle.DashLine))
+        # The reference lap sits on y=0; draw it in the reference colour + its own pattern (index 0).
+        plot.addLine(y=0, pen=pg.mkPen(lap_pens[0], width=1, style=_LAP_STYLES[0]))
         for li, d in enumerate(deltas, start=1):
             color = lap_pens[li % len(lap_pens)]
             dx, dy = trace_prep.downsample(x, d, max_points=_MAX_POINTS)
-            plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2))
+            style = _LAP_STYLES[li % len(_LAP_STYLES)]
+            plot.plot(dx, dy, pen=pg.mkPen(color=color, width=2, style=style))
         plot.getViewBox().enableAutoRange(axis="y")     # gaps are small + signed - just fit them
 
     def _install_cursor(self, link) -> None:
