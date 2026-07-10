@@ -142,17 +142,19 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   routing the **Motion** packet added a g-force `TracePlot` row plus a `TrackMap` XY-path panel with
   a hover marker (`cursor_moved`). The map un-mirrors the left-handed world frame and closes the loop
   so a race lap 1 draws whole; absolute rotation follows the game frame, not F1.com map art (no
-  per-track assets). The map still uses the *selected lap's* raw line, so its shape varies lap to
-  lap — a canonical layout is the next refinement. Dashboard / Sessions / Analytics remain placeholders.
-- **Next:** lap-view **2b.1 — canonical track-map refinement.** Make the map a clean, identical
-  shape per track: a **distance-resampled median racing line** over the track's stored laps (fixed
-  `0..track_length` grid, per-point `nanmedian` of `pos_x`/`pos_z`), decoupled from the driven line.
-  Hover still uses distance-along-lap mapping onto that canonical layout. **No Motion Ex needed** for
-  the median line; a true geometric centerline (needs Motion Ex / track-edge/width) stays deferred.
-  Optional sector colouring only if we add the Lap Data per-frame `sector` field (a small additive
-  trace channel) — sector *distances* aren't stored today. Then **2c** — a car-body graphic
-  (colour-coded tyre + damage zones; only new ingest is tyre/brake temps). Also pending: the
-  Analytics surface and an edit-calendar action. See `docs/ROADMAP.md`.
+  per-track assets). **2b.1 made the map canonical:** it now draws a **distance-resampled median
+  racing line** over the race weekend's valid Motion laps (`analysis/track_layout` +
+  `ui/laps/track_layouts`), so the shape is clean and identical per track regardless of the viewed
+  lap; too few laps → it falls back to the driven line. Dashboard / Sessions / Analytics remain
+  placeholders.
+- **Next:** lap-view **2c — a car-body graphic** (a car silhouette with colour-coded tyre + damage
+  zones). ~90% of its data is already stored (`LapTyreContext` + `CarDamage`); the only new ingest is
+  **tyre carcass/surface + brake temperatures**. Deferred from 2b.1: **sector colouring** on the map
+  (needs the Lap Data per-frame `sector` field as a small additive trace channel — sector *distances*
+  aren't stored today, only sector *times*) and **automatic canonical-map cache refresh** (the
+  in-memory layout cache isn't invalidated on a mid-run re-ingest — fine for personal use, to be made
+  automatic before any release, likely after 2c). Also pending: the Analytics surface and an
+  edit-calendar action. See `docs/ROADMAP.md`.
 
 ## Where to look
 

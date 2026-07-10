@@ -106,13 +106,14 @@ registered already; the work is routing them in `feed()` and snapshotting at the
   Also: a race **lap 1** starts at the grid slot (past the S/F line), so its trace misses the
   line→grid piece of the main straight; `TrackMap` closes the path loop to fill that gap generally.
 - **Sector boundaries are stored as TIMES, not DISTANCES** (Session History `sector{1,2,3}_time_*`).
-  There is no sector-boundary *distance* in what we persist today, so the 2b.1 track map can't colour
-  sectors from stored data alone. The reliable source **is** available in Lap Data: a per-frame
-  `sector` field (`0/1/2`; parsed already, but the assembler currently reads only `lap_distance` from
-  Lap Data). Capturing it as a small additive trace channel (like the 2b motion channels) yields the
-  exact distances where the sector index increments — the boundaries the canonical map would colour.
-  A no-new-ingest approximation exists (integrate `elapsed_time` over the trace, cross the stored
-  sector times) but is only approximate; prefer the `sector` channel if sector colouring is wanted.
+  There is no sector-boundary *distance* in what we persist today, so the 2b.1 canonical track map
+  can't colour sectors from stored data alone — **sector colouring was deferred; the map stays one
+  colour.** The reliable source **is** available in Lap Data: a per-frame `sector` field (`0/1/2`;
+  parsed already, but the assembler currently reads only `lap_distance` from Lap Data). Capturing it
+  as a small additive trace channel (like the 2b motion channels) yields the exact distances where
+  the sector index increments — the boundaries the canonical map would colour. A no-new-ingest
+  approximation exists (integrate `elapsed_time` over the trace, cross the stored sector times) but
+  is only approximate; prefer the `sector` channel if sector colouring is wanted.
 
 ## Session type: Sprint Race == Race (both report 15)
 The game reports `session_type` **RACE (15)** for *both* the Sprint Race and the Grand Prix — a

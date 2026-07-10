@@ -126,6 +126,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `downsample` (stride-decimate parallel arrays for the chart). **N-series-aware** (every entry point
   takes a *list* of traces) — exactly what the iteration-2 overlay is built on: the overlay/delta are
   pure UI wiring over `align` + `time_deltas`, with no change to this module.
+- **`track_layout.py`** *(lap-view iteration 2b.1)* — the canonical track-map builder, pure numpy: a
+  `TrackLayout` value object plus `build_layout(traces)` — resample each lap's `pos_x`/`pos_z` onto
+  one shared distance grid (min-start..max-end, out-of-range → NaN so a lap doesn't vote past its
+  span) and take the per-point `nanmedian`, giving one clean median racing line per track. Robust to
+  single-lap excursions and self-heals the lap-1 S/F gap; returns `None` below `_MIN_LAPS` (3) so the
+  caller falls back to the driven line. Deliberately *not* built on `traces.align` (which shrinks to
+  the laps' overlap and would re-open that gap). Store-free — the weekend lap gathering lives in
+  `ui/laps/track_layouts.py`.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.
@@ -156,10 +164,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `set_colorblind` swaps in the Okabe-Ito palette (persisted via `ui/settings.py`) for both modes.
   A g-force row is appended when the lap carries Motion, and `TracePlot` emits `cursor_moved` (the
   mouse-x mapped to a lap distance, via a pyqtgraph `SignalProxy`). `track_map.py` (`TrackMap`,
-  iteration 2b) is the track-layout panel: an equal-aspect XY path plotted from a lap's
-  `pos_x`/`pos_z` (no track-image assets — works for any circuit), with a marker driven by
-  `cursor_moved`. It negates one axis to correct the left-handed world frame's mirror and closes the
-  path loop so a race lap 1 (grid past the S/F line) still draws a complete outline.
+  iteration 2b) is the track-layout panel: an equal-aspect XY path plotted from `pos_x`/`pos_z` (no
+  track-image assets — works for any circuit), with a marker driven by `cursor_moved`. `set_layout`
+  draws the canonical median line for the track (iteration 2b.1); `set_trace` is the driven-lap
+  fallback; both share a `_render` that negates one axis to correct the left-handed world frame's
+  mirror and closes the path loop so a race lap 1 (grid past the S/F line) still draws a complete
+  outline.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
@@ -185,7 +195,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   lap via `LapStore.load` and composes the `components/` lap widgets — lap info + tyre box, the
   damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`.
   When the lap carries Motion it also shows a `TrackMap` panel, wired to the plot's `cursor_moved`
-  signal so hovering a trace moves the marker round the circuit (iteration 2b). Its
+  signal so hovering a trace moves the marker round the circuit (iteration 2b). The map draws the
+  **canonical median line** for the whole race weekend when available (iteration 2b.1), falling back
+  to the driven lap's own line; `track_layouts.py` (`TrackLayoutProvider`, Qt-free) does the
+  cross-store walk — every valid Motion lap across the sessions sharing this one's `weekend_link_id`
+  at the same `track_id` — feeds them to `analysis.track_layout.build_layout`, and caches the result
+  keyed `(weekend_link_id, track_id)`. Its
   "Compare ▾" menu (iteration 2) lists candidate laps from `comparison.py` and drives `TracePlot`'s
   overlay; `comparison.py` (Qt-free, unit-tested) enumerates them by scope — weekend-fastest,
   same-session, same-weekend — as `LapRef`s loaded on demand via `LapStore.load`. Session uids travel

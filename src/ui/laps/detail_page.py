@@ -46,6 +46,7 @@ from .comparison import (
     best_lap_label,
     candidate_laps,
 )
+from .track_layout import TrackLayoutProvider
 
 _MAX_COMPARE = 5    # base lap + up to this many overlaid laps (kept ≤ TracePlot's palette)
 
@@ -59,7 +60,8 @@ class DetailPage(QWidget):
         super().__init__(parent)
         self._sessions = session_store
         self._laps = lap_store
-        self._colorblind = trace_colorblind()  # throttle/brake palette reference, persisted
+        self._layouts = TrackLayoutProvider(session_store, lap_store)
+        self._colorblind = trace_colorblind()  # colorblind reference, persisted
         self._plot: TracePlot | None = None
         self._base_trace = None
         self._base_lap_number: int | None = None
@@ -126,13 +128,19 @@ class DetailPage(QWidget):
         self._compare_actions = []
         self._plot = TracePlot(lap.trace, colorblind=self._colorblind) if lap.trace is not None else None
 
-        # track map: only when this lap carries Motion; hover on the traces moves its marker
+        # track map: only when this lap carries Motion; hover on the traces moves its marker.
+        # Prefer the canonical median line for the whole weekend; fall back to this lap's own
+        # line when the weekend has to few Motion laps to build a stable median.
         if lap.trace is not None and lap.trace.has_motion:
-            track_map = TrackMap(lap.trace)
-            self._body.addWidget(self._panel("Track map", track_map))
+            track_map = TrackMap()
+            layout = self._layouts.layout_for(uid)
+            if layout is not None:
+                track_map.set_layout(layout)
+            else:
+                track_map.set_trace(lap.trace)
+            self._body.addWidget(self._panel("Track Map", track_map))
             if self._plot is not None:
                 self._plot.cursor_moved.connect(track_map.set_cursor_distance)
-
 
         caption_host = QWidget()
         caption_row = QHBoxLayout(caption_host)

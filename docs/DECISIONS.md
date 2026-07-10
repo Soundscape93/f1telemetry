@@ -213,20 +213,32 @@ what would trigger revisiting it.
   correct without it. Store **raw** world coords (normalise/transform only at render) so no
   information is thrown away.
 - **Canonical track map is a distance-resampled *median racing line*, not one lap's line (iteration
-  2b.1, planned).** 2b draws the *selected lap's* raw `pos_x`/`pos_z`, so the shape shifts lap to lap
+  2b.1).** 2b drew the *selected lap's* raw `pos_x`/`pos_z`, so the shape shifted lap to lap
   (defending, missed apex, off-track, a wider line). 2b.1 makes the map identical-and-clean per track
-  by aggregating: resample each of the track's stored (valid) laps onto a fixed `0..track_length`
-  distance grid (out-of-range → NaN) and take the per-point `nanmedian`. This is robust to
-  single-lap excursions and self-heals the lap-1 S/F gap (other laps cover it). It's valid *without*
-  any alignment step because **F1 track world coordinates are fixed geometry** — the same point is
-  the same `pos_x`/`pos_z` across laps and sessions. **No Motion Ex needed:** this is a *median
-  racing line*, the honest achievable version; a *true geometric centerline* would need track-edge /
-  track-width data (Motion Ex) and stays deferred. Hover is unchanged for the user — both the viewed
-  lap and the canonical layout are distance-indexed, so `cursor_moved` (a distance) snaps the marker
-  to the canonical layout's nearest index. *Sector colouring* is gated on having sector-boundary
-  **distances**, which we don't store (only sector *times*); the reliable source is the Lap Data
-  per-frame `sector` field as a small additive channel — until then the track stays one colour.
-  *Fallback:* too few laps (or a first-lap/custom track) → the selected lap's raw line.
+  by aggregating: resample each usable lap onto one shared distance grid and take the per-point
+  `nanmedian` (`analysis/track_layout.build_layout`; `_GRID_NUM` = 1000 points). Grid points outside
+  a lap's own distance span are masked to NaN so it doesn't vote where it has no data; the grid runs
+  min-start..max-end across the laps so its endpoints are always covered (no leading/trailing NaN).
+  The median is robust to single-lap excursions and self-heals the lap-1 S/F gap (other laps cover
+  it). It's valid *without* any alignment step because **F1 track world coordinates are fixed
+  geometry** — the same point is the same `pos_x`/`pos_z` across laps and sessions; deliberately
+  *not* built on `traces.align` (which shrinks to the laps' overlap and would re-open that gap).
+  **No Motion Ex needed:** this is a *median racing line*, the honest achievable version; a *true
+  geometric centerline* would need track-edge / track-width data (Motion Ex) and stays deferred.
+  **Scope is the race weekend, not one session:** a single qualifying session rarely has ≥3 valid
+  timed laps, so `ui/laps/track_layouts.TrackLayoutProvider` gathers every valid Motion lap across
+  the sessions sharing a `weekend_link_id` at the same `track_id`, builds the layout, and caches it
+  keyed `(weekend_link_id, track_id)`. Below `_MIN_LAPS` (3) usable laps → `build_layout` returns
+  `None` and `TrackMap` falls back to `set_trace` (the driven line); the handedness/loop-close
+  corrections live in `TrackMap._render`, shared by both paths, and `TrackLayout` keeps raw coords.
+  Hover is unchanged for the user — both the viewed lap and the canonical layout are distance-indexed,
+  so `cursor_moved` (a distance) snaps the marker to the canonical layout's nearest index. *Sector
+  colouring was deferred* — it needs sector-boundary **distances**, which we don't store (only sector
+  *times*); the reliable route is the Lap Data per-frame `sector` field as a small additive channel,
+  so until then the track stays one colour. *Cache refresh:* the provider's in-memory cache is not
+  invalidated on a mid-run re-ingest (a stale weekend layout persists until app restart) — fine for
+  personal/testing use, to be made automatic before any release (likely after 2c; see ROADMAP);
+  a persisted `track_layouts/*.parquet` cache also stays deferred.
 - **Lap detail composes reusable components over the 1a data split; visuals follow the game HUD.**
   The lap detail page (`ui/laps/detail_page.py`) is assembly only — it maps the 1a model straight to
   widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order), full `CarDamage`

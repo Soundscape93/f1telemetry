@@ -81,27 +81,29 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     left-handed world frame is un-mirrored by negating one axis (fixes CW/CCW); the loop is closed so
     a race lap 1 (grid past the S/F line) still draws whole. **Absolute rotation follows the game's
     world frame, not the F1.com map art** — matching broadcast orientation would need a per-track
-    rotation constant, deliberately not shipped (kept asset-free); a possible later opt-in. *The map
-    still uses the selected lap's raw line (varies lap to lap) — a canonical layout is 2b.1, next.*
-  - *2b.1 — canonical track-map refinement.* Make the map look the **same clean shape every time**
-    for a given track, decoupled from the driven line, while keeping hover. Approach: a **canonical
-    centerline = distance-resampled median racing line** over the track's stored (valid) laps —
-    resample each lap's `pos_x`/`pos_z` onto a fixed `0..track_length` grid (out-of-range → NaN),
-    then per-point `nanmedian`. Robust to excursions/defending/missed apexes, and self-heals the
+    rotation constant, deliberately not shipped (kept asset-free); a possible later opt-in.
+  - **2b.1 — canonical track-map refinement (DONE).** The map now draws the **same clean shape every
+    time** for a track, decoupled from the driven line, hover intact. A **canonical centerline =
+    distance-resampled median racing line** (`analysis/track_layout.build_layout`): resample each
+    usable lap's `pos_x`/`pos_z` onto one shared distance grid (out-of-range → NaN), then per-point
+    `nanmedian` (1000 points). Robust to excursions/defending/missed apexes, and self-heals the
     lap-1 S/F gap (other laps cover it). Valid because F1 track world coords are fixed geometry —
-    laps aggregate in raw world space with no per-lap alignment. **No Motion Ex needed** for this
+    laps aggregate in raw world space with no per-lap alignment (deliberately not `traces.align`,
+    which would shrink to the overlap and re-open that gap). **No Motion Ex needed** for this
     median-line version; a *true geometric* centerline would need Motion Ex / track-edge / track-width
-    data and stays deferred. New work: a track-keyed lap query (join laps↔sessions on `track_id`), a
-    pure-numpy builder in `analysis/`, a cache (in-memory; optional persisted `track_layouts/` file,
-    keyed by `(track_id, game_format)`), and a `TrackMap` that takes a *layout* + a separate marker
-    *distance*. **Hover unchanged for the user:** `cursor_moved` still emits a distance; the marker
-    snaps to the nearest index on the canonical layout (both are distance-indexed, same world frame),
-    so it rides the clean line at the right spot. *Optional sector colouring:* only if sector-boundary
-    **distances** are available — they are NOT stored today (we keep sector *times*, not distances);
-    the reliable source is the Lap Data per-frame `sector` field (0/1/2), which would be a small
-    additive trace channel (like the 2b motion channels). Without it, keep the track a single colour.
-    Fallback to the selected lap's raw `pos` when a track has too few laps (or a brand-new/custom
-    circuit on its first lap).
+    data and stays deferred. **Scope is the whole race weekend** (a lone quali session rarely has ≥3
+    valid timed laps): `ui/laps/track_layouts.TrackLayoutProvider` gathers valid Motion laps across
+    the sessions sharing a `weekend_link_id` at the same `track_id`, builds the layout, and caches it
+    keyed `(weekend_link_id, track_id)`. `TrackMap.set_layout` draws it; below `_MIN_LAPS` (3) usable
+    laps it falls back to `set_trace` (the driven line). **Hover unchanged:** `cursor_moved` still
+    emits a distance; the marker snaps to the nearest index on the canonical layout (both
+    distance-indexed, same world frame). *Deferred follow-ups:* **sector colouring** — needs
+    sector-boundary **distances**, NOT stored today (we keep sector *times*); the reliable route is
+    the Lap Data per-frame `sector` field (0/1/2) as a small additive trace channel — until then the
+    track stays one colour. **Automatic cache refresh** — the provider's in-memory cache isn't
+    invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
+    for personal/testing use, to be made automatic before any release to friends/users (likely after
+    2c, unless it bites earlier). A persisted `track_layouts/*.parquet` cache also stays deferred.
   - *2c — car-body graphic.* A car silhouette with colour-coded tyre + damage zones. ~90% of the
     data is already stored (tyre wear/damage/blisters on `LapTyreContext`; full car damage on
     `CarDamage`) — the only new ingest is **tyre carcass/surface + brake temperatures** (Car
