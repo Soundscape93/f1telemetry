@@ -12,8 +12,8 @@ by default if a capture is present.
 
 Run::
 
-    python -m unittest f1telemetry.test.integration_replay_tests
-    python -m unittest f1telemetry.test.integration_replay_tests.ReplayIntegrationTest.test_replay_race_2026
+    python -m unittest f1telemetry.test.integrationtest.test_integration_replay
+    python -m unittest f1telemetry.test.integrationtest.test_integration_replay.ReplayIntegrationTest.test_replay_race_2026
 """
 
 from __future__ import annotations
@@ -25,6 +25,10 @@ from f1telemetry.src.ingest.sources import FileReplaySource
 from f1telemetry.src.protocol.parser import PacketParser
 from f1telemetry.src.protocol.registry import build_registry
 
+_WORKSPACE_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+
 
 class ReplayIntegrationTest(unittest.TestCase):
     """Replay real captures and verify complete parsing with zero drops."""
@@ -32,10 +36,7 @@ class ReplayIntegrationTest(unittest.TestCase):
     @staticmethod
     def _capture_path(filename: str) -> str:
         """Resolve capture file path relative to workspace root."""
-        workspace_root = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        return os.path.join(workspace_root, filename)
+        return os.path.join(_WORKSPACE_ROOT, filename)
 
     def _replay_and_verify(self, capture_filename: str) -> None:
         """Replay a capture file and assert zero drops.
@@ -72,10 +73,7 @@ class ReplayIntegrationTest(unittest.TestCase):
         )
 
     @unittest.skipIf(
-        not os.path.exists(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "race_2026.f1cap"
-        )),
+        not os.path.exists(os.path.join(_WORKSPACE_ROOT, "race_2026.f1cap")),
         "race_2026.f1cap not found; skipping (optional integration test)"
     )
     def test_replay_race_2026(self) -> None:
@@ -83,10 +81,7 @@ class ReplayIntegrationTest(unittest.TestCase):
         self._replay_and_verify("race_2026.f1cap")
 
     @unittest.skipIf(
-        not os.path.exists(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "my_race.f1cap"
-        )),
+        not os.path.exists(os.path.join(_WORKSPACE_ROOT, "my_race.f1cap")),
         "my_race.f1cap not found; skipping (optional integration test)"
     )
     def test_replay_my_race(self) -> None:
