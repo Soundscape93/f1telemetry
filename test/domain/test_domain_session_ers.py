@@ -165,6 +165,10 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                         gear=7,
                         engine_rpm=10000,
                         drs=1,
+                        tyres_surface_temperature=(90, 90, 90, 90),
+                        tyres_inner_temperature=(95, 95, 95, 95),
+                        brakes_temperature=(300, 300, 300, 300),
+                        engine_temperature=110,
                     )
                 ],
             )
@@ -216,6 +220,10 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                         gear=8,
                         engine_rpm=10500,
                         drs=1,
+                        tyres_surface_temperature=(90, 90, 90, 90),
+                        tyres_inner_temperature=(95, 95, 95, 95),
+                        brakes_temperature=(300, 300, 300, 300),
+                        engine_temperature=110,
                     )
                 ],
             )

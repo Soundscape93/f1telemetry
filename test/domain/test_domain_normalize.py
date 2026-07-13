@@ -9,8 +9,10 @@ from f1telemetry.src.domain.normalizer import (
     Sample,
     build_trace,
     motion_sample,
+    normalize_car_damage,
     normalize_classification,
     normalize_participants,
+    normalize_tyre_context,
     normalize_session,
 )
 from f1telemetry.src.protocol.enums import Formula, ResultStatus, SessionType, Weather
@@ -228,6 +230,51 @@ class ModelPropertiesTest(unittest.TestCase):
                       sector3_ms=None, is_valid=False, trace=None)
         self.assertTrue(complete.is_complete)
         self.assertFalse(partial.is_complete)
+
+
+class NormalizeTemperaturesTest(unittest.TestCase):
+    """Lap-boundary temperature snapshots (2c) read Car Telemetry; absent source -> zeros."""
+
+    def _status(self):
+        return SimpleNamespace(actual_tyre_compound=17, visual_tyre_compound=16, tyres_age_laps=4)
+
+    def _damage(self):
+        return SimpleNamespace(
+            tyres_wear=(5.0, 6.0, 7.0, 8.0), tyres_damage=(1, 2, 3, 4), tyre_blisters=(0, 1, 0, 1),
+            brakes_damage=(1, 2, 3, 4), front_left_wing_damage=5, front_right_wing_damage=6,
+            rear_wing_damage=7, floor_damage=8, diffuser_damage=9, sidepod_damage=10,
+            gearbox_damage=11, engine_damage=12, engine_mguh_wear=1, engine_es_wear=2,
+            engine_ce_wear=3, engine_ice_wear=4, engine_mguk_wear=5, engine_tc_wear=6,
+            drs_fault=False, ers_fault=False, engine_blown=False, engine_seized=False,
+        )
+
+    def _telemetry(self):
+        return SimpleNamespace(
+            tyres_surface_temperature=(95, 96, 90, 91),
+            tyres_inner_temperature=(100, 101, 88, 89),
+            brakes_temperature=(350, 360, 420, 430),
+            engine_temperature=118,
+        )
+
+    def test_tyre_context_reads_temps(self):
+        tc = normalize_tyre_context(self._status(), self._damage(), self._telemetry())
+        self.assertEqual(tc.surface_temp, (95, 96, 90, 91))
+        self.assertEqual(tc.carcass_temp, (100, 101, 88, 89))
+        self.assertEqual(tc.wear, (5.0, 6.0, 7.0, 8.0))  # unchanged
+
+    def test_car_damage_reads_temps(self):
+        dmg = normalize_car_damage(self._damage(), self._telemetry())
+        self.assertEqual(dmg.brake_temp, (350, 360, 420, 430))
+        self.assertEqual(dmg.engine_temp, 118)
+        self.assertEqual(dmg.rear_wing, 7)  # unchanged
+
+    def test_missing_telemetry_defaults_to_zero(self):
+        tc = normalize_tyre_context(self._status(), self._damage())          # no telemetry
+        dmg = normalize_car_damage(self._damage())
+        self.assertEqual(tc.surface_temp, (0, 0, 0, 0))
+        self.assertEqual(tc.carcass_temp, (0, 0, 0, 0))
+        self.assertEqual(dmg.brake_temp, (0, 0, 0, 0))
+        self.assertEqual(dmg.engine_temp, 0)
 
     
 if __name__ == "__main__":

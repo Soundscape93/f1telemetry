@@ -118,6 +118,8 @@ class LapRow(Base):
     tyre_wear: Mapped[list | None] = mapped_column(JSON, nullable=True)      # per-wheel wear %, RL,RR,FL,FR
     tyre_damage: Mapped[list | None] = mapped_column(JSON, nullable=True)    # per-wheel tyre damage %
     tyre_blisters: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel blister %
+    tyre_surface_temp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel tyre surface temp °C
+    tyre_carcass_temp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel tyre inner/carcass temp °C
     damage: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # non-tyre CarDamage snapshot
 
 

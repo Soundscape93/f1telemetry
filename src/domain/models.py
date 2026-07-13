@@ -94,8 +94,9 @@ class LapTyreContext:
     """The player's tyre state caputred at the end of one lap (as the car crosses the line).
     
     Wear is cumulative over the stint (a percentage per wheel), so this is a boundary snapshot,
-    not a per-frame trace channel. Compund and age come from Car Status; wear from Car Damage.
-    Wheel order is RL, RR, FL, FR throughout, matching the UDP spec.
+    not a per-frame trace channel. Compund and age come from Car Status; wear from Car Damage;
+    the surface/carcass temperatures from Car Telemetry. Wheel order is RL, RR, FL, FR throughout,
+    matching the UDP spec.
     """
 
     actual_compound: int                        # see enums.ActualTyreCompound
@@ -104,6 +105,8 @@ class LapTyreContext:
     wear: tuple[float, float, float, float]     # RL, RR, FL, FR (0.0..100.0 %)
     damage: tuple[int, int, int, int] = (0, 0, 0, 0)           # per wheel a damage %
     blisters: tuple[int, int, int, int] = (0, 0, 0, 0)          # per wheel a blister %
+    surface_temp: tuple[int, int, int, int] = (0, 0, 0, 0)      # per wheel surface temp °C, RL,RR,FL,FR
+    carcass_temp: tuple[int, int, int, int] = (0, 0, 0, 0)       # per wheel inner/carcass temp °C (primary readout)
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,8 @@ class CarDamage:
     ers_fault: bool
     engine_blown: bool
     engine_seized: bool
+    brake_temp: tuple[int, int, int, int] = (0, 0, 0, 0)  # per-wheel brake temp °C, RL, RR, FL, FR (Car Telemetry)
+    engine_temp: int = 0                                   # engine temp °C (Car Telemetry)
 
 
 @dataclass(frozen=True)

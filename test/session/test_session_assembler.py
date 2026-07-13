@@ -76,7 +76,11 @@ def frames(uid, lap_num, distances, player=0):
         out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
                                    car_telemetry_data=[SimpleNamespace(
                                        speed=200, throttle=1.0, brake=0.0, steer=0.0,
-                                       gear=7, engine_rpm=10000, drs=0)]))
+                                       gear=7, engine_rpm=10000, drs=0,
+                                       tyres_surface_temperature=(90, 90, 90, 90),
+                                       tyres_inner_temperature=(95, 95, 95, 95),
+                                       brakes_temperature=(300, 300, 300, 300),
+                                       engine_temperature=110)]))
     return out
 
 
@@ -111,7 +115,11 @@ def motion_frames(uid, lap_num, points, player=0):
         out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
                                    car_telemetry_data=[SimpleNamespace(
                                        speed=200, throttle=1.0, brake=0.0, steer=0.0,
-                                       gear=7, engine_rpm=10000, drs=0)]))
+                                       gear=7, engine_rpm=10000, drs=0,
+                                       tyres_surface_temperature=(90, 90, 90, 90),
+                                       tyres_inner_temperature=(95, 95, 95, 95),
+                                       brakes_temperature=(300, 300, 300, 300),
+                                       engine_temperature=110)]))
     return out
 
 
@@ -302,6 +310,8 @@ class TyreContextTest(unittest.TestCase):
         self.assertEqual(context.actual_compound, 16)
         self.assertEqual(context.age_laps, 2)
         self.assertEqual(context.wear, (5.0, 6.0, 7.0, 8.0))
+        self.assertEqual(context.surface_temp, (90, 90, 90, 90))
+        self.assertEqual(context.carcass_temp, (95, 95, 95, 95))
 
     def test_car_damage_snapshotted_at_lap_boundary(self):
         stream = [session_pkt(1), participants_pkt(1)]
@@ -318,6 +328,8 @@ class TyreContextTest(unittest.TestCase):
         self.assertEqual(lap1.damage.rear_wing, 30)
         self.assertEqual(lap1.damage.floor, 10)
         self.assertFalse(lap1.damage.engine_blown)
+        self.assertEqual(lap1.damage.brake_temp, (300, 300, 300, 300))
+        self.assertEqual(lap1.damage.engine_temp, 110)
 
 
 class MotionChannelsTest(unittest.TestCase):

@@ -140,6 +140,8 @@ class LapStore:
             tyre_wear=list(tc.wear) if tc else None,
             tyre_damage=list(tc.damage) if tc else None,
             tyre_blisters=list(tc.blisters) if tc else None,
+            tyre_surface_temp=list(tc.surface_temp) if tc else None,
+            tyre_carcass_temp=list(tc.carcass_temp) if tc else None,
             damage=dataclasses.asdict(lap.damage) if lap.damage else None,
         )
     
@@ -153,10 +155,16 @@ class LapStore:
                 wear=tuple(row.tyre_wear or (0.0, 0.0, 0.0, 0.0)),
                 damage=tuple(row.tyre_damage or (0, 0, 0, 0)),
                 blisters=tuple(row.tyre_blisters or (0, 0, 0, 0)),
+                surface_temp=tuple(row.tyre_surface_temp or (0, 0, 0, 0)),
+                carcass_temp=tuple(row.tyre_carcass_temp or (0, 0, 0, 0))
             )
         damage = None
         if row.damage is not None:
-            damage = CarDamage(**{**row.damage, "brakes": tuple(row.damage["brakes"])})
+            fields = dict(row.damage)
+            fields["brakes"] = tuple(fields["brakes"])
+            if fields.get("brake_temp") is not None:
+                fields["brake_temp"] = tuple(fields["brake_temp"])
+            damage = CarDamage(**fields)
         trace = None
         if with_trace and row.trace_path:
             trace = read_trace(str(self._trace_dir / row.trace_path))

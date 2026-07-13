@@ -18,7 +18,9 @@ definitions. Important names are:
     participant entry:      ai_controlled, driver_id, network_id, team_id, race_number, 
                             nationality, name
     lap-data entry:         lap_distance (read here; current_lap_enum / timing read by the assembler)
-    car-telemetry entry:    speed, throttle, brake, steer, gear, engine_rpm, drs
+    car-telemetry entry:    speed, throttle, brake, steer, gear, engine_rpm, drs;
+                            tyres_surface_temperature, tyres_inner_temperature,
+                            brakes_temperature, engine_temperature (lap-boundary temps)
     car-status entry:       ers_store_energy, ers_deploy_mode
 """
 from __future__ import annotations
@@ -133,12 +135,13 @@ def normalize_setup(setup) -> Setup:
     )
 
 
-def normalize_tyre_context(car_status, car_damage=None) -> LapTyreContext:
+def normalize_tyre_context(car_status, car_damage=None, car_telemetry=None) -> LapTyreContext:
     """Snapshot the player's tyre state at a lap boundary.
     
     `car_status` is the player's CarStatusData entry (compound + age); `car_damage` is the
-    player's CarDamageData entry (per-wheel wear %, damage %, blisters %). All wheel arrays are
-    read in order RL, RR, FL, FR; when no Car Damage frame has arrived yet they fall back to zeros.
+    player's CarDamageData entry (per-wheel wear %, damage %, blisters %); `car_telemetry` is the
+    player's CarTelemetryData entry (per-wheel surface temp °C + inner/carcass temp °C). All wheel
+    arrays are read in order RL, RR, FL, FR; a source not yet seen falls back to zeros.
     """
     if car_damage is not None:
         wear = tuple(float(w) for w in car_damage.tyres_wear)
@@ -146,6 +149,11 @@ def normalize_tyre_context(car_status, car_damage=None) -> LapTyreContext:
         blisters = tuple(int(b) for b in car_damage.tyre_blisters)
     else:
         wear, damage, blisters = (0.0, 0.0, 0.0, 0.0), (0, 0, 0, 0), (0, 0, 0, 0)
+    if car_telemetry is not None:
+        surface_temp = tuple(int(t) for t in car_telemetry.tyres_surface_temperature)
+        carcass_temp = tuple(int(t) for t in car_telemetry.tyres_inner_temperature)
+    else:
+        surface_temp, carcass_temp = (0, 0, 0, 0), (0, 0, 0, 0)
     return LapTyreContext(
         actual_compound=car_status.actual_tyre_compound,
         visual_compound=car_status.visual_tyre_compound,
@@ -153,15 +161,24 @@ def normalize_tyre_context(car_status, car_damage=None) -> LapTyreContext:
         wear=wear,
         damage=damage,
         blisters=blisters,
+        surface_temp=surface_temp,
+        carcass_temp=carcass_temp
     )
 
 
-def normalize_car_damage(car_damage) -> CarDamage:
+def normalize_car_damage(car_damage, car_telemetry=None) -> CarDamage:
     """Convert the player's Car Damage entry into the non-tyre CarDamage snapshot.
 
     The tyre-specific fields (wear/damage/blisters) are handled by ``normalize_tyre_context``;
     this reads the car-body and engine fields. Brakes are read in wheel order RL, RR, FL, FR.
+    `car_telemetry` (the player's CarTelemetryData entry) supplies the per-wheel brake and engine
+    temperatures (°C); when absent they fall back to zeros.
     """
+    if car_telemetry is not None:
+        brake_temp = tuple(int(t) for t in car_telemetry.brakes_temperature)
+        engine_temp = car_telemetry.engine_temperature
+    else:
+        brake_temp, engine_temp = (0, 0, 0, 0), 0
     return CarDamage(
         brakes = tuple(int(b) for b in car_damage.brakes_damage),
         front_left_wing=car_damage.front_left_wing_damage,
@@ -182,6 +199,8 @@ def normalize_car_damage(car_damage) -> CarDamage:
         ers_fault=car_damage.ers_fault,
         engine_blown=car_damage.engine_blown,
         engine_seized=car_damage.engine_seized,
+        brake_temp=brake_temp,
+        engine_temp=engine_temp
     )
 
 

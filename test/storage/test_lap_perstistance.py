@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from sqlalchemy import select
 import os
 import shutil
 import tempfile
@@ -59,7 +60,9 @@ def make_damage():
         engine_mguh_wear=1, engine_es_wear=2, engine_ce_wear=3, engine_ice_wear=4,
         engine_mguk_wear=5, engine_tc_wear=6,
         drs_fault=False, ers_fault=False, engine_blown=False, engine_seized=False,
+        brake_temp=(350, 360, 420, 430), engine_temp=118,
     )
+
 
 
 def make_lap(n):
@@ -68,8 +71,9 @@ def make_lap(n):
         sector1_ms=25000, sector2_ms=30000, sector3_ms=25000,
         is_valid=True, trace=make_trace(),
         tyre_context=LapTyreContext(actual_compound=16, visual_compound=16,
-                                    age_laps=n, wear=(5.0, 6.0, 7.0, 8.0), damage=(2, 3, 4, 5),
-                                    blisters=(0, 1, 0, 1)),
+                            age_laps=n, wear=(5.0, 6.0, 7.0, 8.0), damage=(2, 3, 4, 5),
+                            blisters=(0, 1, 0, 1),
+                            surface_temp=(95, 96, 90, 91), carcass_temp=(100, 101, 88, 89)),
         damage=make_damage(),
     )
 
@@ -114,6 +118,10 @@ class LapStoreRoundTripTest(unittest.TestCase):
         self.assertEqual(len(laps[0].trace), 5)
         np.testing.assert_allclose(laps[0].trace.distance, make_trace().distance)
         np.testing.assert_array_equal(laps[0].trace.gear, make_trace().gear)
+        self.assertEqual(laps[0].tyre_context.surface_temp, (95, 96, 90, 91))
+        self.assertEqual(laps[0].tyre_context.carcass_temp, (100, 101, 88, 89))
+        self.assertEqual(laps[0].damage.brake_temp, (350, 360, 420, 430))
+        self.assertEqual(laps[0].damage.engine_temp, 118)
 
     def test_list_omits_traces_but_keeps_metadata(self):
         self.store.save_laps(123, (make_lap(1), make_lap(2)))
@@ -146,6 +154,20 @@ class LapStoreRoundTripTest(unittest.TestCase):
         loaded = self.store.load(55, 1)
         self.assertIsNone(loaded.trace.pos_x)
         self.assertFalse(loaded.trace.has_motion)
+
+    def test_pre_2c_damage_blob_loads_with_default_temps(self):
+        lap = make_lap(1)
+        self.store.save_laps(88, (lap,))
+        # simulate an older row: strip the 2c keys from the persisted damage JSON
+        from sqlalchemy import update
+        from f1telemetry.src.storage.schema import LapRow
+        with self.store._Session.begin() as db:
+            row = db.scalar(select(LapRow).where(LapRow.session_uid == "88"))
+            legacy = {k: v for k, v in row.damage.items() if k not in ("brake_temp", "engine_temp")}
+            row.damage = legacy
+        loaded = self.store.load(88, 1)
+        self.assertEqual(loaded.damage.brake_temp, (0, 0, 0, 0))
+        self.assertEqual(loaded.damage.engine_temp, 0)
 
     def test_resave_replaces_laps(self):
         self.store.save_laps(123, (make_lap(1), make_lap(2), make_lap(3)))

@@ -87,7 +87,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   - *(lap-view iteration 1a)* diffs the player's **Car Setups** packet to build a `setup_history`
     (a new snapshot stamped with the current lap whenever the setup changes), and snapshots per-lap
     **tyre context** + full non-tyre **car damage** at each lap boundary (compound/age from Car
-    Status, wear/damage from Car Damage);
+    Status, wear/damage from Car Damage; *(iteration 2c)* tyre surface/carcass temperatures on the
+    tyre context and brake/engine temperatures on the car damage, read from the carried-forward Car
+    Telemetry entry);
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -170,6 +172,16 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   fallback; both share a `_render` that negates one axis to correct the left-handed world frame's
   mirror and closes the path loop so a race lap 1 (grid past the S/F line) still draws a complete
   outline.
+  The car-status graphic (iteration 2c) is a two-part split: `car_status.py` is a **Qt-free model**
+  (`damage_parts` / `tyre_corners` map a lap's `CarDamage` + `LapTyreContext` onto per-part
+  `Status` + colour via three threshold families — wear 60/80, aero 15/40, compound-keyed temp
+  bands; unit-tested in `test_car_status.py`), and `car_status_graphic.py` (`CarStatusGraphic`) is
+  the thin renderer over it: an in-game-style top-down car whose body regions and four corner tyre
+  gauges are drawn as `QGraphicsPathItem`s and recoloured from the model, with native per-part
+  tooltips. Shapes are authored as SVG path `d` strings parsed into `QPainterPath`s (`_svg_path`),
+  so parts can be re-authored in a vector editor — the SVG-authored → QGraphicsScene path-item
+  approach from DECISIONS. **The graphic renders and is wired in, but its visual styling is not yet
+  final — a later pass will refine the silhouette / layout (see ROADMAP).**
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
@@ -192,8 +204,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →
   the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
   filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
-  lap via `LapStore.load` and composes the `components/` lap widgets — lap info + tyre box, the
-  damage and setup tables (setup resolved by `SessionResult.setup_for_lap`), and the `TracePlot`.
+  lap via `LapStore.load` and composes the `components/` lap widgets. The left column stacks the
+  tyre box and the `CarStatusGraphic` (iteration 2c); the right holds the damage and setup tables
+  (setup resolved by `SessionResult.setup_for_lap`); below sits the `TracePlot`.
   When the lap carries Motion it also shows a `TrackMap` panel, wired to the plot's `cursor_moved`
   signal so hovering a trace moves the marker round the circuit (iteration 2b). The map draws the
   **canonical median line** for the whole race weekend when available (iteration 2b.1), falling back

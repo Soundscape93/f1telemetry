@@ -163,6 +163,7 @@ class _SessionBuilder:
         self._best_lap_num_by_index: dict[int, int] = {}  # car_idx -> lap the best lap was set on
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
+        self._last_car_telemetry = None         # the player's latest Car Telemetry entry
         self._last_motion = None                # the player's latest normalized MotionSample
 
         self._last_car_damage = None            # the player's latest Car Damage entry (tyre wear)
@@ -241,7 +242,9 @@ class _SessionBuilder:
             idx = packet.header.player_car_index
             if idx >= len(packet.car_telemetry_data):  # player not in the array this frame (lobby/spectator)
                 return
-            self._pending_car_telemetry = packet.car_telemetry_data[idx]
+            entry = packet.car_telemetry_data[idx]
+            self._last_car_telemetry = entry        # carry forward for the lap-boundary temp snapshot
+            self._pending_car_telemetry = entry
             self._pending_car_telemetry_frame = packet.header.frame_identifier
             self._try_frame_join()
 
@@ -298,14 +301,18 @@ class _SessionBuilder:
 
     def _snapshot_lap_state(self, lap_number: int) -> None:
         """Snapshot the player's tyre state and car damage at a lap boundary (as the car crosses
-        the line). Tyre context needs a Car Status frame; damage needs a Car Damage frame; each is
-        recorded only once its source has been seen."""
+        the line). Tyre context needs a Car Status frame; damage needs a Car Damage frame; the
+        surface/carcass/brake/engine temperatures come from the latest Car Telemetry frame
+        (carry forward). Each snapshot is recorded only once its required source has been seen.
+        """
         if self._last_car_status is not None:
             self._tyre_context[lap_number] = normalize_tyre_context(
-                self._last_car_status, self._last_car_damage
+                self._last_car_status, self._last_car_damage, self._last_car_telemetry
             )
         if self._last_car_damage is not None:
-            self._damage[lap_number] = normalize_car_damage(self._last_car_damage)
+            self._damage[lap_number] = normalize_car_damage(
+                self._last_car_damage, self._last_car_telemetry
+            )
 
     def _build_laps(self) -> tuple[Lap, ...]:
         """Join captured traces with Session History timing, by lap number."""

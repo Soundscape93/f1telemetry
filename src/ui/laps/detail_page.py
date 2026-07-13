@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from ...protocol.reference import track_name
 from ..components import (
+    CarStatusGraphic,
     TracePlot,
     TrackMap,
     TyreBox,
@@ -108,10 +109,21 @@ class DetailPage(QWidget):
         # top: one compact lap-summary row (tyre+lap · sectors · lap time · valid), full width
         self._body.addWidget(self._lap_summary_row(lap))
 
-        # beneath: tyre box, damage and setuo tables side by side
+        # beneath: left column = tyre box + car-status graphic (visual overview);
+        # right = the exact-number damage + setup tables
         columns = QHBoxLayout()
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
         if lap.tyre_context is not None:
-            columns.addWidget(self._panel("Tyres", TyreBox(lap.tyre_context)))
+            left.addWidget(self._panel("Tyres", TyreBox(lap.tyre_context)))
+        if lap.tyre_context is not None or lap.damage is not None:
+            graphic = CarStatusGraphic()
+            graphic.set_lap(lap.tyre_context, lap.damage)
+            left.addWidget(self._panel("Car Status", graphic))
+        left.addStretch(1)
+        left_host = QWidget()
+        left_host.setLayout(left)
+        columns.addWidget(left_host)
         if lap.damage is not None:
             columns.addWidget(self._panel("Damage", build_damage_table(lap.damage)))
         if setup is not None:
@@ -120,7 +132,7 @@ class DetailPage(QWidget):
         cols_host = QWidget()
         cols_host.setLayout(columns)
         self._body.addWidget(cols_host)
-
+        
         # bottom: telemetry graphs, with a compare picker + colour-blind toggle in the header
         self._base_trace = lap.trace
         self._base_lap_number = lap.lap_number

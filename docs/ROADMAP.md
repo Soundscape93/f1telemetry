@@ -104,11 +104,23 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
     for personal/testing use, to be made automatic before any release to friends/users (likely after
     2c, unless it bites earlier). A persisted `track_layouts/*.parquet` cache also stays deferred.
-  - *2c — car-body graphic.* A car silhouette with colour-coded tyre + damage zones. ~90% of the
-    data is already stored (tyre wear/damage/blisters on `LapTyreContext`; full car damage on
-    `CarDamage`) — the only new ingest is **tyre carcass/surface + brake temperatures** (Car
-    Telemetry `tyres_surface_temperature`/`tyres_inner_temperature`/`brakes_temperature`, snapshotted
-    at the lap boundary like tyre context). UI-weighted iteration.
+  - *2c — car-status graphic.* A car silhouette (in-game neon style, tyres as corner gauges) with
+    colour-coded tyre / engine / body-damage zones. Rendered as SVG-authored `QGraphicsScene` path
+    items over a Qt-free, tested `car_status.py` model; three threshold rules (tyre + engine wear
+    60/80, aero/body stricter 15/40, temperatures as compound-keyed two-sided bands — see DECISIONS).
+    ~90% of the data was already stored (tyre wear/damage/blisters on `LapTyreContext`; full car
+    damage on `CarDamage`). **Phase A (data backbone) — DONE:** the only new ingest, the
+    temperatures, is captured — tyre surface/carcass temps on `LapTyreContext`, brake/engine temps on
+    `CarDamage`, snapshotted at the lap boundary from the carried-forward Car Telemetry entry
+    (`tyres_surface_temperature` / `tyres_inner_temperature` / `brakes_temperature` /
+    `engine_temperature`; requires re-ingest). **Phase B (threshold model) — DONE:** Qt-free
+    `car_status.py` (`damage_parts` / `tyre_corners`), unit-tested. **Phase C (widget) — DONE,
+    functional:** `CarStatusGraphic` renders the car (body regions + four corner tyre gauges) from
+    SVG-authored path items, coloured by the model, with per-part tooltips, wired below the tyre box
+    on the detail page. **Visual styling is NOT final** — a later session will refine the
+    silhouette / layout / neon look (the widget works and colours correctly; the appearance is still
+    being dialled in, and some in-game fidelity may be bounded by the plotted-path approach).
+    *Remaining:* the visual polish pass; optionally fold `tyre_box._wear_color` into `car_status`.
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory

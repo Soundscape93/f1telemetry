@@ -253,6 +253,51 @@ what would trigger revisiting it.
 - **pyqtgraph is a hand-managed runtime dep, like pyarrow.** There's no requirements file; both are
   installed by hand. `TracePlot` lazy-imports pyqtgraph and shows an install hint if it's missing, so
   the app and the test suite stay importable without it. (pyqtgraph is now installed in the dev env.)
+- **The car-status graphic (iteration 2c) is authored as SVG paths but rendered as `QGraphicsScene`
+  path items, in the in-game neon top-down style.** Considered three backends: (a) templated QtSvg —
+  rebuild an SVG string with substituted `fill`s and feed `QSvgRenderer`; (b) tinted PNG assets —
+  rejected (raster, per-part tinting fiddly, against the asset-free house style); (c) **chosen:** draw
+  the car once in a vector editor, import each id'd path as a `QGraphicsPathItem`. Rationale: `QPainterPath`
+  is a superset of SVG path geometry, so fidelity is identical across backends and the shapes can trace
+  the game's car-status screen freely (neon silhouette; the four tyres pulled out to corner gauges showing
+  wear % + carcass temp, joined by dotted connectors). The path-item route gives the cleanest per-part
+  recolour (`item.setBrush()`, no XML string rebuild), native per-part `setToolTip()` / hover hit-testing,
+  and needs no extra `QtSvg` dependency. As with the rest of the lap surface, the logic is a **Qt-free,
+  unit-tested `car_status.py`** mapping `CarDamage` + `LapTyreContext` → per-part `(status, colour)`, so the
+  render backend stays swappable. Placement: keep 1b's `TyreBox`, add the graphic **below it on the left**;
+  the exact-number Damage/Setup tables stay on the right (visual overview left, precise values right). The
+  `TyreBox` can be retired later if the graphic covers tyres well enough — not in 2c.
+  *Realization (Phase C):* shapes are authored as SVG path `d` strings parsed to `QPainterPath` by a
+  small in-widget parser (`_svg_path`, handles M/L/H/V/C/Q/Z abs+rel), so parts stay re-authorable in
+  a vector editor without touching Python geometry. Tyres are drawn on-car at the axles with a dashed
+  connector out to each corner gauge (game-style). The **`QGraphicsDropShadowEffect` glow was disabled**:
+  over a `background: transparent` viewport it produced black-box repaint artifacts on hover; the neon
+  look comes from the bright pen + translucent fill instead. *Status:* the graphic is wired in and
+  colours correctly, but its **visual styling is deliberately not final** — a later session refines the
+  silhouette / layout, and some in-game fidelity may be bounded by the asset-free plotted-path approach.
+- **2c colour thresholds are three separate rules, not one (with tyre temps keyed by compound).**
+  Researched against F1 24/25 community data; where the game's exact values are undocumented we use a
+  clearly-labelled tunable fallback. (1) **Monotonic wear/damage, tyre + engine:** reuse the existing HUD
+  rule — green <60 %, orange 60–79 %, red ≥80 % — for tyre wear/damage/blisters *and* all power-unit
+  component wear (ICE/MGU-K/MGU-H/turbo/ES/CE, gearbox). Engine reuses the tyre rule deliberately: in-game
+  the engineer warns ~60 % (part orange) and ≥80 % the component is effectively spent (dropped gears / power
+  loss / replacement due). The engine block is coloured by the **worst** of its sub-wears. (2) **Aero/body
+  damage** (front/rear wing, floor, diffuser, sidepods) uses a **stricter** fallback — green <15 %, orange
+  15–39 %, red ≥40 % — because a partly-damaged wing already costs real downforce, so reusing the 60/80 wear
+  rule would flag it far too late. (3) **Temperatures are two-sided bands** (cold ⇄ optimal ⇄ hot), and the
+  tyre window is **compound-specific** — the operating range differs per compound and we already store
+  `actual_compound`, so thresholds key off it (e.g. C1 optimal ~90–115 °C … C5 ~70–90 °C … C6 ~65–85 °C;
+  inters/wets lower). Carcass/core is the primary readout; surface runs a few °C hotter. Brake temps use a
+  broad band (~250–1000 °C working, red above). Every threshold is a named constant in one place; the temp
+  windows and aero cutoffs are community-/estimate-sourced, not official — *revisit* once observed against
+  real telemetry. *New ingest 2c needs:* only the temperatures (tyre surface + carcass, brakes, engine) —
+  snapshotted at the lap boundary like the existing tyre context; all wear/damage is already stored.
+  **Storage split (Phase A, done):** tyre surface/carcass temps go on `LapTyreContext` (two additive
+  nullable `laps` columns `tyre_surface_temp` / `tyre_carcass_temp`); brake + engine temps go on
+  `CarDamage` inside its existing JSON blob (zero new columns) — grouping brake temp beside brake damage
+  and engine temp beside engine wear. The assembler carries the latest Car Telemetry entry forward (like
+  Car Status) and reads it in `normalize_tyre_context` / `normalize_car_damage` at the line. Pre-2c rows
+  load with zero-temp defaults; a re-ingest populates them.
 
 ## Conventions
 - **Module-level constants use a single leading underscore.** A double underscore name-mangles

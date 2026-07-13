@@ -147,9 +147,16 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   `ui/laps/track_layouts`), so the shape is clean and identical per track regardless of the viewed
   lap; too few laps → it falls back to the driven line. Dashboard / Sessions / Analytics remain
   placeholders.
-- **Next:** lap-view **2c — a car-body graphic** (a car silhouette with colour-coded tyre + damage
-  zones). ~90% of its data is already stored (`LapTyreContext` + `CarDamage`); the only new ingest is
-  **tyre carcass/surface + brake temperatures**. Deferred from 2b.1: **sector colouring** on the map
+- **Mostly done:** lap-view **2c — a car-status graphic** (an in-game-style car silhouette with
+  colour-coded tyre / engine / body-damage zones; tyres as corner gauges). SVG-authored
+  `QGraphicsScene` path items (`car_status_graphic.py`) over a Qt-free, tested `car_status.py`
+  model. **Phases A–C all done and functional:** temperatures ingested (tyre surface/carcass on
+  `LapTyreContext`, brake/engine on `CarDamage`, from the carried-forward Car Telemetry entry;
+  re-ingest needed), threshold model + tests, and the widget wired below the tyre box on the detail
+  page with per-part tooltips. **Remaining: a visual-polish pass** — the graphic renders and colours
+  correctly but its look isn't final yet (a later session refines the silhouette / layout; some
+  in-game fidelity may be bounded by the plotted-path approach). Deferred
+  from 2b.1: **sector colouring** on the map
   (needs the Lap Data per-frame `sector` field as a small additive trace channel — sector *distances*
   aren't stored today, only sector *times*) and **automatic canonical-map cache refresh** (the
   in-memory layout cache isn't invalidated on a mid-run re-ingest — fine for personal use, to be made

@@ -7,6 +7,7 @@ the lap-detail widgets (tyre box, damage / setup panels, single-lap telemetry pl
 
 from __future__ import annotations
 
+from .car_status_graphic import CarStatusGraphic
 from .classification_table import build_classification_table, display_name_fn
 from .damage_panel import build_damage_table
 from .setup_panel import build_setup_table
@@ -16,6 +17,7 @@ from .tyre_box import TyreBox
 from .track_map import TrackMap
 
 __all__ = [
+    "CarStatusGraphic",
     "build_classification_table",
     "display_name_fn",
     "build_damage_table",

@@ -84,6 +84,15 @@ registered already; the work is routing them in `feed()` and snapshotting at the
   and a damage table. Field names are **identical across 2025 and 2026**, so the normalizer reads
   either without branching. Split by consumer: per-wheel tyre fields → `LapTyreContext`; everything
   else → the `CarDamage` value object.
+- **Temperatures come from Car Telemetry (6), snapshotted at the lap boundary (iteration 2c):**
+  `tyres_surface_temperature[4]` and `tyres_inner_temperature[4]` (= carcass/core, the primary
+  readout) land on `LapTyreContext`; `brakes_temperature[4]` (a `uint16`) and `engine_temperature`
+  land on `CarDamage`. All °C, wheel order **RL, RR, FL, FR**. The assembler carries the latest Car
+  Telemetry entry forward (like Car Status) and reads it in `normalize_tyre_context` /
+  `normalize_car_damage` at the line. **Older laps need a re-ingest** to populate them (they load as
+  zeros otherwise): the two new `laps` columns (`tyre_surface_temp`, `tyre_carcass_temp`) are
+  additive-nullable and brake/engine temps ride inside the existing `damage` JSON blob, so pre-2c
+  rows load with defaults.
 - **Setup comes from Car Setups (5), and is a *history* not a snapshot.** The packet streams the
   player's setup continuously; a mid-session garage change shows up as a value diff. The assembler
   diffs it (frozen-dataclass `==`) and records a `SetupSnapshot(from_lap, setup)` on change, so the
