@@ -178,10 +178,13 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   bands; unit-tested in `test_car_status.py`), and `car_status_graphic.py` (`CarStatusGraphic`) is
   the thin renderer over it: an in-game-style top-down car whose body regions and four corner tyre
   gauges are drawn as `QGraphicsPathItem`s and recoloured from the model, with native per-part
-  tooltips. Shapes are authored as SVG path `d` strings parsed into `QPainterPath`s (`_svg_path`),
-  so parts can be re-authored in a vector editor — the SVG-authored → QGraphicsScene path-item
-  approach from DECISIONS. **The graphic renders and is wired in, but its visual styling is not yet
-  final — a later pass will refine the silhouette / layout (see ROADMAP).**
+  tooltips. Body/structural shapes are authored in Inkscape as SVG path `d` strings parsed into
+  `QPainterPath`s (`_svg_path` — full M/L/H/V/C/S/T/A/Z, abs+rel; `test_svg_path.py`), grouped by
+  render style (`_BODY_PARTS` damage-coloured, `_STRUCTURAL` faint fill, `_PANELS` solid fill,
+  `_OUTLINES` stroke-only, `_ARMS` suspension); the four corners (on-car tyre + inboard brake block +
+  dashed connector + wear/temp gauge) are drawn procedurally from `_CORNERS` / `_TYRE_*` / `_BRAKE_*`.
+  The SVG-authored → QGraphicsScene path-item approach from DECISIONS; authoring template in
+  `docs/car_template.svg`.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
   `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
   → detail → weekend) and does nothing but wire their **navigation signals** to page switches —

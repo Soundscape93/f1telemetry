@@ -147,16 +147,17 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   `ui/laps/track_layouts`), so the shape is clean and identical per track regardless of the viewed
   lap; too few laps → it falls back to the driven line. Dashboard / Sessions / Analytics remain
   placeholders.
-- **Mostly done:** lap-view **2c — a car-status graphic** (an in-game-style car silhouette with
+- **Done:** lap-view **2c — a car-status graphic** (an in-game-style car silhouette with
   colour-coded tyre / engine / body-damage zones; tyres as corner gauges). SVG-authored
   `QGraphicsScene` path items (`car_status_graphic.py`) over a Qt-free, tested `car_status.py`
-  model. **Phases A–C all done and functional:** temperatures ingested (tyre surface/carcass on
-  `LapTyreContext`, brake/engine on `CarDamage`, from the carried-forward Car Telemetry entry;
-  re-ingest needed), threshold model + tests, and the widget wired below the tyre box on the detail
-  page with per-part tooltips. **Remaining: a visual-polish pass** — the graphic renders and colours
-  correctly but its look isn't final yet (a later session refines the silhouette / layout; some
-  in-game fidelity may be bounded by the plotted-path approach). Deferred
-  from 2b.1: **sector colouring** on the map
+  model. Temperatures ingested (tyre surface/carcass on `LapTyreContext`, brake/engine on
+  `CarDamage`, from the carried-forward Car Telemetry entry; re-ingest needed), threshold model +
+  tests, and the widget wired below the tyre box on the detail page with per-part tooltips. Body
+  shapes are **Inkscape-traced** (`docs/car_template.svg` template) and parsed by `_svg_path` — now
+  the full SVG command set incl. S/T smooth curves + A arcs (`test_svg_path.py`); tyres, inboard
+  **brake blocks** and corner gauges are procedural (from `_CORNERS` / `_TYRE_*` / `_BRAKE_*`). The
+  neon glow is on (an early transparent-viewport hover artifact was fixed via `setStyleSheet`).
+  Deferred from 2b.1: **sector colouring** on the map
   (needs the Lap Data per-frame `sector` field as a small additive trace channel — sector *distances*
   aren't stored today, only sector *times*) and **automatic canonical-map cache refresh** (the
   in-memory layout cache isn't invalidated on a mid-run re-ingest — fine for personal use, to be made

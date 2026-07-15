@@ -267,14 +267,26 @@ what would trigger revisiting it.
   render backend stays swappable. Placement: keep 1b's `TyreBox`, add the graphic **below it on the left**;
   the exact-number Damage/Setup tables stay on the right (visual overview left, precise values right). The
   `TyreBox` can be retired later if the graphic covers tyres well enough — not in 2c.
-  *Realization (Phase C):* shapes are authored as SVG path `d` strings parsed to `QPainterPath` by a
-  small in-widget parser (`_svg_path`, handles M/L/H/V/C/Q/Z abs+rel), so parts stay re-authorable in
-  a vector editor without touching Python geometry. Tyres are drawn on-car at the axles with a dashed
-  connector out to each corner gauge (game-style). The **`QGraphicsDropShadowEffect` glow was disabled**:
-  over a `background: transparent` viewport it produced black-box repaint artifacts on hover; the neon
-  look comes from the bright pen + translucent fill instead. *Status:* the graphic is wired in and
-  colours correctly, but its **visual styling is deliberately not final** — a later session refines the
-  silhouette / layout, and some in-game fidelity may be bounded by the asset-free plotted-path approach.
+  *Realization (Phase C + visual polish, DONE):* shapes are authored as SVG path `d` strings parsed to
+  `QPainterPath` by a small in-widget parser (`_svg_path`) and rendered as path items. The parser handles
+  the full command set Inkscape/Figma emit — M/L/H/V/C/**S/T** smooth curves and **A** elliptical arcs
+  (arcs via the SVG-spec F.6 endpoint→centre conversion, approximated by ≤90° cubics in `_arc_to`),
+  abs + rel — but deliberately does **not** read `transform`, so an authored path must carry its geometry
+  in `d` with any transform flattened (`test_svg_path.py`). **Authoring workflow (see `docs/car_template.svg`):**
+  trace each part in Inkscape over a 420×560 canvas (= the `_VIEWBOX`), Store-transformation = Optimized,
+  `Object to Path`, then copy the `d` into the relevant list. Parts are grouped by how they render:
+  `_BODY_PARTS` (damage-coloured, one path per damage channel — the two sidepod ids share one channel),
+  `_STRUCTURAL` (closed neutral shapes, faint translucent fill — the halo), `_PANELS` (closed shapes with a
+  **solid** light-grey fill — the floor-edge wings), `_OUTLINES` (**stroke-only open** shapes, no fill — the
+  chassis/nose), and `_ARMS` (front suspension, stroke-only). Tyres + brakes + gauges are **procedural**,
+  not authored: each corner draws an on-car tyre block, an inboard brake block (coloured by brake temp), and
+  a dashed connector out to a corner gauge (wear % + carcass temp), positioned from `_CORNERS` / `_TYRE_*` /
+  `_BRAKE_*`, so moving a tyre is a one-line change. The neon glow (`QGraphicsDropShadowEffect`) is **on** —
+  an early black-box-on-hover artifact was fixed via the viewport `setStyleSheet`, not by disabling the glow.
+  *Two Qt fill gotchas learned + relied on:* an open path is implicitly closed when filled (so genuine
+  2-point straight strokes are fill-safe and may share a filled path, but a curved/kinked "open" shape must
+  live in `_OUTLINES`); and the `background: transparent` viewport shows through a too-faint fill, which is
+  why the floor fences use `_PANELS`' solid fill rather than the `_STRUCTURAL` wash.
 - **2c colour thresholds are three separate rules, not one (with tyre temps keyed by compound).**
   Researched against F1 24/25 community data; where the game's exact values are undocumented we use a
   clearly-labelled tunable fallback. (1) **Monotonic wear/damage, tyre + engine:** reuse the existing HUD

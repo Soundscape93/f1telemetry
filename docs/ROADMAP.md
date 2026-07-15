@@ -114,13 +114,14 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     `CarDamage`, snapshotted at the lap boundary from the carried-forward Car Telemetry entry
     (`tyres_surface_temperature` / `tyres_inner_temperature` / `brakes_temperature` /
     `engine_temperature`; requires re-ingest). **Phase B (threshold model) — DONE:** Qt-free
-    `car_status.py` (`damage_parts` / `tyre_corners`), unit-tested. **Phase C (widget) — DONE,
-    functional:** `CarStatusGraphic` renders the car (body regions + four corner tyre gauges) from
-    SVG-authored path items, coloured by the model, with per-part tooltips, wired below the tyre box
-    on the detail page. **Visual styling is NOT final** — a later session will refine the
-    silhouette / layout / neon look (the widget works and colours correctly; the appearance is still
-    being dialled in, and some in-game fidelity may be bounded by the plotted-path approach).
-    *Remaining:* the visual polish pass; optionally fold `tyre_box._wear_color` into `car_status`.
+    `car_status.py` (`damage_parts` / `tyre_corners`), unit-tested. **Phase C (widget) + visual polish
+    — DONE.** `CarStatusGraphic` renders the car — Inkscape-traced body regions, chassis/nose outline,
+    floor-edge wings and front suspension — coloured by the model with per-part tooltips, plus four
+    procedural corners (on-car tyre + inboard brake block + dashed connector to a wear/temp corner gauge),
+    wired below the tyre box on the detail page. The `_svg_path` parser was extended to the full Inkscape
+    command set (S/T smooth curves, A arcs; `test_svg_path.py`) so parts are authored visually — see the
+    Inkscape workflow + `docs/car_template.svg` in DECISIONS. *Optional later:* fold
+    `tyre_box._wear_color` into `car_status` (shared 60/80 rule).
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
