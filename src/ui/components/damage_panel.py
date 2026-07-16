@@ -29,6 +29,7 @@ def damage_rows(damage: CarDamage) -> list[tuple[str, str | None]]:
         ("Front wing (R)", _pct(damage.front_right_wing)),
         ("Rear wing", _pct(damage.rear_wing)),
         ("Floor", _pct(damage.floor)),
+        ("Diffuser", _pct(damage.diffuser)),
         ("Sidepod", _pct(damage.sidepod)),
         ("Brakes", None),
         ("Brake RL", _pct(damage.brakes[0])),

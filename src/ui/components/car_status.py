@@ -165,6 +165,8 @@ class TyreCorner:
     key: str        # "rl" / "rr" / "fl" / "fr"
     label: str
     wear_pct: float
+    blisters: int               # per-wheel blisters % (shown in gauge tooltip)
+    tyre_damage: int             # per-wheel tyre damage % (shown in gauge tooltip)
     surface_temp: int
     carcass_temp: int
     brake_temp: int
@@ -205,19 +207,24 @@ def damage_parts(damage: CarDamage) -> list[PartStatus]:
 def tyre_corners(tyre_context: LapTyreContext,
                  damage: CarDamage | None = None) -> list[TyreCorner]:
     """The four corner gauges, in order RL, RR, FL, FR. Brake temp is read from ``damage``
-    when present (else 0 -> NONE)."""
+    when present (else 0 -> NONE). Blisters + per-wheel tyre damage ride along on the tooltip
+    detail - used to live in the removed TyreBox."""
     corners = []
     for idx, key, label in _WHEELS:
         wear = tyre_context.wear[idx]
+        blisters = tyre_context.blisters[idx]
+        tyre_damage = tyre_context.damage[idx]
         carcass = tyre_context.carcass_temp[idx]
         surface = tyre_context.surface_temp[idx]
         brake = damage.brake_temp[idx] if damage is not None else 0
         ts = tyre_temp_status(carcass, tyre_context.actual_compound)
         ws = _wear_status(wear)
         bs = brake_temp_status(brake)
-        detail = (f"{wear:.0f}% wear · carcass {carcass}°C · surface {surface}°C · brake {brake}°C")
+        detail = (f"{wear:.0f}% wear · blisters {blisters}% · tyre damage {tyre_damage}% · " 
+                  f"carcass {carcass}°C · surface {surface}°C · brake {brake}°C")
         corners.append(TyreCorner(
-            key=key, label=label, wear_pct=wear, surface_temp=surface, carcass_temp=carcass,
+            key=key, label=label, wear_pct=wear, blisters=blisters, tyre_damage=tyre_damage,
+            surface_temp=surface, carcass_temp=carcass,
             brake_temp=brake, temp_status=ts, wear_status=ws, brake_status=bs,
             temp_colour=status_colour(ts), wear_colour=status_colour(ws), detail=detail
         ))

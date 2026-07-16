@@ -29,7 +29,6 @@ from ..components import (
     CarStatusGraphic,
     TracePlot,
     TrackMap,
-    TyreBox,
     build_damage_table,
     build_setup_table,
     cell,
@@ -114,12 +113,10 @@ class DetailPage(QWidget):
         columns = QHBoxLayout()
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
-        if lap.tyre_context is not None:
-            left.addWidget(self._panel("Tyres", TyreBox(lap.tyre_context)))
         if lap.tyre_context is not None or lap.damage is not None:
             graphic = CarStatusGraphic()
             graphic.set_lap(lap.tyre_context, lap.damage)
-            left.addWidget(self._panel("Car Status", graphic))
+            left.addWidget(self._car_status_panel(graphic, lap.tyre_context))
         left.addStretch(1)
         left_host = QWidget()
         left_host.setLayout(left)
@@ -247,6 +244,39 @@ class DetailPage(QWidget):
         box.addWidget(widget)
         box.addStretch(1)
         return panel
+    
+    @staticmethod
+    def _car_status_panel(graphic: QWidget, tyre_context) -> QWidget:
+        """The Car Status column: a caption row (title + compound icon + tyre age), then the
+        car-status graphic. The age is the useful part of the removed TyreBox header."""
+        panel = QWidget()
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(2)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(6)
+        cap = QLabel("Car Status")
+        cap.setStyleSheet("font-weight: 600;")
+        head.addWidget(cap)
+        if tyre_context is not None:
+            pixmap = tyre_pixmap(tyre_context.visual_compound, size=16)
+            if pixmap is not None:
+                icon = QLabel()
+                icon.setPixmap(pixmap)
+                head.addWidget(icon)
+            age = tyre_context.age_laps
+            age_label = QLabel(f"{age} lap{'s' if age != 1 else ''} old")
+            age_label.setStyleSheet("font-size: 11px;")
+            head.addWidget(age_label)
+        head.addStretch(1)
+        box.addLayout(head)
+
+        box.addWidget(graphic)
+        box.addStretch(1)
+        return panel
+
     
     @staticmethod
     def _lap_summary_row(lap) -> QWidget:
