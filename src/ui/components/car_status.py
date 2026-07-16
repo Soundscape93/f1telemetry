@@ -97,7 +97,7 @@ def _monotonic(pct: float, warn: int, crit: int) -> Status:
     return Status.OK
 
 
-def _wear_status(pct: float) -> Status:
+def wear_status(pct: float) -> Status:
     """Tyre / engine component wear or damage %: green <60, orange 60-79, red >=80."""
     return _monotonic(pct, _WEAR_WARN, _WEAR_CRIT)
 
@@ -107,7 +107,7 @@ def body_status(pct: float) -> Status:
     return _monotonic(pct, _BODY_WARN, _BODY_CRIT)
 
 
-def _tyre_window(actual_compound: int) -> tuple[int, int]:
+def tyre_window(actual_compound: int) -> tuple[int, int]:
     """The (cold_below, hot_above) carcass window °C for a compound; default for unknwon / F2."""
     try:
         return _TYRE_WINDOWS[ActualTyreCompound(actual_compound)]
@@ -122,7 +122,7 @@ def tyre_temp_status(carcass_temp: float, actual_compound: int) -> Status:
     """
     if carcass_temp <= 0:
         return Status.NONE
-    cold_below, hot_above = _tyre_window(actual_compound)
+    cold_below, hot_above = tyre_window(actual_compound)
     if carcass_temp < cold_below:
         return Status.COLD
     if carcass_temp > hot_above:
@@ -197,10 +197,10 @@ def damage_parts(damage: CarDamage) -> list[PartStatus]:
         _part("sidepod", "Sidepod", body_status(damage.sidepod), f"{damage.sidepod}% damage"),
     ]
     sub = [(label, getattr(damage, field)) for field, label in _ENGINE_WEARS.items()]
-    engine_status = worst(*(_wear_status(v) for _, v in sub))
+    engine_status = worst(*(wear_status(v) for _, v in sub))
     engine_detail = ", ".join(f"{label} {v}%" for label, v in sub)
     parts.append(_part("engine", "Power unit", engine_status, engine_detail))
-    parts.append(_part("gearbox", "Gearbox", _wear_status(damage.gearbox), f"{damage.gearbox}% damage"))
+    parts.append(_part("gearbox", "Gearbox", wear_status(damage.gearbox), f"{damage.gearbox}% damage"))
     return parts
 
 
@@ -218,7 +218,7 @@ def tyre_corners(tyre_context: LapTyreContext,
         surface = tyre_context.surface_temp[idx]
         brake = damage.brake_temp[idx] if damage is not None else 0
         ts = tyre_temp_status(carcass, tyre_context.actual_compound)
-        ws = _wear_status(wear)
+        ws = wear_status(wear)
         bs = brake_temp_status(brake)
         detail = (f"{wear:.0f}% wear · blisters {blisters}% · tyre damage {tyre_damage}% · " 
                   f"carcass {carcass}°C · surface {surface}°C · brake {brake}°C")
