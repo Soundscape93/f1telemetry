@@ -11,6 +11,7 @@ from .car_status_graphic import CarStatusGraphic
 from .classification_table import build_classification_table, display_name_fn
 from .damage_panel import build_damage_table
 from .setup_panel import build_setup_table
+from .slider_row import SetupSliderRow, SliderMarkerBar
 from .tables import build_kv_table, cell, clear_layout, fit_table_height, tidy_table
 from .trace_plot import TracePlot
 from .track_map import TrackMap
@@ -21,6 +22,8 @@ __all__ = [
     "display_name_fn",
     "build_damage_table",
     "build_setup_table",
+    "SetupSliderRow",
+    "SliderMarkerBar",
     "build_kv_table",
     "cell",
     "clear_layout",

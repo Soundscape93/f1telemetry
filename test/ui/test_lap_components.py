@@ -9,7 +9,7 @@ import unittest
 
 from f1telemetry.src.domain.models import CarDamage, Setup
 from f1telemetry.src.ui.components.damage_panel import damage_rows
-from f1telemetry.src.ui.components.setup_panel import setup_rows
+from f1telemetry.src.ui.components.setup_panel import setup_fields
 
 
 def make_damage():
@@ -43,13 +43,23 @@ class DamageRowsTest(unittest.TestCase):
         self.assertEqual(rows["DRS"], "—")
 
 
-class SetupRowsTest(unittest.TestCase):
+class SetupFieldsTest(unittest.TestCase):
     def test_sections_and_values(self):
-        rows = dict(setup_rows(make_setup()))
-        self.assertIsNone(rows["Tyres"])
-        self.assertEqual(rows["Front wing"], "5")
-        self.assertEqual(rows["Brake bias"], "58")
-        self.assertEqual(rows["Pressure Front Right"], "23.5 psi")  # tuple RL,RR,FL,FR -> FR is index 3
+        rows = setup_fields(make_setup())
+        headers = [label for label, field in rows if field is None]
+        fields = {f.label: f for _, f in rows if f is not None}
+
+        self.assertIn("Aerodynamics", headers)
+        self.assertNotIn("Ballast", fields)  # ballast removed
+        self.assertNotIn("Ballast & Fuel", headers)
+        self.assertIn("Fuel Load", fields)
+
+        fw = fields["Front Wing"]
+        self.assertEqual(fw.display, "5")
+        self.assertEqual((fw.min_display, fw.max_display), ("0", "50"))
+        self.assertAlmostEqual(fw.fraction, 5 / 50)
+
+        self.assertEqual(fields["Front Right Tyre Pressure"].display, "22.0 PSI")
 
 
 if __name__ == "__main__":
