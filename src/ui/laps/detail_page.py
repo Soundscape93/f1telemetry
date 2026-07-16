@@ -39,6 +39,7 @@ from ..components import (
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
 from ..settings import set_trace_colorblind, trace_colorblind
+from ..style import MUTED_TEXT_QSS
 from .comparison import (
     SCOPE_BEST,
     SCOPE_SESSION,
@@ -174,7 +175,7 @@ class DetailPage(QWidget):
             self._body.addWidget(self._plot)       # sizes itself; the QScrollArea scrolls
         else:
             missing = QLabel("No telemetry trace stored for this lap.")
-            missing.setStyleSheet("color: palette(mid);")
+            missing.setStyleSheet(MUTED_TEXT_QSS)
             self._body.addWidget(missing)
         self._body.addStretch(1)
 

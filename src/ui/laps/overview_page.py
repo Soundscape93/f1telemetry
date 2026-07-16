@@ -33,6 +33,7 @@ from ...protocol.reference import track_name
 from ..components import cell, clear_layout, fit_table_height, tidy_table
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
+from ..style import MUTED_TEXT_QSS
 
 
 def _recorded_label(recorded_at: datetime | None) -> str:
@@ -113,7 +114,7 @@ class OverviewPage(QWidget):
             shown += 1
         if shown == 0:
             empty = QLabel(self._empty_message())
-            empty.setStyleSheet("color: palette(mid);")
+            empty.setStyleSheet(MUTED_TEXT_QSS)
             self._body.addWidget(empty)
         self._body.addStretch(1)
 
@@ -146,7 +147,7 @@ class OverviewPage(QWidget):
         count = f"{len(laps)} lap" + ("s" if len(laps) != 1 else "")
         best_str = f"  ·  best {format_lap_time(best)}" if best else ""
         meta = QLabel(f"{count}{best_str}  ·  {_recorded_label(session.recorded_at)}")
-        meta.setStyleSheet("color: palette(mid);")
+        meta.setStyleSheet(MUTED_TEXT_QSS)
         header.addWidget(meta)
         vbox.addLayout(header)
 

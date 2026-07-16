@@ -30,6 +30,7 @@ from ...domain.season import SeasonMode, grand_prix_session
 from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
 from ..formatting import race_winner_summary
+from ..style import MUTED_TEXT_QSS
 from .labels import season_title
 
 
@@ -86,7 +87,7 @@ class DetailPage(QWidget):
         cal_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
         calendar_layout.addWidget(cal_caption)
         hint = QLabel("Double-click a round to open its weekend and assign sessions.")
-        hint.setStyleSheet("color: palette(mid);")
+        hint.setStyleSheet(MUTED_TEXT_QSS)
         calendar_layout.addWidget(hint)
 
         self._calendar_table = QTableWidget(0, 3)
@@ -106,7 +107,7 @@ class DetailPage(QWidget):
         roster_layout.setContentsMargins(0, 0, 0, 0)
         roster_layout.setSpacing(4)
         self._roster_status = QLabel()
-        self._roster_status.setStyleSheet("color: palette(mid);")
+        self._roster_status.setStyleSheet(MUTED_TEXT_QSS)
         self._roster_status.setWordWrap(True)
         roster_buttons = QHBoxLayout()
         self._roster_create_btn = QPushButton("Create roster file")
@@ -129,7 +130,7 @@ class DetailPage(QWidget):
             "No results yet — assign captured race weekends to this season's round to "
             "see standings."
         )
-        self._standings_empty.setStyleSheet("color: palette(mid);")
+        self._standings_empty.setStyleSheet(MUTED_TEXT_QSS)
         self._standings_empty.setWordWrap(True)
         standings_layout.addWidget(self._standings_empty)
 
@@ -145,7 +146,7 @@ class DetailPage(QWidget):
             "No results yet — assign captured race weekends to this season's round to "
             "see standings."
         )
-        self._constructor_empty.setStyleSheet("color: palette(mid);")
+        self._constructor_empty.setStyleSheet(MUTED_TEXT_QSS)
         self._constructor_empty.setWordWrap(True)
         standings_layout.addWidget(self._constructor_empty)
 

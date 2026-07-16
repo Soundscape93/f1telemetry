@@ -59,7 +59,7 @@ class SetupFieldsTest(unittest.TestCase):
         self.assertEqual((fw.min_display, fw.max_display), ("0", "50"))
         self.assertAlmostEqual(fw.fraction, 5 / 50)
 
-        self.assertEqual(fields["Front Right Tyre Pressure"].display, "22.0 PSI")
+        self.assertEqual(fields["Front Right Tyre Pressure"].display, "22.0PSI")
 
 
 if __name__ == "__main__":

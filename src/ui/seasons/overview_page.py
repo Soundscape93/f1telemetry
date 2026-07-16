@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..components import clear_layout
+from ..style import MUTED_TEXT_QSS
 from .labels import format_label, season_title
 
 
@@ -74,7 +75,7 @@ class OverviewPage(QWidget):
             )
             blurb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             blurb.setWordWrap(True)
-            blurb.setStyleSheet("font-size: 14px; color: palette(mid);")
+            blurb.setStyleSheet(f"font-size: 14px; {MUTED_TEXT_QSS}")
             self._body.addWidget(heading)
             self._body.addWidget(blurb)
             self._body.addStretch(1)

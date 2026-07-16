@@ -35,6 +35,7 @@ from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
 from .seasons import SeasonsView
 from .laps import LapsView
+from .style import MUTED_TEXT_QSS
 
 # Defaults; these become user settings later.
 _CAPTURE_DIR = Path("captures")
@@ -58,7 +59,7 @@ class _PlaceholderPage(QWidget):
         heading.setStyleSheet("font-size: 20px; font-weight: 600;")
         sub = QLabel(subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet("color: palette(mid)")
+        sub.setStyleSheet(MUTED_TEXT_QSS)
         layout.addWidget(heading)
         layout.addWidget(sub)
         layout.addStretch(1)

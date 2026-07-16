@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...analysis.track_layout import TrackLayout
 from ...domain.models import LapTrace
+from ..style import MUTED_TEXT_QSS
 
 _MISSING = "The track map needs pyqtgraph - install it with: \n\n   pip install pyqtgraph"
 _SIZE = 320 # px; the map is square (equal aspect)
@@ -37,7 +38,7 @@ class TrackMap(QWidget):
             self._pg = None
             self._plot = None
             hint = QLabel(_MISSING)
-            hint.setStyleSheet("color: palette(mid)")
+            hint.setStyleSheet(MUTED_TEXT_QSS)
             layout.addWidget(hint)
             return
         

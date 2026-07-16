@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...analysis import traces as trace_prep
 from ...domain.models import LapTrace
+from ..style import MUTED_TEXT_QSS
 
 _MAX_POINTS = 2000  # per channel - a responsive chart without visible loss on a lap trace
 _MISSING = "Telemetry graphs need pyqtgraph — install it with:\n\n    pip install pyqtgraph"
@@ -106,7 +107,7 @@ class TracePlot(QWidget):
             self._pg = None
             self._glw = None
             hint = QLabel(_MISSING)
-            hint.setStyleSheet("color: palette(mid);")
+            hint.setStyleSheet(MUTED_TEXT_QSS)
             layout.addWidget(hint)
             return
         

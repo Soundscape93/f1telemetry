@@ -36,6 +36,7 @@ from ..components import (
     tidy_table,
 )
 from ..formatting import slot_label
+from ..style import MUTED_TEXT_QSS
 
 
 def _recorded_label(recorded_at: datetime | None) -> str:
@@ -164,7 +165,7 @@ class WeekendPage(QWidget):
         clear_layout(self._assigned_body)
         if not round.sessions:
             empty = QLabel("No sessions assigned to this round yet — add one below.")
-            empty.setStyleSheet("color: palette(mid);")
+            empty.setStyleSheet(MUTED_TEXT_QSS)
             self._assigned_body.addWidget(empty)
         else:
             slots = weekend_slots(round.sessions)
@@ -206,7 +207,7 @@ class WeekendPage(QWidget):
         """
         state = "Skipped" if skipped else "not captured yet"
         label = QLabel(f"{slot_label(slot.session_type, slot.is_sprint_race)}  —  {state}")
-        label.setStyleSheet("color: palette(mid); font-style: italic; padding: 4px 0;")
+        label.setStyleSheet(f"{MUTED_TEXT_QSS} font-style: italic; padding: 4px 0;")
         return label
 
     def _session_block(self, slot, name_of=lambda entry: entry.driver_name) -> QWidget:
