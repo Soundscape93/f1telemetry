@@ -90,6 +90,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     Status, wear/damage from Car Damage; *(iteration 2c)* tyre surface/carcass temperatures on the
     tyre context and brake/engine temperatures on the car damage, read from the carried-forward Car
     Telemetry entry);
+  - *(fuel fix)* captures per-lap **start-of-lap fuel** (`Lap.fuel_in_tank`) from Car Status
+    `fuel_in_tank` — the first finite fuel reading of the lap's selected timed run (the run trimming
+    already drops the formation lap / out-laps / in-laps, so this is fuel at the racing S/F line,
+    falling lap by lap). Distinct from the static garage `Setup.fuel_load`, which is no longer shown
+    as live fuel;
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -103,7 +108,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
   re-ingest never wipes manual placements.
 - **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
-  their per-lap tyre context, with each lap's dense `LapTrace` written to a **Parquet file**
+  their per-lap tyre context (and per-lap start-of-lap fuel, the additive-nullable `fuel_in_tank`
+  column), with each lap's dense `LapTrace` written to a **Parquet file**
   referenced by the lap row (not SQLite rows — see DECISIONS). Write: `save_laps` (replace-by-uid,
   rows + files) / `delete`. Read: `list(uid)` returns a session's laps **without** their traces
   (cheap, for the overview), `load(uid, lap_number)` returns one fully-hydrated lap **with** its

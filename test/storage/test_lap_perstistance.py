@@ -75,6 +75,7 @@ def make_lap(n):
                             blisters=(0, 1, 0, 1),
                             surface_temp=(95, 96, 90, 91), carcass_temp=(100, 101, 88, 89)),
         damage=make_damage(),
+        fuel_in_tank=48.5,
     )
 
 
@@ -106,6 +107,7 @@ class LapStoreRoundTripTest(unittest.TestCase):
         self.assertEqual(laps[0].lap_time_ms, 80001)
         self.assertEqual((laps[0].sector1_ms, laps[0].sector2_ms, laps[0].sector3_ms),
                          (25000, 30000, 25000))
+        self.assertEqual(laps[0].fuel_in_tank, 48.5)
         self.assertEqual(laps[0].tyre_context.actual_compound, 16)
         self.assertEqual(laps[0].tyre_context.age_laps, 1)
         self.assertEqual(laps[0].tyre_context.wear, (5.0, 6.0, 7.0, 8.0))

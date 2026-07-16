@@ -117,7 +117,7 @@ class DetailPage(QWidget):
         if lap.tyre_context is not None or lap.damage is not None:
             graphic = CarStatusGraphic()
             graphic.set_lap(lap.tyre_context, lap.damage)
-            left.addWidget(self._car_status_panel(graphic, lap.tyre_context))
+            left.addWidget(self._car_status_panel(graphic, lap.tyre_context, lap.fuel_in_tank))
         left.addStretch(1)
         left_host = QWidget()
         left_host.setLayout(left)
@@ -247,9 +247,10 @@ class DetailPage(QWidget):
         return panel
     
     @staticmethod
-    def _car_status_panel(graphic: QWidget, tyre_context) -> QWidget:
-        """The Car Status column: a caption row (title + compound icon + tyre age), then the
-        car-status graphic. The age is the useful part of the removed TyreBox header."""
+    def _car_status_panel(graphic: QWidget, tyre_context, fuel_in_tank: float | None) -> QWidget:
+        """The Car Status column: a caption row (title + compound icon + tyre age + fuel), then the
+        car-status graphic. Age and fuel are per-lap boundary state; ``fuel_in_tank`` is the tank mass
+        at lap start, shwon as "-" when the lap predates fuel capture (re-ingest to populate)."""
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.setContentsMargins(0, 0, 0, 0)
@@ -271,6 +272,11 @@ class DetailPage(QWidget):
             age_label = QLabel(f"{age} lap{'s' if age != 1 else ''} old")
             age_label.setStyleSheet("font-size: 11px;")
             head.addWidget(age_label)
+        fuel_text = f"{fuel_in_tank:.1f} kg" if fuel_in_tank is not None else "—"
+        prefix = "· Fuel: " if tyre_context is not None else "Fuel: "
+        fuel_label = QLabel(prefix + fuel_text)
+        fuel_label.setStyleSheet("font-size: 11px;")
+        head.addWidget(fuel_label)
         head.addStretch(1)
         box.addLayout(head)
 

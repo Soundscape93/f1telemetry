@@ -84,13 +84,13 @@ def frames(uid, lap_num, distances, player=0):
     return out
 
 
-def status_pkt(uid, compound=16, visual=16, age=1, player=0):
-    """Fake Car Status packet: the player's tyre compound + age (and zeroed ERS)."""
+def status_pkt(uid, compound=16, visual=16, age=1, player=0, fuel=50.0):
+    """Fake Car Status packet: the player's tyre compound + age, fuel (and zeroed ERS)."""
     return SimpleNamespace(
         header=_hdr(PacketId.CAR_STATUS, uid, player=player),
         car_status_data=[SimpleNamespace(
             actual_tyre_compound=compound, visual_tyre_compound=visual,
-            tyres_age_laps=age, ers_store_energy=0.0, ers_deploy_mode=0)])
+            tyres_age_laps=age, ers_store_energy=0.0, ers_deploy_mode=0, fuel_in_tank=fuel)])
 
 
 def motion_pkt(uid, pos_x, pos_z, g_lat, g_long, frame, player=0):

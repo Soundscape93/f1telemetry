@@ -121,6 +121,7 @@ class LapRow(Base):
     tyre_surface_temp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel tyre surface temp °C
     tyre_carcass_temp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel tyre inner/carcass temp °C
     damage: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # non-tyre CarDamage snapshot
+    fuel_in_tank: Mapped[float | None] = mapped_column(nullable=True)        # kg in tank at lap start
 
 
 class DeletedSessionRow(Base):

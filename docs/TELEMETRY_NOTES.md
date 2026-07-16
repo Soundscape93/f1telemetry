@@ -98,6 +98,20 @@ registered already; the work is routing them in `feed()` and snapshotting at the
   diffs it (frozen-dataclass `==`) and records a `SetupSnapshot(from_lap, setup)` on change, so the
   lap detail can resolve the setup active for a given lap (latest `from_lap <= lap_number`). Restricted
   telemetry doesn't bite here — the own car's setup is always fully public.
+- **Per-lap fuel comes from Car Status (7) `fuel_in_tank`, NOT from Car Setups.**
+  `CarSetupData.fuel_load` is the static **garage slider** (a race default of ~5 kg, a practice preset
+  of ~20 kg, whatever quali was dialled to) — it never reflects consumption, so it must not be shown as
+  live fuel. The real value is `fuel_in_tank` (kg; `float` in both formats), a **continuous per-frame**
+  Car Status field already carried forward for ERS. It's captured as a per-lap scalar `Lap.fuel_in_tank`
+  = the **first finite fuel reading of the lap's selected timed run**, i.e. fuel at the racing S/F line
+  as the lap begins, falling lap by lap. Anchoring to the timed run (rather than a raw lap-boundary
+  snapshot) reuses the run trimming that already discards the formation lap, out-laps and in-laps, so
+  race **lap 1** shows post-formation start fuel and qualifying shows the flying lap's start fuel. It
+  rides as a lap-start scalar on the in-memory `Sample` — **not** a trace channel, so `build_trace` /
+  the Parquet format are unchanged. Stored in an additive-nullable `laps.fuel_in_tank` column; **older
+  laps need a re-ingest** (they load as `None` → shown as `—`). `Setup.fuel_load` is retained on the
+  model but no longer surfaced in the setup table; per-lap fuel is shown next to the Car Status /
+  tyre-age header instead.
 - **G-force + track position (iteration 2b, implemented)** live in Motion (0):
   `g_force_lateral/longitudinal` plus `world_position_x` / `world_position_z` (F1's ground plane is
   X/Z; Y is *up*, unused). **World position is `float` in both formats, but g-force is the one

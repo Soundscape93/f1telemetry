@@ -23,6 +23,7 @@ Session History time is 0).
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Iterable, Iterator
 
 from ..domain.models import (
@@ -138,6 +139,21 @@ def _select_timed_run(runs: list[list[Sample]], target_ms: int | None) -> list[S
     if target_ms and len(runs) > 1:
         return min(runs, key=lambda r: abs(_estimate_lap_ms(r) - target_ms))
     return _longest_run(runs)
+
+
+def _lap_start_fuel(samples: list[Sample]) -> float | None:
+    """Fuel in the tank at the start of a timed lap, in kg.
+    
+    ``samples`` is already trimmed to the timed lap's 0..track-length pass (the
+    formation/out-lap prefix and in-lap/slow-down have been dropped by _select_timed_run /
+    _split_runs), so its first frame sits at the racing s/f line - i.e. fuel at the lap start,
+    which falls lap by lap. Returns the first finite Car Status fuel reading, or None when no 
+    frame of the run carried one (older streams, or Car Status not yet seen).
+    """
+    for sample in samples:
+        if not math.isnan(sample.fuel):
+            return sample.fuel
+    return None
 
 
 def _trim_to_timed_lap(samples: list[Sample]) -> list[Sample]:
@@ -341,7 +357,8 @@ class _SessionBuilder:
                     is_valid=bool(entry.lap_valid_bit_flags & _LAP_VALID_BIT),
                     trace=build_trace(samples),
                     tyre_context=self._tyre_context.get(lap_number),
-                    damage=self._damage.get(lap_number)
+                    damage=self._damage.get(lap_number),
+                    fuel_in_tank=_lap_start_fuel(samples)
                 )
             )
         return tuple(laps)

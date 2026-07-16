@@ -52,7 +52,6 @@ class SetupFieldsTest(unittest.TestCase):
         self.assertIn("Aerodynamics", headers)
         self.assertNotIn("Ballast", fields)  # ballast removed
         self.assertNotIn("Ballast & Fuel", headers)
-        self.assertIn("Fuel Load", fields)
 
         fw = fields["Front Wing"]
         self.assertEqual(fw.display, "5")

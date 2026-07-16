@@ -4,6 +4,7 @@ Test cases for ERS-related functionality in the session assembler.
 from __future__ import annotations
 
 from types import SimpleNamespace
+import math
 import unittest
 
 import numpy as np
@@ -43,13 +44,14 @@ class TelemetrySampleTest(unittest.TestCase):
             engine_rpm=11000,
             drs=1,
         )
-        car_status = SimpleNamespace(ers_store_energy=4321, ers_deploy_mode=2)
+        car_status = SimpleNamespace(ers_store_energy=4321, ers_deploy_mode=2, fuel_in_tank=48.5)
 
         sample = telemetry_sample(lap_data, car_telemetry, car_status)
 
         self.assertEqual(sample.distance, 123.4)
         self.assertEqual(sample.ers_store_energy, 4321)
         self.assertEqual(sample.ers_deploy_mode, 2)
+        self.assertEqual(sample.fuel, 48.5)
 
     def test_telemetry_sample_defaults_ers_to_zero_without_car_status(self) -> None:
         lap_data = SimpleNamespace(lap_distance=50.0)
@@ -67,6 +69,7 @@ class TelemetrySampleTest(unittest.TestCase):
 
         self.assertEqual(sample.ers_store_energy, 0)
         self.assertEqual(sample.ers_deploy_mode, 0)
+        self.assertTrue(math.isnan(sample.fuel), "Fuel in tank should be NaN when car status is not provided")
 
 
 class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
@@ -108,7 +111,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     ers_deploy_mode=1,
                     actual_tyre_compound=16,
                     visual_tyre_compound=16,
-                    tyres_age_laps=1,)],
+                    tyres_age_laps=1,
+                    fuel_in_tank=50.0
+                    )],
             )
         )
 
@@ -188,6 +193,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     actual_tyre_compound=16,
                     visual_tyre_compound=16,
                     tyres_age_laps=1,
+                    fuel_in_tank=49.5
                 )],
             )
         )
@@ -236,6 +242,8 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
         self.assertEqual(len(result.laps), 1)
         self.assertEqual(result.laps[0].trace.ers_store_energy.tolist(), [111, 222])
         self.assertEqual(result.laps[0].trace.ers_deploy_mode.tolist(), [1, 2])
+        # lap-start fuel = the first frame's Car Status reading (50.0), not the later 49.5
+        self.assertEqual(result.laps[0].fuel_in_tank, 50.0)
 
 
 if __name__ == "__main__":

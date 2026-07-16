@@ -154,6 +154,7 @@ class Lap:
     trace: LapTrace | None = None   # dense samples; may be persistent seperately from timing
     tyre_context: LapTyreContext | None = None  # tyre state at the line; None until captured/stored
     damage: CarDamage | None = None  # non-tyre damage at the line; None until captured/stored
+    fuel_in_tank: float | None = None  # kg in the tank at lap start (Car Status); None until captured.
 
     @property
     def is_complete(self) -> bool:

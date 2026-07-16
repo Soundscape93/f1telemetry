@@ -52,9 +52,6 @@ _SETUP_SPEC = (
         ("Rear Right Tyre Pressure", "tyre_pressures", 2, 20.5, 26.5, 1, "PSI"),
         ("Rear Left Tyre Pressure", "tyre_pressures", 3, 20.5, 26.5, 1, "PSI"),
     )),
-    ("Fuel", (
-        ("Fuel Load", "fuel_load", None, 5, 110, 0, "kg"),
-    ))
 )
 
 

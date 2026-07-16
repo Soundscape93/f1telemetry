@@ -143,6 +143,7 @@ class LapStore:
             tyre_surface_temp=list(tc.surface_temp) if tc else None,
             tyre_carcass_temp=list(tc.carcass_temp) if tc else None,
             damage=dataclasses.asdict(lap.damage) if lap.damage else None,
+            fuel_in_tank=lap.fuel_in_tank
         )
     
     def _to_domain(self, row: LapRow, with_trace: bool = True) -> Lap:
@@ -178,5 +179,6 @@ class LapStore:
             trace=trace,
             tyre_context=tyre_context,
             damage=damage,
+            fuel_in_tank=row.fuel_in_tank
         )
 

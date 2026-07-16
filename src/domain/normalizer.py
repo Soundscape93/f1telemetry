@@ -270,22 +270,26 @@ class Sample(NamedTuple):
     pos_z: float = float('nan')
     g_lat: float = float('nan')
     g_long: float = float('nan')
+    fuel: float = float('nan')      # Car Status fuel_in_tank (kg); a lap-start scaler, NOT a trace channel
 
 
 def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> Sample:
     """Combine one frame's player rows into a single trace sample.
     
     `lap_data` / `car_telemetry` are the player's entries from the Lap Data and
-    Car Telemetry packets. `car_status` is the player's Car Status entry (ERS; zeros when
-    omitted). `motion` is the normalized ``MotionSample`` for the frame - position + g-force -
-    or None (older streams / no Motion), in which case those channels are NaN placeholders.
+    Car Telemetry packets. `car_status` is the player's Car Status entry (ERS + fuel_in_tank);
+    zeros when omitted). `motion` is the normalized ``MotionSample`` for the frame -
+    position + g-force - or None (older streams / no Motion), in which case those channels are
+    NaN placeholders.
     """
     if car_status is not None:
         ers_store_energy = car_status.ers_store_energy
         ers_deploy_mode = car_status.ers_deploy_mode
+        fuel = car_status.fuel_in_tank
     else:
         ers_store_energy = 0
         ers_deploy_mode = 0
+        fuel = float('nan')
     if motion is not None:
         pos_x, pos_z, g_lat, g_long = motion
     else:
@@ -304,7 +308,8 @@ def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> S
         pos_x=pos_x,
         pos_z=pos_z,
         g_lat=g_lat,
-        g_long=g_long
+        g_long=g_long,
+        fuel=fuel
     )
 
 
