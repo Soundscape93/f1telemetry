@@ -83,6 +83,58 @@ what would trigger revisiting it.
   archiving is non-fatal — on failure the raw capture is kept and the UI says so. Reads go
   through `open_capture`, so both forms replay/re-ingest identically. *Revisit:* the ROADMAP
   hybrid (metadata in DB + zstd payload) replaces the codec choice when it lands.
+- **League data is shared as capture files; the database stays local, single-writer, and
+  derived.** A league needs someone else's recording when the admin can't attend a weekend.
+  Putting the SQLite DB on a synced cloud folder (Drive/Dropbox/OneDrive) was considered and
+  **rejected**: SQLite's guarantees rest on POSIX locking and on the DB file and its journal/WAL
+  staying mutually consistent, and sync clients honour neither — they upload whole files on their
+  own schedule, so a mid-transaction snapshot ships a torn file. There is also no merge for a
+  binary B-tree: concurrent edits produce a "conflicted copy" and someone's work vanishes
+  silently. And the DB is only half the data — the Parquet traces and capture archives sync
+  independently of it, so rows would point at files a peer doesn't have yet. Instead the
+  **capture file is the interchange format**: immutable, write-once, the one shape sync handles
+  perfectly. Sharing is a Drive folder (`<League>/<Season>/<Round>-<Track>/`, season in the tree
+  because a track folder alone collapses seasons and contributors); captures are copied local
+  after import, so Drive is transport and the local archive stays the home. The admin's DB is the
+  canonical league dataset and everyone else contributes captures — curation (round assignment,
+  rosters, calendars) stays with the admin. *Why this needs no merge code:* `session_uid` is a
+  game-generated 64-bit id, so contributors' sessions can't collide; `SessionStore.save()` is a
+  replace-by-uid, so re-import is idempotent; and `recorded_at` is the capture's own packet
+  wall-clock, so sessions from different machines sort correctly against each other (modulo a
+  contributor's PC clock being wrong). If the DB is ever lost or corrupted, re-ingest rebuilds it.
+  *Packaging dependency:* league members run the **full app**, not a cut-down recorder — they are
+  the first external test users (their own career/practice sessions, the existing views, feedback
+  and bugs), and capture contribution is a side effect of that, not the point. *Revisit:*
+  multi-admin editing — other members assigning rounds or editing rosters — is what would force a
+  real hosted backend (Postgres + object storage, since traces and payloads can't live in a
+  relational DB); indefinitely future, and nothing here blocks it.
+- **Auto-ingest after recording is fine for league captures; the three concerns are already
+  decoupled.** The Record button auto-ingests, then archives. A contributor's local ingest does
+  not affect what they upload: ingest is a pure read, and no local identity leaks into the file
+  because `session_uid` comes from the game, not from an autoincrement. So recording, local
+  ingest, and sharing need no separation — the contributor's DB is just their own private
+  projection of the same capture. Two consequences to know: **tombstones are local** —
+  `ingest_capture` skips the *ingesting* store's `deleted_uids()`, so a contributor deleting an
+  aborted attempt doesn't delete it for the admin, who must re-do it. That's correct, not a gap:
+  you shouldn't silently inherit someone else's curation calls. And **archiving is currently
+  gated on ingest succeeding** (`IngestWorker`: `if sessions:`), so a capture that fails to
+  parse — the one most worth sending the admin — is left raw at ~10x the size, as is a capture
+  whose sessions are all tombstoned. *Fix when the hybrid lands:* archive because recording
+  finished, not because ingest liked the result.
+- **Hybrid capture storage (metadata in DB + payload on disk) lands before the session view.**
+  Not an architectural ordering but a deadline one: once the league season starts captures
+  accumulate immediately, and both halves are retroactive-forever — every weekend archived under
+  the old codec is a re-compress pass later, and every capture ingested before the metadata table
+  exists needs a backfill. Doing it first makes the league dataset uniform from day one, and the
+  migration is cheap because capture metadata is a **new table** (`create_all` handles it, per the
+  `deleted_sessions` precedent); only new columns on existing tables force a re-ingest. The
+  metadata is designed as a **manifest for sharing**: a **content hash** (exact dedupe on import
+  regardless of filename, so re-syncs are no-ops) and the **producing peer** (one column now; the
+  difference between "someone recorded Monza" and an auditable league dataset). The codec switch
+  itself is not re-decided here — see the gzip bullet's *Revisit* above — but it carries one hard
+  constraint: **`open_capture` must keep reading `.f1cap.gz` forever.** It currently hard-codes
+  that suffix via `is_compressed_capture`; the new codec is an addition to the reader, never a
+  replacement, so every existing recording stays importable.
 
 ## Migrations
 - **Ad-hoc / additive now; Alembic later.** All schema changes so far are additive (new
