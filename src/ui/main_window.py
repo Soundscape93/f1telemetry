@@ -247,13 +247,13 @@ class MainWindow(QMainWindow):
         self._reset_button()
         if descriptions:
             message = f"Stored {len(descriptions)} session(s): " + " ".join(descriptions)
-            if archive_path:
-                message += f"Archived capture to {Path(archive_path).name}"
-            elif archive_error:
-                message += f"Capture kept uncompressed: {archive_error}"
-            self._status.setText(message)
         else:
-            self._status.setText("Capture saved, but no complete session(s) found.")
+            message = "Capture saved, but no complete session(s) found."
+        if archive_path:
+            message += f"Archived capture to {Path(archive_path).name}."
+        elif archive_error:
+            message += f"Capture kept uncompressed: {archive_error}"
+        self._status.setText(message)
 
         # a freshly-stored session may be on an open surface; refresh whichever is showing.
         current = self._stack.currentWidget()

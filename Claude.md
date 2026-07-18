@@ -37,6 +37,9 @@ design depends on it.
 - **UI:** PySide6 (+ PyQtGraph for charts).
 - **Storage:** SQLite via SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`/`mapped_column`), kept
   engine-agnostic so it *could* move to Postgres if a hosted server is ever built.
+- **Hand-managed runtime deps (no requirements file):** `pyarrow` (Parquet traces), `pyqtgraph`
+  (charts), `zstandard` (new capture archives). Install the PyPI wheels by hand; `zstandard`'s
+  wheel statically bundles libzstd, which avoids a version clash with the one Qt loads.
 - **Wire parsing:** `ctypes.LittleEndianStructure` (`_pack_ = 1`), one struct set per format.
 
 ## Repository layout
@@ -44,8 +47,9 @@ design depends on it.
 ```
 F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; holds untracked
                                 #   data + dev scratch that stays out of version control:
-  captures/                     # capture recordings — source of truth; gzip-archived to
-                                #   .f1cap.gz after ingest, never auto-deleted
+  captures/                     # capture recordings — source of truth; archived after ingest,
+                                #   never auto-deleted. New archives are .f1cap.zst (zstd);
+                                #   existing .f1cap.gz stay readable forever
   rosters/                      # canonical per-season roster JSON:
                                 #   season_<id>.json; CSV is import-only (see DECISIONS)
   diagnose_participants.py      # dev tool: raw Participants per session (read-only)
@@ -61,18 +65,18 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
     docs/                       # ARCHITECTURE, DECISIONS, TELEMETRY_NOTES, ROADMAP
     src/
       ingest/    recording.py (.f1cap read/write), recorder.py, sources.py,
-                 archive.py (gzip .f1cap.gz), inspect.py (capture-summary CLI)
+                 archive.py (gzip/zstd codec dispatch + HashingReader), inspect.py (CLI)
       protocol/  base.py, header.py, enums.py, reference.py, registry.py, parser.py,
                  v2025/structs.py, v2026/structs.py
-      domain/    models.py, normalizer.py, season.py, calendars.py, roster.py
+      domain/    models.py, captures.py, normalizer.py, season.py, calendars.py, roster.py
       session/   assembler.py
-      storage/   schema.py, sessions.py, seasons.py
+      storage/   schema.py, sessions.py, seasons.py, laps.py, captures.py
       analysis/  standings.py
       ui/        app.py, main_window.py, season_roster.py, workers.py, formatting.py,
                  seasons/ (view.py=SeasonsView container + overview/create/detail/weekend
                    _page.py, labels.py) — pages coordinated by navigation signals
                  components/ (tables.py, classification_table.py) — shared widgets
-      pipeline.py               # Qt-free ingest orchestration (ingest_capture)
+      pipeline.py               # Qt-free ingest orchestration (ingest_capture, archive_and_ingest)
     test/                       # unittest suites (test_*.py); run from the repo root:
                                 #   python3 -m f1telemetry.test.<name>
 ```
@@ -115,8 +119,14 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
 
 ## Current status
 
-- **Ingest / protocol / domain / storage:** complete and tested (both formats). Captures are
-  gzip-archived to `.f1cap.gz` after a successful ingest; replay/ingest reads both forms.
+- **Ingest / protocol / domain / storage:** complete and tested (both formats), the archive-first
+  flow **verified end-to-end against a live recording**. Ingest is **archive-first**:
+  `archive_and_ingest` compresses the raw capture to `.f1cap.zst` (zstd),
+  ingests *from* the archive so its checksum is verified end-to-end, and deletes the raw only on
+  success — a capture that fails to parse is kept as both raw and archive. Existing `.f1cap.gz`
+  archives stay readable and are ingested in place (never rewritten). A `captures` metadata table
+  (`CaptureStore`, keyed by a codec-independent content hash) makes captures queryable without
+  decompressing them — the base for a future "import league captures from a folder" flow.
 - **Standings:** driver standings (by name or race number) and constructor standings; LEAGUE
   standings resolve drivers through the per-season roster.
 - **UI:** single-window shell (sidebar + persistent record/stop header + stacked pages). The

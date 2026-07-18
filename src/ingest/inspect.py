@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import struct
 
+from .archive import open_capture       # dev tools at workspace root
 from .recording import read_header, read_packet
 
 # F1 25 / F1 26 packet ids (see Claude.md MVP subset). 15 is F1 25+, 16 is F1 26 only.
@@ -48,7 +49,7 @@ def summarize(path: str) -> None:
     first_time: float | None = None
     last_time: float | None = None
 
-    with open(path, "rb") as f:
+    with open_capture(path) as f:
         read_header(f)
         while True:
             packet = read_packet(f)

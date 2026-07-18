@@ -174,20 +174,20 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   are still unresolved.
 
 ## Capture compression
-- **Done:** captures are gzip-archived to `.f1cap.gz` after a successful ingest
-  (`ingest/archive.py`; see ARCHITECTURE → Capture compression).
-- **Loose ends:**
-  - The diagnostic tools (`ingest/inspect.py`, `diagnose_participants.py`,
-    `dump_classifications.py`) open captures with plain `open()`, so they can't read a
-    `.f1cap.gz` — route them through `open_capture`.
-  - `compressed_capture_path` appends `.f1cap.gz` to the *full* filename, producing a doubled
-    extension (`x.f1cap` → `x.f1cap.f1cap.gz`, e.g. `captures/league_race.f1cap.f1cap.gz`);
-    `x.f1cap.gz` (append only `.gz`) would still satisfy `is_compressed_capture`. Renaming the
-    scheme means also handling the already-archived files.
-- **Future — a hybrid.** Store capture **metadata in the database** (so captures are queryable
-  without decompressing), keeping the payload compressed on disk; and likely **switch the
-  payload codec from gzip to zstd (Zstandard)** — better compression ratio *and* faster than
-  gzip. Shape TBD (metadata-in-DB + blob-on-disk split, with the codec chosen at that point).
+- **Done — the hybrid landed.** Ingest is archive-first (`pipeline.archive_and_ingest`): compress
+  the raw to `.f1cap.zst` first, ingest *from* the archive (checksum-verified end-to-end), delete
+  the raw only on success — a failed ingest keeps both raw and archive. New archives are **zstd**
+  (level 3: ~18% smaller than gzip-6 and several times faster; benchmarked); existing `.f1cap.gz`
+  stay readable and are ingested in place. Capture **metadata is in the DB** (`captures` +
+  `capture_sessions`, `CaptureStore`, keyed by a codec-independent content hash) so captures are
+  queryable without decompressing. The diagnostic tools read through `open_capture`. See
+  ARCHITECTURE → Capture compression and DECISIONS → Storage.
+- **Next — league capture import.** Build on the metadata table: an "import new captures from a
+  shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
+  `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
+- **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
+  never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
+  (it isn't in the file), so the column exists now; wiring waits for the import flow above.
 
 ## Possible, uncertain
 - **Hosted multi-user league platform** — signup / authorization, colleagues upload their own

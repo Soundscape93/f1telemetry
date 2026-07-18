@@ -144,6 +144,52 @@ class DeletedSessionRow(Base):
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
+class CaptureRow(Base):
+    """One capture file: its identity, where it lives, and what it holds.
+    
+    Keyed on the sha256 of the *decompressed* payload, so re-archiving a capture under a new
+    codec (gzip -> zstd) updates the row rather than creating a second one, and importing the
+    same recording twice from a shared league folder is a no-op. ``path`` is advisory: files get
+    moved and copied between machines, and the hash - not the location - is the identity.
+    """
+    
+    __tablename__ = "captures"
+
+    content_hash: Mapped[str] = mapped_column(String, primary_key=True)  # sha256 of the decompressed payload; the identity
+    path: Mapped[str] = mapped_column(String)
+    file_name: Mapped[str] = mapped_column(String, index=True)  # indexed: folder-scan pre-filter
+    file_size: Mapped[int] = mapped_column(BigInteger)
+    payload_size: Mapped[int] = mapped_column(BigInteger)
+    codec: Mapped[str] = mapped_column(String)
+    packet_count: Mapped[int] = mapped_column(BigInteger)
+    recorded_by: Mapped[str | None] = mapped_column(String, nullable=True)  # which user/member produced it; None = unknown/self
+    ingested_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    first_packet_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_packet_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    sessions: Mapped[list["CaptureSessionRow"]] = relationship(
+        back_populates="capture", cascade="all, delete-orphan")
+
+
+class CaptureSessionRow(Base):
+    """Which sessions a capture contains: the session_uid -> capture lookup.
+    
+    A child table rather than a JSON list on ``captures`` because the useful direction is
+    *uid -> capture* ("which file do I re-ingest to back-fill this session?", ROADMAP ->
+    Packaging), and JSON can't be joined or indexed. ``session_uid`` is deliberately NOT a
+    foreign key to ``sessions`` {mirrors ``season_assignments`` and ``laps``}: it records what
+    the *file* holds, which stays true whether or not that session is currently stored -
+    including sessions ingest skipped as tombstoned.
+    """
+
+    __tablename__ = "capture_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    content_hash: Mapped[str] = mapped_column(ForeignKey("captures.content_hash"), index=True)
+    session_uid: Mapped[str] = mapped_column(String, index=True)
+
+    capture: Mapped[CaptureRow] = relationship(back_populates="sessions")
+
 class SeasonRow(Base):
     """A user-authored season: mode, number, optional nickname, pinned game format."""
 

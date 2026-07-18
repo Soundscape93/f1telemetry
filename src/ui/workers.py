@@ -14,7 +14,6 @@ from PySide6.QtCore import QThread, Signal
 
 from ..ingest.recorder import SessionRecorder
 from ..ingest.sources import LiveUDPSource
-from ..ingest.archive import archive_capture
 
 
 class RecorderWorker(QThread):
@@ -71,35 +70,35 @@ class IngestWorker(QThread):
         self._trace_dir = trace_dir
     
     def run(self) -> None:
-        """ Run the parse -> assemble -> persist pipeline in its own thread.
-        Heavy imports are done here so the app starts quickly and only pulls them in
-        when a capture is actually processed.
+        """Archive, ingest, and persist the capture on this thread (see pipeline.archive_and_ingest).
+
+        Each store owns its connection on THIS thread - SQLite dislikes a connection shared across
+        threads, and the LapStore writes each lap's Parquet trace under trace_dir. Heavy imports
+        live here so the app starts quickly and only pulls them in when a capture is processed.
         """
-        from ..pipeline import ingest_capture
+        from ..pipeline import archive_and_ingest
+        from ..storage.captures import CaptureStore
         from ..storage.laps import LapStore
         from ..storage.sessions import SessionStore
 
+        # Each store owns its own engine on THIS thread; a single finally disposes all three,
+        # wether ingest succeeded, failed, or a later store failed to construct (None = never built).
+        store = lap_store = capture_store = None
         try:
             store = SessionStore(self._db_url)
-            # Own the LapStore for this thread only (SQL dislikes a connection shared accross
-            # threads); it writes each lap's Parquet trace under trace_dir. Without it, ingest
-            # persists classification + setup historey but leaves the laps table empty.
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
-            try:
-                sessions = ingest_capture(self._capture_path, store, lap_store=lap_store)
-            finally:
-                lap_store.close()
-            archive_path = ""
-            archive_error = ""
-            if sessions:
-                try:
-                    archive_path = str(archive_capture(self._capture_path))
-                except Exception as exc:
-                    archive_error = str(exc)
+            capture_store = CaptureStore(self._db_url)
+            sessions, archive_path, archive_error = archive_and_ingest(
+                self._capture_path, store,
+                lap_store=lap_store, capture_store=capture_store
+            )
             self.done.emit([self._describe(s) for s in sessions], archive_path, archive_error)
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
-            
+        finally:
+            for s in (capture_store, lap_store, store):
+                if s is not None:
+                    s.close()
 
     @staticmethod
     def _describe(session) -> str:

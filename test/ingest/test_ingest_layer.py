@@ -153,62 +153,99 @@ class IngestRoundTripTest(unittest.TestCase):
         # the original capture must be untouched (still exactly its one packet)
         self.assertEqual(len(list(FileReplaySource(path, realtime=False))), 1)
 
-    def test_gzip_capture_replay_preserves_bytes_and_order(self):
-        from f1telemetry.src.ingest.archive import archive_capture
+    def test_archive_round_trips_every_codec(self):
+        """Bytes, order, and the remove-original default, for every codec we can write."""
+        from f1telemetry.src.ingest.archive import CODEC_GZIP, CODEC_ZSTD, archive_capture
 
-        datagrams = [
-            _make_datagram(2025, 0),
-            _make_datagram(2025, 6),
-            _make_datagram(2025, 2),
-            _make_datagram(2026, 3),
+        datagrams = [_make_datagram(2025, 0),
+                     _make_datagram(2025, 6),
+                     _make_datagram(2026, 2),
+                     _make_datagram(2026, 3)
         ]
-        path = self._write_capture(datagrams)
+        for codec, suffix in ((CODEC_GZIP, ".gz"), (CODEC_ZSTD, ".zst")):
+            with self.subTest(codec=codec):
+                path = self._write_capture(datagrams)
+                archive_path = archive_capture(path, codec=codec)
+                self.addCleanup(lambda p=archive_path: os.path.exists(p) and os.remove(p))
 
+                self.assertTrue(str(archive_path).endswith(suffix))
+                self.assertFalse(os.path.exists(path),
+                                 "archive_capture should remove the original capture by default")
+                self.assertEqual(list(FileReplaySource(archive_path, realtime=False)), datagrams,
+                                 "replay of the archived capture should yield the same datagrams in order")
+    
+    def test_default_codec_is_zstd(self):
+        from f1telemetry.src.ingest.archive import CODEC_ZSTD, archive_capture, capture_codec
+
+        path = self._write_capture([_make_datagram(2025, 0)])
         archive_path = archive_capture(path)
-
-        self.assertFalse(os.path.exists(path), "archive_capture should remove the original capture by default")
-        self.assertEqual(os.path.exists(archive_path), True, "archive_capture should create a .gz file")
-        self.assertEqual(list(FileReplaySource(str(archive_path), realtime=False)), datagrams,
-                         "replay of the archived capture should yield the same datagrams in order")
-        
+        self.addCleanup(lambda: os.path.exists(archive_path) and os.remove(archive_path))
+        self.assertEqual(capture_codec(archive_path), CODEC_ZSTD)
+    
     def test_archive_capture_can_keep_original_when_requested(self):
+        """Load-bearing for the ingest flow: the worker archives *before* it ingests, and
+        deletes the raw capture only once ingest has proven the archive readable."""
         from f1telemetry.src.ingest.archive import archive_capture
 
-        datagrams = [
-            _make_datagram(2025, 0),
-            _make_datagram(2025, 6),
-        ]
+        datagrams = [_make_datagram(2025, 0), _make_datagram(2025, 6)]
         path = self._write_capture(datagrams)
 
         archive_path = archive_capture(path, remove_original=False)
+        self.addCleanup(lambda: os.path.exists(archive_path) and os.remove(archive_path))
 
-        self.assertTrue(os.path.exists(path), "archive_capture should keep the original capture when remove_original=False")
-        self.assertEqual(os.path.exists(archive_path), True, "archive_capture should create a .gz file")
+        self.assertTrue(os.path.exists(path),
+                        "archive_capture should keep the original capture when remove_original=False")
         self.assertEqual(list(FileReplaySource(str(archive_path), realtime=False)), datagrams,
                          "replay of the archived capture should yield the same datagrams in order")
 
-
-    def test_gzip_capture_preserves_recv_time(self):
-        from f1telemetry.src.ingest.archive import archive_capture, open_capture
-        from f1telemetry.src.ingest.recording import read_header, read_packet
+    def test_archive_preserves_recv_time(self):
+        """Every codec must preserve recv_time - SessionResult.recorded_at is derived from it."""
+        from f1telemetry.src.ingest.archive import (CODEC_GZIP, CODEC_ZSTD, archive_capture,
+                                                    open_capture)
 
         datagrams = [_make_datagram(2025, 0), _make_datagram(2025, 6), _make_datagram(2025, 3)]
-        path = self._write_capture(datagrams)
+        for codec in (CODEC_GZIP, CODEC_ZSTD):
+            with self.subTest(codec=codec):
+                path = self._write_capture(datagrams)
+                archive_path = archive_capture(path, codec=codec)
+                self.addCleanup(lambda p=archive_path: os.path.exists(p) and os.remove(p))
 
-        archive_path = archive_capture(path)
-        self.addCleanup(lambda: os.path.exists(archive_path) and os.remove(archive_path))
+                recovered = []
+                with open_capture(str(archive_path)) as f:
+                    read_header(f)
+                    while (packet := read_packet(f)) is not None:
+                        recovered.append((packet.recv_time, packet.data))
 
-        recovered = []
-        with open_capture(str(archive_path)) as f:
-            read_header(f)
-            while (packet := read_packet(f)) is not None:
-                recovered.append((packet.recv_time, packet.data))
+                self.assertEqual(
+                    recovered,
+                    [(float(i), d) for i, d in enumerate(datagrams)],
+                    "the archive round-trip must preserve both recv_time and payload bytes")
 
-        self.assertEqual(
-            recovered,
-            [(float(i), d) for i, d in enumerate(datagrams)],
-            "gzip round-trip must preserve both recv_time and payload bytes",)
-            
+    def test_hash_is_codec_independent(self):
+        """A gzip -> zstd re-archive changes every byte on disk but not the capture's identity.
+
+        This is what lets the content hash be the dedupe key for league capture imports: the
+        hash is taken over the decompressed payload, never the archive.
+        """
+        from f1telemetry.src.ingest.archive import (CODEC_GZIP, CODEC_ZSTD, HashingReader,
+                                                    archive_capture, open_capture)
+
+        datagrams = [_make_datagram(2025, 0), _make_datagram(2026, 3)]
+        hashes = {}
+        for codec in (CODEC_GZIP, CODEC_ZSTD):
+            path = self._write_capture(datagrams)
+            archive_path = archive_capture(path, codec=codec)
+            self.addCleanup(lambda p=archive_path: os.path.exists(p) and os.remove(p))
+
+            with open_capture(str(archive_path)) as fh:
+                reader = HashingReader(fh)
+                while reader.read(4096):
+                    pass
+                hashes[codec] = reader.content_hash
+
+        self.assertEqual(hashes[CODEC_GZIP], hashes[CODEC_ZSTD],
+                         "the content hash must be taken over the decompressed payload, so a "
+                         "re-archived capture keeps its identity")
 
 
 if __name__ == "__main__":

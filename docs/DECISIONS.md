@@ -76,13 +76,21 @@ what would trigger revisiting it.
   second explicit action rather than the default.
 - **Enums stored as raw ints, read via `safe_enum`.** The game's enums grow across title
   updates; `safe_enum` returns the member or the raw int so an unknown value never crashes load.
-- **Captures are gzip-archived after ingest, not compressed while recording.** Recording stays
+- **Captures are archived after recording, not compressed while recording.** Recording stays
   a dumb append of raw datagrams (no CPU/complexity on the live path, and a crash mid-capture
-  loses nothing to a half-written compressed stream); `IngestWorker` archives to `.f1cap.gz`
-  only after a successful ingest. gzip because it's stdlib (zero deps for colleagues);
-  archiving is non-fatal — on failure the raw capture is kept and the UI says so. Reads go
-  through `open_capture`, so both forms replay/re-ingest identically. *Revisit:* the ROADMAP
-  hybrid (metadata in DB + zstd payload) replaces the codec choice when it lands.
+  loses nothing to a half-written compressed stream); compression happens at ingest. *Ordering
+  (Phase C, done):* ingest is **archive-first** — the raw is compressed (original kept), the
+  **archive** is ingested so its frame checksum is verified end-to-end, and the raw is deleted
+  only on a successful ingest. So a capture that fails to parse is kept as *both* raw (for
+  debugging) and archive (uploadable) — which is why archiving is no longer gated on ingest
+  succeeding. Archiving is still non-fatal: if compression itself fails the raw is ingested
+  directly and kept, and the UI says so. *Codec (done):* new archives are **zstd** (`.f1cap.zst`,
+  level 3 — benchmarked ~18% smaller than gzip-6 *and* several times faster); the original gzip
+  choice (stdlib, zero deps) is superseded, but `open_capture` reads `.f1cap.gz` **forever** and
+  re-ingesting one leaves it a `.gz` (never rewritten). `zstandard` joins pyarrow/pyqtgraph as a
+  hand-installed dep (its PyPI wheel bundles libzstd statically, dodging a clash with Qt's copy).
+  The earlier *Revisit* (ROADMAP hybrid replaces the codec) is now **resolved** — it landed with
+  the capture-metadata table (see the three league-sharing bullets below).
 - **League data is shared as capture files; the database stays local, single-writer, and
   derived.** A league needs someone else's recording when the admin can't attend a weekend.
   Putting the SQLite DB on a synced cloud folder (Drive/Dropbox/OneDrive) was considered and

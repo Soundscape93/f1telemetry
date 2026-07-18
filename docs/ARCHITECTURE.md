@@ -25,13 +25,16 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   datagrams to a `.f1cap`. Cooperative stop via a `threading.Event` checked at each
   socket-timeout cycle. (The Qt wrapper is `RecorderWorker` in `ui/workers.py`.)
 - **`sources.py`** — `PacketSource` ABC; `LiveUDPSource`; `FileReplaySource` (realtime or fast).
-  Opens files through `archive.open_capture`, so it replays `.f1cap` and `.f1cap.gz` alike.
+  Opens files through `archive.open_capture`, so it replays `.f1cap`, `.f1cap.gz`, and
+  `.f1cap.zst` alike.
 - **`archive.py`** — capture compression (see [Capture compression](#capture-compression)):
-  `archive_capture` gzips a capture, `open_capture` opens either form transparently,
-  `is_compressed_capture` / `compressed_capture_path` are the naming helpers.
+  `archive_capture` writes a capture in a chosen codec (`CODEC_*`; new archives default to zstd),
+  `open_capture` opens any form transparently by suffix, `capture_codec` /
+  `is_compressed_capture` / `compressed_capture_path` are the naming helpers, and `HashingReader`
+  hashes+sizes the decompressed payload as it streams past (the capture's codec-independent id).
 - **`inspect.py`** — diagnostic CLI (`python -m f1telemetry.src.ingest.inspect <capture>`):
-  per-`(format, packet_id)` tally, byte total, and duration for one capture. Reads through the
-  same recording layer as the analysis, so corruption surfaces the same way here as downstream.
+  per-`(format, packet_id)` tally, byte total, and duration for one capture. Reads through
+  `open_capture`, so it handles raw, gzip, and zstd captures alike.
 
 ### protocol/ — datagrams into typed packets
 - **`base.py`** — `_Struct` = a packed `LittleEndianStructure`.
@@ -116,6 +119,15 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   trace (detail page; the iter-2 overlay calls it per selected lap), `load_laps(uid)` the full set.
   The session's setup **history** (`setup_history`) is a JSON column on the session row, not a lap
   concern. Repository-per-aggregate (own table cluster; `schema.py` stays the shared layer).
+- **`captures.py`** *(hybrid capture storage)* — `CaptureStore` over `captures` +
+  `capture_sessions`: what recordings exist, what sessions each holds, and where each was last
+  seen — so a capture is queryable without decompressing it. Keyed by a **content hash of the
+  decompressed payload** (codec-independent, so a gzip→zstd re-archive keeps its identity);
+  `record` is replace-by-hash (idempotent re-import). `for_session(uid)` is the backfill
+  re-ingest lookup; `known_files()` is the cheap name+size pre-filter for a folder scan. The
+  `capture_sessions` list includes sessions ingest *skipped* as tombstoned — it describes the
+  file, not the store's curation of it. `session_uid` is deliberately not a FK (mirrors
+  `session_assignments` / `laps`). `recorded_by` is plumbed but unset (reserved for league import).
 - Stores are context managers (dispose the engine on exit).
 
 ### analysis/ — derived facts
@@ -229,42 +241,56 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   through signals as `str` (uint64-safe). Track-country flags are deferred (no `track_id → country`
   map exists yet).
 - **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
-  `SessionStore` **and** `LapStore` in-thread (SQLite dislikes cross-thread connections) and passes
-  the `LapStore` into `ingest_capture`, so app-side ingest writes laps + Parquet traces (under an
-  injectable `trace_dir`, default `lap_traces/` at the CWD) — not just the classification. Then it
-  gzip-archives the capture after a successful ingest (archive failure is reported, never fatal).
+  `SessionStore`, `LapStore`, **and** `CaptureStore` in-thread (SQLite dislikes cross-thread
+  connections) and calls `pipeline.archive_and_ingest`, so app-side ingest archives the capture,
+  writes laps + Parquet traces (under an injectable `trace_dir`, default `lap_traces/` at the CWD),
+  and records capture metadata — not just the classification. All three stores are disposed in a
+  single `finally`. It's a thin wrapper: the archive/ingest/delete ordering lives in the pipeline.
 - **`formatting.py`** — Qt-free presentation helpers (winner time / gap / +laps / status;
   best-lap-or-status; `is_race`, `slot_label`), unit-testable without importing PySide6.
-- **`pipeline.py`** (`src/pipeline.py`) — `ingest_capture(path, store)`, extracted so ingest is
-  testable without Qt.
+- **`pipeline.py`** (`src/pipeline.py`) — the Qt-free ingest orchestration, extracted so it's
+  testable without Qt: `ingest_capture(path, store, ...)` (parse → assemble → persist, plus the
+  capture-metadata scan) and `archive_and_ingest(...)` (the archive-first flow the worker wraps —
+  see [Capture compression](#capture-compression)).
 
 ## Capture compression
 
-Captures record uncompressed (the recorder appends raw datagrams as they arrive), then are
-**gzip-archived after a successful ingest**: `IngestWorker` calls
-`archive_capture(path)` once `ingest_capture` has produced at least one session, which writes
-`<name>.f1cap.gz` (via a `.tmp` file + atomic `os.replace`) and removes the original.
+Captures record uncompressed (the recorder appends raw datagrams as they arrive), then ingest is
+**archive-first** (`pipeline.archive_and_ingest`, wrapped by `IngestWorker`):
+
+1. **Archive the raw first**, keeping the original — `archive_capture(path, remove_original=False)`
+   writes `<name>.f1cap.zst` (via a `.tmp` file + atomic `os.replace`).
+2. **Ingest the archive.** The decompressor verifies the archive's own frame checksum end-to-end
+   as `ingest_capture` streams it to EOF, so a corrupt archive fails the ingest.
+3. **Delete the raw only after a successful ingest** — never before its bytes are proven readable
+   in the archive.
+
 Key properties:
 
-- **Archiving is non-fatal.** If compression fails the ingest still succeeds; the UI reports
-  "capture kept uncompressed" and the raw `.f1cap` stays on disk. An existing destination is
-  never overwritten (`FileExistsError`).
-- **Reading is transparent.** `open_capture` picks `gzip.open` vs `open` by extension, and
-  `FileReplaySource` goes through it — so replay, re-ingest, and the file-picker
-  (`*.f1cap *.f1cap.gz`) all work on either form. The `.f1cap` record framing is unchanged;
-  gzip is a pure outer wrapper.
-- **Compressed captures remain the source of truth** — nothing is deleted until the compressed
-  copy is fully written.
-
-Future direction (see ROADMAP): a hybrid with capture *metadata in the database* and the
-payload compressed on disk, likely moving the codec from gzip to zstd.
+- **A failed ingest keeps both files.** The raw survives for debugging *and* a small archive
+  exists to upload/share — this is the one capture most worth sending. Archiving is non-fatal too:
+  if compression itself fails, the raw is ingested directly and kept, and the UI says so. An
+  existing destination is never overwritten (`FileExistsError`).
+- **New archives are zstd (level 3); gzip stays readable forever.** `capture_codec` dispatches
+  `open_capture` on the suffix, and `FileReplaySource` goes through it — so replay, re-ingest, and
+  the file-picker work on `.f1cap`, `.f1cap.gz`, and `.f1cap.zst` alike. zstd-3 was benchmarked as
+  ~18% smaller than gzip-6 *and* several times faster to write (the flat knee of the ratio curve).
+  The `.f1cap` record framing is unchanged; compression is a pure outer wrapper.
+- **An already-archived input is ingested in place** — re-ingesting a `.gz`/`.zst` re-compresses
+  nothing and deletes nothing.
+- **Capture metadata comes free from the ingest read.** `HashingReader` wraps the decompression
+  stream, so a capture's content hash (over the *decompressed* payload — codec-independent) and
+  payload size fall out of the pass ingest already makes; `CaptureStore` records them (plus the
+  sessions the file holds) without a second decompression. This is the base for a future "import
+  league captures from a folder" flow (dedupe on hash, `known_files()` pre-filter). See
+  DECISIONS → Storage and ROADMAP.
 
 ## Threading
 
 Recording and ingest run on `QThread`s so the UI stays responsive. SQLite dislikes a connection
-shared across threads, so the **`IngestWorker` creates its own store in-thread**, while the UI
-reads through stores owned by the main window on the GUI thread — both pointing at the same
-database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
+shared across threads, so the **`IngestWorker` creates its own stores in-thread** (session, lap,
+capture — disposed in a `finally`), while the UI reads through stores owned by the main window on
+the GUI thread — both pointing at the same database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
 
 ## Invariants (see also CLAUDE.md and DECISIONS.md)
 
