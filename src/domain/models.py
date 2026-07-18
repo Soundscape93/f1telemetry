@@ -324,10 +324,17 @@ class SessionResult:
         
 
         def setup_for_lap(self, lap_number: int) -> Setup | None:
-            """The setup active on a given lap; the latest snapshot taking effect on or before it.
-            
-            Returns None if no setupr was captured, or if every snapshot starts after this lap.
+            """he setup active on a given lap; the latest snapshot taking effect on or before it.
+
+            Returns None if no setup was captured, or if every snapshot starts after this lap.
+            Several snapshots can share a from_lap (e.g. tuning in the garage before the first
+            lap: the game emits the initial default then the chosen setup while still on lap 1).
+            setup_history is in record order, so among those the last one is the setup actually
+            driven - pick it, not the first (which `max` would return on a tie).
             """
             active = [snap for snap in self.setup_history if snap.from_lap <= lap_number]
-            return max(active, key=lambda snap: snap.from_lap).setup if active else None
+            if not active:
+                return None
+            latest = max(snap.from_lap for snap in active)
+            return next(snap.setup for snap in reversed(self.setup_history) if snap.from_lap == latest)
         

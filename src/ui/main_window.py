@@ -180,8 +180,8 @@ class MainWindow(QMainWindow):
             return
         start_dir = str(_CAPTURE_DIR) if _CAPTURE_DIR.exists() else ""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a .f1cap / .f1cap.gz to ingest", start_dir,
-             "Captures (*.f1cap *.f1cap.gz);;All files (*)"
+            self, "Choose a .f1cap / .f1cap.gz / .f1cap.zst to ingest", start_dir,
+             "Captures (*.f1cap *.f1cap.gz *.f1cap.zst);;All files (*)"
         )
         if not path:
             return

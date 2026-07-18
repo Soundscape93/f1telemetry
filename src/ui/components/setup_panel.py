@@ -47,10 +47,10 @@ _SETUP_SPEC = (
         ("Brake Pressure", "brake_pressure", None, 80, 100, 0, "%"),
     )),
     ("Tyres", (
-        ("Front Right Tyre Pressure", "tyre_pressures", 0, 22.5, 29.5, 1, "PSI"),
-        ("Front Left Tyre Pressure", "tyre_pressures", 1, 22.5, 29.5, 1, "PSI"),
-        ("Rear Right Tyre Pressure", "tyre_pressures", 2, 20.5, 26.5, 1, "PSI"),
-        ("Rear Left Tyre Pressure", "tyre_pressures", 3, 20.5, 26.5, 1, "PSI"),
+        ("Front Right Tyre Pressure", "tyre_pressures", 3, 22.5, 29.5, 1, "PSI"),
+        ("Front Left Tyre Pressure", "tyre_pressures", 2, 22.5, 29.5, 1, "PSI"),
+        ("Rear Right Tyre Pressure", "tyre_pressures", 1, 20.5, 26.5, 1, "PSI"),
+        ("Rear Left Tyre Pressure", "tyre_pressures", 0, 20.5, 26.5, 1, "PSI"),
     )),
 )
 

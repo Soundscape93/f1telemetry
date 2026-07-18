@@ -58,7 +58,11 @@ class SetupFieldsTest(unittest.TestCase):
         self.assertEqual((fw.min_display, fw.max_display), ("0", "50"))
         self.assertAlmostEqual(fw.fraction, 5 / 50)
 
-        self.assertEqual(fields["Front Right Tyre Pressure"].display, "22.0PSI")
+        # tyre_pressures = (RL 22.0, RR 22.5, FL 23.0, FR 23.5); each label must map to its own wheel
+        self.assertEqual(fields["Front Left Tyre Pressure"].display, "23.0PSI")
+        self.assertEqual(fields["Front Right Tyre Pressure"].display, "23.5PSI")
+        self.assertEqual(fields["Rear Left Tyre Pressure"].display, "22.0PSI")
+        self.assertEqual(fields["Rear Right Tyre Pressure"].display, "22.5PSI")
 
 
 if __name__ == "__main__":

@@ -291,7 +291,31 @@ class SetupHistoryTest(unittest.TestCase):
         stream.append(sh_pkt(1, [_lap_entry(80000, 0x0F), _lap_entry(0, 0x00)]))
         (race,) = list(assemble(stream))
         self.assertEqual(len(race.setup_history), 1)
-
+    
+    def test_garage_tuning_before_first_lap_resolves_to_chosen_setup(self):
+        """Default + chosen setup both recorded on lap 1 (tuned in the garage before driving);
+        every early lap must show the chosen setup, not the initial default that arrived first.
+        Reproduces the Suzuka P1 bug where laps 1-3 showed the default."""
+        stream = [session_pkt(1), participants_pkt(1)]
+        stream += frames(1, 1, [0])                       # first join -> cur_lap = 1
+        stream.append(setup_pkt(1, front_wing=5))         # initial/default, from_lap = 1
+        stream.append(setup_pkt(1, front_wing=16))        # chosen in garage, from_lap = 1
+        stream += frames(1, 1, [1500, 3000])
+        stream += frames(1, 2, [0, 1500, 3000])
+        stream += frames(1, 3, [0, 1500, 3000])
+        stream += frames(1, 4, [0])                       # enter lap 4
+        stream.append(setup_pkt(1, front_wing=18))        # tweak before lap 4, from_lap = 4
+        stream += frames(1, 4, [1500, 3000])
+        stream.append(sh_pkt(1, [_lap_entry(72000, 0x0F), _lap_entry(71000, 0x0F),
+                                 _lap_entry(70000, 0x0F), _lap_entry(69000, 0x0F)]))
+        (race,) = list(assemble(stream))
+        # both same-lap snapshots are kept, in record order
+        self.assertEqual([(s.from_lap, s.setup.front_wing) for s in race.setup_history],
+                         [(1, 5), (1, 16), (4, 18)])
+        self.assertEqual(race.setup_for_lap(1).front_wing, 16)   # chosen, not the 5 default
+        self.assertEqual(race.setup_for_lap(2).front_wing, 16)
+        self.assertEqual(race.setup_for_lap(3).front_wing, 16)
+        self.assertEqual(race.setup_for_lap(4).front_wing, 18)   # later tweak
 
 class TyreContextTest(unittest.TestCase):
     """A lap carries a tyre snapshot (compound/age from Car Status, wear from Car Damage)
