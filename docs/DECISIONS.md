@@ -199,6 +199,23 @@ what would trigger revisiting it.
   complete identity), not from a single packet. A late post-race/podium Participants packet can
   report a reduced `num_active_cars`; last-write-wins left high-index cars unmatched in the
   classification join (blank name / number 0 / team −1). See TELEMETRY_NOTES.
+- **Missing Final Classification → reconstructed classification (Option 2).** The game sends the
+  Final Classification packet *once*; a recording stopped a beat early or a single dropped datagram
+  loses it, and the results table then showed 0 drivers. When the packet is absent the assembler
+  now synthesizes a best-effort result (`reconstruct_classification`) from the last Lap Data frame +
+  per-car Session History. **What's recovered exactly:** finishing order, laps, best lap, tyre
+  stints, total race time (sum of Session History lap times = the game's "race time without
+  penalties"), and penalty time (`LapData.penalties`). **The one gap is championship points** —
+  FC-only, in no telemetry packet — left 0. Reconstructed results carry
+  `Classification.is_reconstructed` (persisted via an additive `SessionRow.is_reconstructed`
+  column, auto-migrated by `ensure_schema`). *Why not guess points into the field:* `points` feeds
+  `compute_standings`, so a fabricated value silently corrupts the championship — and standard
+  scoring can't know classified-DNF or custom-league rules. Instead: the UI **badges** the table
+  "reconstructed" and shows a **muted, display-only estimate** (`~25`; GP `25-18-…-1` / sprint
+  `8-…-1`, no fastest-lap point per 2025+ regs, blank for non-finishers), and **standings exclude**
+  reconstructed sessions entirely. *Deferred (Option 3):* an accept/edit/store workflow that lets
+  the user confirm or hand-correct reconstructed race points, a manual editor, and re-including the
+  confirmed values in standings — to land with league-management (see ROADMAP).
 
 ## UI
 - **PySide6 + PyQtGraph.** Chosen over a web stack / NiceGUI / DearPyGui for the analytics-heavy

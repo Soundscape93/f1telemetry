@@ -17,10 +17,12 @@ into ``driver_name`` by the normalizer); human online names are left untouched.
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QLabel, QTableWidget, QTableWidgetItem
 
 from ..formatting import (
     compound_for_lap,
+    estimate_points,
     format_grid,
     format_lap_gap,
     format_lap_time,
@@ -33,6 +35,7 @@ from ..formatting import (
 from ...domain.roster import LeagueRoster, league_display_name
 from ...protocol.enums import ResultStatus
 from ...protocol.reference import team_display_name
+from ..style import MUTED_TEXT
 from .flags import flag_icon
 from .tables import cell, fit_table_height, tidy_table
 from .tyres import tyre_pixmap
@@ -77,6 +80,19 @@ def _tyre_widget(pixmap) -> QLabel:
     return label
 
 
+def _points_cell(entry, reconstructed: bool, is_sprint_race: bool) -> QTableWidgetItem:
+    """The PTS cell. For a normal (game-reported) result it's the official points; for a
+    reconstructed result - where no Final Classification packet supplied points - it shows a muted
+    estimate (``~25``) from finishing position, or blank for a non-finisher. Display-only: this
+    number never reaches standings (see analysis.standings)."""
+    if not reconstructed:
+        return cell(str(entry.points))
+    est = estimate_points(entry.position, entry.result_status, is_sprint_race)
+    item = cell("" if est is None else f"~{est}")
+    item.setForeground(QColor(MUTED_TEXT))
+    return item
+
+
 def _wire_penalty_alternation(
     table: QTableWidget, penalty_cells: list[tuple[QTableWidgetItem, str, str]]
 ) -> None:
@@ -99,12 +115,18 @@ def _wire_penalty_alternation(
     timer.start(_ALTERNATE_MS)
 
 
-def build_classification_table(session, name_of=lambda entry: entry.driver_name) -> QTableWidget:
+def build_classification_table(
+    session, name_of=lambda entry: entry.driver_name, is_sprint_race: bool = False
+) -> QTableWidget:
     """Return a classification table for one session (no surrounding chrome).
 
     ``name_of`` resolves each entry's shown name; it defaults to the entry's own driver name.
+    ``is_sprint_race`` (from the weekend context) picks the Sprint points table when estimating
+    points for a reconstructed race - the two share ``SessionType.RACE`` and can't be told apart
+    from the session alone.
     """
     race_session = is_race(session.session_type)
+    reconstructed = session.classification is not None and session.classification.is_reconstructed
     if race_session:
         columns = ["POS", "DRIVER", "TEAM", "GRID", "STOPS", "BEST", "TIME", "PTS"]
     else:
@@ -135,7 +157,7 @@ def build_classification_table(session, name_of=lambda entry: entry.driver_name)
             time_str = race_result(entry, winner)
             time_item = cell(time_str)
             table.setItem(i, 6, time_item)
-            table.setItem(i, 7, cell(str(entry.points)))
+            table.setItem(i, 7, _points_cell(entry, reconstructed, is_sprint_race))
             badge = format_penalty_badge(entry.num_penalties, entry.penalties_time_s)
             if badge and entry.result_status == ResultStatus.FINISHED:
                 penalty_cells.append((time_item, time_str, badge))

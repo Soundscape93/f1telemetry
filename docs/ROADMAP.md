@@ -170,6 +170,15 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     become fast pure-SQL migrations instead).
 
 ## Storage & analysis
+- **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:
+  a missing Final Classification packet yields a reconstructed classification
+  (`Classification.is_reconstructed`), badged in the UI, with a **muted, display-only** points
+  estimate and **excluded from standings** (see DECISIONS, TELEMETRY_NOTES). Option 3 adds the
+  human-in-the-loop half: an **accept/edit workflow** to confirm or hand-correct the estimated race
+  points (persisted, distinct from game-reported), a **manual editor** for the points cells, and
+  **re-including** the confirmed values in `compute_standings` / `compute_constructor_standings`.
+  Needs a points-source distinction on the entry and belongs with **league-management** (per-league
+  scoring tables) — until then estimates never reach a championship.
 - **Dense-trace persistence (in progress — lap-view iteration 1a).** Store `LapTrace`s as
   **Parquet** files referenced by the lap row (~5,400 samples/lap at 60 Hz — not SQLite rows; npz
   was the alternative, Parquet chosen — see DECISIONS), plus an ingest entry point that writes

@@ -179,6 +179,7 @@ class NormalizeClassificationTest(unittest.TestCase):
         """The classification is sorted by finishing position, not by vehicle index."""
         c = normalize_classification(self._packet(), self._roster())
         self.assertEqual([e.position for e in c.entries], [1, 2])
+        self.assertFalse(c.is_reconstructed)   # real Final Classification -> not reconstructed
 
     def test_winner_and_player_denormalized(self):
         """The winner and player entries are denormalized with driver name and team."""

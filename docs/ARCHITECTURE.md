@@ -53,13 +53,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 
 ### domain/ — version-agnostic models + pure conversion
 - **`models.py`** — frozen dataclasses: `SessionResult` (metadata, hierarchy keys, roster,
-  laps, classification, `game_mode`), `Participant`, `Classification`, `ClassificationEntry`
+  laps, classification, `game_mode`), `Participant`, `Classification` (carries `is_reconstructed`
+  — True when synthesized from telemetry because no Final Classification packet arrived),
+  `ClassificationEntry`
   (incl. `race_number`), `TyreStint`, `Lap`, `LapTrace` (parallel numpy arrays, distance-indexed).
   `LapTrace` also carries four **optional** motion channels — `pos_x`, `pos_z`, `g_lat`, `g_long`
   (iteration 2b) — None on laps captured without the Motion packet (`OPTIONAL_CHANNELS`, kept
   distinct from the nine required `CHANNELS` so `analysis/traces.py` and the overlay are unaffected).
 - **`normalizer.py`** — pure, stateless: `normalize_session`, `normalize_participants`,
-  `normalize_classification`, `merge_participant` (roster union across frames),
+  `normalize_classification`, `reconstruct_classification` (best-effort classification from Lap
+  Data + Session History when no Final Classification packet arrived; sets `is_reconstructed`),
+  `merge_participant` (roster union across frames),
   `telemetry_sample`, `build_trace`, and the `Sample` tuple. Reads struct fields by name; the
   field-name contract is documented in the module docstring.
 - **`season.py`** — the user-authored season layer: `SeasonMode` (MY_TEAM / DRIVER_CAREER /
@@ -82,6 +86,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   - joins the player's Lap Data + Car Telemetry rows by `frame_identifier` into trace `Sample`s,
     splits laps on `current_lap_num`, keeps a trace only if it started near the line;
   - takes lap **timing from Session History** (authoritative), not live Lap Data;
+  - captures the **final classification** from the Final Classification packet; if none arrived,
+    falls back to `reconstruct_classification` (last Lap Data frame + per-car Session History),
+    setting `Classification.is_reconstructed`;
   - carries the player's latest Car Status ERS fields forward into each sample;
   - *(lap-view iteration 2b)* carries the player's latest **Motion** entry forward into each sample
     (world position + g-force, format-normalized via `motion_sample`), adding the track-map /
@@ -135,7 +142,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `compute_standings(sessions, key, display)`; `standings_for_rounds`;
   `league_standings_for_rounds(rounds, roster)`. Points sum across race-type sessions only 
   (RACE_SESSION_TYPES); the game leaves stale last-race points in non-race classifications' 
-  m_points, so other session types are skipped. LEAGUE driver standings resolve through the per-season
+  m_points, so other session types are skipped. **Reconstructed classifications
+  (`is_reconstructed`) are also skipped** — they have no official points (only a UI estimate), so
+  they never enter a championship until an accept/confirm flow lands (Option 3, see ROADMAP).
+  LEAGUE driver standings resolve through the per-season
   roster and display via `league_display_name`; non-league seasons stay name-keyed. Constructor
   standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
   in-memory and desktop-bound.
@@ -169,8 +179,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`components/`** — shared, view-agnostic widgets so every surface renders the same way
   instead of rebuilding tables inline. `tables.py` holds the pure Qt primitives (`cell`,
   `tidy_table`, `fit_table_height`, `clear_layout`); `classification_table.py` holds
-  `build_classification_table(session, name_of)` — the results grid shown for one session
-  (race vs best-lap columns) — plus `display_name_fn(roster)`, the roster→name resolver passed
+  `build_classification_table(session, name_of, is_sprint_race)` — the results grid shown for one
+  session (race vs best-lap columns); for a **reconstructed** race it renders a muted, display-only
+  points estimate (`~25`, GP/sprint table by `is_sprint_race`) in place of official points — plus
+  `display_name_fn(roster)`, the roster→name resolver passed
   as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
   surfaces reuse the same builder.
   The lap-detail widgets also live here: `tyre_box.py` (`TyreBox` — the 4-box RL/RR/FL/FR tyre

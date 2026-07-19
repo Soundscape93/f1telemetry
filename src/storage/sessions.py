@@ -202,6 +202,10 @@ class SessionStore:
                 for snap in result.setup_history
             ],
             recorded_at=result.recorded_at or datetime.now(timezone.utc),
+            is_reconstructed=(
+                result.classification.is_reconstructed
+                if result.classification is not None else False
+            ),
             entries=entries,
         )
     
@@ -238,7 +242,10 @@ class SessionStore:
             ) 
             for rows in sorted(row.entries, key=lambda e: e.position)
         )
-        classification = Classification(entries=entries) if entries else None
+        classification = (
+            Classification(entries=entries, is_reconstructed=row.is_reconstructed)
+            if entries else None
+        )
         return SessionResult(
             session_uid=int(row.session_uid),
             season_link_id=row.season_link_id,

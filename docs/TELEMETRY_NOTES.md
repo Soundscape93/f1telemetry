@@ -28,6 +28,16 @@ Motion Ex, Lobby Info, Time Trial, Lap Positions, Event.
 - **Final Classification (id 8, sent once at race end)** is the source of truth for results and
   points. **Session History (id 11)** gives per-lap times and sectors — timing comes from here,
   not from live Lap Data. (Sector field name is `sector1_time_ms_part` — no "in".)
+- **Missing Final Classification → reconstructed result.** Because id 8 is sent *once*, a recording
+  stopped a beat early (or a single dropped datagram) can miss it entirely, which used to leave the
+  results table empty (0 drivers). When it's absent, the assembler synthesizes a best-effort
+  classification (`reconstruct_classification`) from the **last Lap Data frame** + **per-car Session
+  History**: finishing order, laps, best lap and tyre stints are recovered exactly; **total race
+  time** as the sum of Session History lap times (the game defines the FC total as race time
+  *without penalties* — i.e. exactly that sum); **penalty time** from `LapData.penalties`. The one
+  FC-only field is **championship points** (in no telemetry packet), left 0. Such results carry
+  `Classification.is_reconstructed=True`; the UI badges them and shows a muted, display-only points
+  *estimate*, and standings exclude them (see ARCHITECTURE → standings, DECISIONS).
 - **Frame join:** the "rate as specified in menus" packets share `header.frame_identifier` and
   ship together; carry the slower packets (Session ~2/s, Car Status/Damage ~10/s) forward into
   each sample. The assembler joins the player's Lap Data + Car Telemetry rows by frame id.

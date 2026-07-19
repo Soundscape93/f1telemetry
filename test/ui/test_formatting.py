@@ -7,6 +7,7 @@ from f1telemetry.src.protocol.enums import ResultStatus, SessionType
 from f1telemetry.src.protocol.reference import team_display_name
 from f1telemetry.src.ui.formatting import (
     compound_for_lap,
+    estimate_points,
     format_gap,
     format_grid,
     format_lap_gap,
@@ -203,6 +204,32 @@ class TeamDisplayNameTest(unittest.TestCase):
 
     def test_base_team_unchanged(self):
         self.assertEqual(team_display_name(1), "Ferrari")
+
+
+class EstimatePointsTest(unittest.TestCase):
+    """The display-only points estimate for reconstructed race tables."""
+
+    def test_grand_prix_scoring(self):
+        self.assertEqual(estimate_points(1, ResultStatus.FINISHED), 25)
+        self.assertEqual(estimate_points(2, ResultStatus.FINISHED), 18)
+        self.assertEqual(estimate_points(3, ResultStatus.FINISHED), 15)
+        self.assertEqual(estimate_points(10, ResultStatus.FINISHED), 1)
+
+    def test_grand_prix_out_of_points_is_zero(self):
+        self.assertEqual(estimate_points(11, ResultStatus.FINISHED), 0)
+        self.assertEqual(estimate_points(20, ResultStatus.FINISHED), 0)
+
+    def test_sprint_scoring(self):
+        self.assertEqual(estimate_points(1, ResultStatus.FINISHED, is_sprint_race=True), 8)
+        self.assertEqual(estimate_points(8, ResultStatus.FINISHED, is_sprint_race=True), 1)
+        self.assertEqual(estimate_points(9, ResultStatus.FINISHED, is_sprint_race=True), 0)
+
+    def test_non_finishers_return_none(self):
+        for status in (ResultStatus.DID_NOT_FINISH, ResultStatus.RETIRED,
+                       ResultStatus.DISQUALIFIED, ResultStatus.NOT_CLASSIFIED,
+                       ResultStatus.INACTIVE):
+            self.assertIsNone(estimate_points(1, status))
+            self.assertIsNone(estimate_points(1, status, is_sprint_race=True))
 
 
 if __name__ == "__main__":

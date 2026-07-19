@@ -413,3 +413,92 @@ def normalize_classification(
         # ordered by finishing position; unclassified (position=0/DNF) sink to the bottom
     entries.sort(key=lambda e: (e.position if e.position > 0 else 9999))
     return Classification(entries=tuple(entries))
+
+
+def reconstruct_classification(
+        roster: tuple[Participant, ...], lap_data_packet,
+        session_history_by_index: dict[int, object],
+        best_lap_num_by_index: dict[int, int] | None = None) -> Classification | None:
+    """Best-effort classification for a session that never delivered a Final Classification packet.
+    
+    The game broadcasts the Final Classification packet once, at the session-end moment; if the
+    recording is stopped a beat too early or that single datagram is lost, it is absent and
+    ``normalize_classification`` has nothing to build from. This reconstructs each car's row from
+    the last Lap Data frame (finishing/running position, grid, pit stops, laps, result status) and
+    its Session History (best lap time and tyre stints), joined to the roster the same way.
+
+    Total race time is recovered as the sum of the car's Session History lap times (the game
+    defines the Final Classification total as race time *without penalties*, i.e. exactly that
+    sum) and accumulated time penalties from the last Lap Data frame. Championship points are the
+    one Final-Classification-only field - not present in any telemetry packet - so they are left 0
+    (the UI shows an estimate; standings exclude reconstructed sessions). Returns None when there
+    is no Lap Data to order by (nothing to reconstruct).
+    """
+    if lap_data_packet is None:
+        return None
+    
+    player_idx = lap_data_packet.header.player_car_index
+    by_index = {p.vehicle_index: p for p in roster}
+    best_lap_num_by_index = best_lap_num_by_index or {}
+    lap_rows = lap_data_packet.lap_data
+
+    entries = []
+    for i in sorted(by_index):
+        if i >= len(lap_rows):
+            continue
+        lap = lap_rows[i]
+        participant = by_index.get(i)
+
+        best_ms = 0
+        total_race_ms = 0
+        stints: tuple[TyreStint, ...] = ()
+        sh = session_history_by_index.get(i)
+        if sh is not None:
+            num_laps = min(sh.num_laps, len(sh.lap_history_data))
+            lap_times = [sh.lap_history_data[j].lap_time_in_ms for j in range(num_laps)]
+            completed = sum(1 for t in lap_times if t > 0)
+            total_race_ms = sum(t for t in lap_times if t > 0)   # race time w/o penalties = sum of laps
+            bnum = sh.best_lap_time_lap_num
+            if 0 < bnum <= num_laps:
+                best_ms = sh.lap_history_data[bnum - 1].lap_time_in_ms
+            stints = tuple(
+                TyreStint(
+                    actual_compound=t.tyre_actual_compound,
+                    visual_compound=t.tyre_visual_compound,
+                    end_lap=t.end_lap,
+                )
+                for t in sh.tyre_stints_history_data[:sh.num_tyre_stints]
+            )
+        else:
+            completed = max(0, lap.current_lap_num -1)
+        
+        entries.append(
+            ClassificationEntry(
+                vehicle_index=i,
+                position=lap.car_position,
+                driver_name=_display_driver_name(participant) if participant else f"car_{i}",
+                team_id=participant.team_id if participant else -1,
+                race_number=participant.race_number if participant else 0,
+                nationality_id=participant.nationality_id if participant else 0,
+                is_player=(i == player_idx),
+                grid_position=lap.grid_position,
+                points=0,
+                num_laps=completed,
+                num_pit_stops=lap.num_pit_stops,
+                best_lap_time_ms=best_ms,
+                best_lap_num=best_lap_num_by_index.get(i, 0),
+                total_race_time_s=total_race_ms / 1000.0,
+                penalties_time_s=lap.penalties,         # LapData.penalties = accumulated time penalties (s)
+                num_penalties=0,
+                result_status=safe_enum(ResultStatus, lap.result_status),
+                result_reason=safe_enum(ResultReason, 0),
+                tyre_stints=stints,
+            )
+        )
+    
+    if not entries:
+        return None
+    
+    # same ordering as the real classifiction: by finishing position, unclassified (0) to the bottom
+    entries.sort(key=lambda e: (e.position if e.position > 0 else 9999))
+    return Classification(entries=tuple(entries), is_reconstructed=True)

@@ -76,6 +76,8 @@ def compute_standings(
     for session in sessions:
         if session.classification is None:
             continue
+        if session.classification.is_reconstructed:
+            continue                       # no Final Classification packet -> no official points
         if session.session_type not in RACE_SESSION_TYPES:
             continue
         for entry in session.classification.entries:
@@ -120,6 +122,8 @@ def compute_constructor_standings(
     for session in sessions:
         if session.classification is None:
             continue
+        if session.classification.is_reconstructed:
+            continue                       # no Final Classification packet -> no official points
         if session.session_type not in RACE_SESSION_TYPES:
             continue
         for entry in session.classification.entries:

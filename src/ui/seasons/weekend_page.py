@@ -235,11 +235,17 @@ class WeekendPage(QWidget):
         unassign = QPushButton("Unassign")
         unassign.clicked.connect(partial(self._unassign, session.session_uid))
         header.addWidget(toggle)
+        if session.classification is not None and session.classification.is_reconstructed:
+            recon = QLabel("reconstructed")
+            recon.setToolTip("No Final Classification packet was captured; this table was rebuilt "
+                             "from telemetry. Points are estimated, not official.")
+            recon.setStyleSheet(f"{MUTED_TEXT_QSS} font-style: italic; padding-left: 8px;")
+            header.addWidget(recon)
         header.addStretch(1)
         header.addWidget(unassign)
         vbox.addLayout(header)
 
-        table = build_classification_table(session, name_of)
+        table = build_classification_table(session, name_of, is_sprint_race=slot.is_sprint_race)
         table.setVisible(toggle.isChecked())
         toggle.toggled.connect(partial(self._toggle_session_table, session.session_uid, table, toggle))
         vbox.addWidget(table)

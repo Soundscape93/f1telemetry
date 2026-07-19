@@ -40,6 +40,7 @@ from ..domain.normalizer import (
     build_trace,
     motion_sample,
     normalize_classification,
+    reconstruct_classification,
     merge_participant,
     normalize_participants,
     normalize_session,
@@ -176,7 +177,9 @@ class _SessionBuilder:
         self._scaffold: SessionResult | None = None
         self._roster_by_index: dict[int, Participant] = {}  # merged across all Participants frames
         self._session_history = None            # the player's latest Session History packet
+        self._session_history_by_index: dict[int, object] = {}  # car_idx -> last Session History (fallback classification)
         self._best_lap_num_by_index: dict[int, int] = {}  # car_idx -> lap the best lap was set on
+        self._last_lap_data = None                # latest full Lap Data packet, all cars (fallback classification)
         self._final_classification = None       # the final classification packet
         self._last_car_status = None            # the player's latest Car Status entry
         self._last_car_telemetry = None         # the player's latest Car Telemetry entry
@@ -222,6 +225,7 @@ class _SessionBuilder:
             # Session History cycles through every car; keep each car's best-lap lap number
             # (last-write wins) so the classification can resolve the fastest-lap tyre stint.
             self._best_lap_num_by_index[packet.car_idx] = packet.best_lap_time_lap_num
+            self._session_history_by_index[packet.car_idx] = packet     # full history, for fallback classification
             if packet.car_idx == packet.header.player_car_index:
                 self._session_history = packet              # last-write wins -> end-of-session bulk
         elif pid == PacketId.FINAL_CLASSIFICATION:
@@ -248,6 +252,7 @@ class _SessionBuilder:
                 return
             self._record_setup(normalize_setup(packet.car_setups[idx]))
         elif pid == PacketId.LAP_DATA:
+            self._last_lap_data = packet            # full grid; for fallback classification if not Final Classification arrives
             idx = packet.header.player_car_index
             if idx >= len(packet.lap_data):         # player not in the array this frame (lobby/spectator)
                 return
@@ -378,6 +383,14 @@ class _SessionBuilder:
         if self._final_classification is not None:
             classification = normalize_classification(
                 self._final_classification, roster, self._best_lap_num_by_index
+            )
+        else:
+            # No Final Classification packet arrived (recording stopped early, or that single 
+            # datagram was lost). Reconstruct a best-effort result from the last Lap Data fram + 
+            # Session History so the session still has a table.
+            classification = reconstruct_classification(
+                roster, self._last_lap_data, self._session_history_by_index,
+                self._best_lap_num_by_index
             )
 
         return dataclasses.replace(

@@ -53,6 +53,9 @@ class SessionRow(Base):
     # Additive column - [] for rows saved before setup history existed.
     setup_history: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)  # timestamp of when the session was recorded
+    # True when the classification was synthesized from telemetry (no Final Classification packet).
+    # Additive column - 0 for rows saved before it existed (ensure_schema ALTERs it in on startup).
+    is_reconstructed: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
 
     entries: Mapped[list[ClassificationEntryRow]] = relationship(
         back_populates="session",

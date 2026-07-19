@@ -7,7 +7,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from f1telemetry.src.protocol.enums import Formula, PacketId, SessionType, Weather
+from f1telemetry.src.protocol.enums import Formula, PacketId, ResultStatus, SessionType, Weather
 from f1telemetry.src.session.assembler import assemble
 
 
@@ -15,6 +15,15 @@ def _hdr(pid, uid, frame=0, player=0):
     """Build a fake packet header for testing."""
     return SimpleNamespace(packet_id=pid, session_uid=uid, frame_identifier=frame,
                            packet_format=2025, player_car_index=player)
+
+
+def _car_lap(lap_num, distance):
+    """A minimal Lap Data entry for the player's car. Carries the classification-fallback fields
+    (position/grid/stops/penalties/status) that reconstruct_classification reads when a stream has
+    no Final Classification packet - as these assembler streams don't."""
+    return SimpleNamespace(current_lap_num=lap_num, lap_distance=distance,
+                           car_position=1, grid_position=1, num_pit_stops=0,
+                           penalties=0, result_status=int(ResultStatus.FINISHED))
 
 
 def session_pkt(uid, stype=SessionType.RACE, laps=5):
@@ -60,7 +69,8 @@ def sh_pkt(uid, entries, player=0, best_lap_num=0, car_idx=None):
     return SimpleNamespace(header=_hdr(PacketId.SESSION_HISTORY, uid, player=player),
                            car_idx=player if car_idx is None else car_idx,
                            num_laps=len(entries), best_lap_time_lap_num=best_lap_num,
-                           lap_history_data=entries)
+                           lap_history_data=entries,
+                           num_tyre_stints=0, tyre_stints_history_data=[])
 
 
 _frame = [0]
@@ -73,7 +83,7 @@ def frames(uid, lap_num, distances, player=0):
         _frame[0] += 1
         f = _frame[0]
         out.append(SimpleNamespace(header=_hdr(PacketId.LAP_DATA, uid, frame=f, player=player),
-                                   lap_data=[SimpleNamespace(current_lap_num=lap_num, lap_distance=d)]))
+                                   lap_data=[_car_lap(lap_num, d)]))
         out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
                                    car_telemetry_data=[SimpleNamespace(
                                        speed=200, throttle=1.0, brake=0.0, steer=0.0,
@@ -112,7 +122,7 @@ def motion_frames(uid, lap_num, points, player=0):
         f = _frame[0]
         out.append(motion_pkt(uid, x, z, gl, gL, frame=f, player=player))
         out.append(SimpleNamespace(header=_hdr(PacketId.LAP_DATA, uid, frame=f, player=player),
-                                   lap_data=[SimpleNamespace(current_lap_num=lap_num, lap_distance=d)]))
+                                   lap_data=[_car_lap(lap_num, d)]))
         out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
                                    car_telemetry_data=[SimpleNamespace(
                                        speed=200, throttle=1.0, brake=0.0, steer=0.0,

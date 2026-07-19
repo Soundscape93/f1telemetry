@@ -265,6 +265,10 @@ class Classification:
     """
 
     entries: tuple[ClassificationEntry, ...]
+    # True when this classification was synthesized from telemetry because no Final Classification
+    # packet arrived (see domain.normalizer.reconstruct_classification). Championship points are
+    # not derivable and are left 0; the UI badges such tables and standings exclude them.
+    is_reconstructed: bool = False
 
     @property
     def winner(self) -> ClassificationEntry | None:

@@ -129,6 +129,11 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   decompressing them — the base for a future "import league captures from a folder" flow.
 - **Standings:** driver standings (by name or race number) and constructor standings; LEAGUE
   standings resolve drivers through the per-season roster.
+- **Missing Final Classification fallback:** if a session ends without the game's (once-sent)
+  Final Classification packet, the assembler reconstructs a best-effort result from Lap Data +
+  Session History (`Classification.is_reconstructed`), badged in the UI. Points can't be recovered
+  (FC-only), so they show as a muted estimate and reconstructed sessions are excluded from
+  standings. See DECISIONS / TELEMETRY_NOTES; an accept/edit flow is deferred (ROADMAP, Option 3).
 - **UI:** single-window shell (sidebar + persistent record/stop header + stacked pages). The
   Seasons surface is real — overview, create, per-season detail (calendar + driver & constructor
   standings), per-season LEAGUE roster CSV import, and a weekend view with round-centric session

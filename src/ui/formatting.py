@@ -48,6 +48,31 @@ def is_race(session_type: SessionType) -> bool:
     return session_type in _RACE_TYPES
 
 
+# Championship points by finishing position (1-based). F1 25/26 scoring: the Grand Prix awards
+# the top 10 and the Sprint the top 8; there is no fastest-lap point (dropped for 2025+). Used
+# only for the muted estimate on reconstructed race tables - never persisted or summed into
+# standings (see analysis.standings, which skips reconstructed sessions).
+_GP_POINTS = (25, 18, 15, 12, 10, 8, 6, 4, 2, 1)
+_SPRINT_POINTS = (8, 7, 6, 5, 4, 3, 2, 1)
+
+
+def estimate_points(position: int, result_status: ResultStatus, is_sprint_race: bool = False) -> int | None:
+    """Best-guess championship points for a finishing position, for reconstructed race tables.
+
+    Returns standard F1 25/26 points (Grand Prix, or Sprint when ``is_sprint_race``) for a
+    finisher in the scoring positions, 0 for a finisher outside them, and None for a driver who
+    didn't finish (no position to score). An estimate for display only: it assumes standard game
+    scoring and can't know classified-DNF or custom league rules, so it is shown muted and never
+    reaches standings.
+    """
+    if result_status != ResultStatus.FINISHED:
+        return None
+    table = _SPRINT_POINTS if is_sprint_race else _GP_POINTS
+    if 1 <= position <= len(table):
+        return table[position - 1]
+    return 0
+
+
 def slot_label(session_type, is_sprint_race: bool = False) -> str:
     """Return prettified session-type name, e.g. RACE -> Race.
 
