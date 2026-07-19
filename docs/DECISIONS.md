@@ -292,10 +292,26 @@ what would trigger revisiting it.
   `None` and `TrackMap` falls back to `set_trace` (the driven line); the handedness/loop-close
   corrections live in `TrackMap._render`, shared by both paths, and `TrackLayout` keeps raw coords.
   Hover is unchanged for the user — both the viewed lap and the canonical layout are distance-indexed,
-  so `cursor_moved` (a distance) snaps the marker to the canonical layout's nearest index. *Sector
-  colouring was deferred* — it needs sector-boundary **distances**, which we don't store (only sector
-  *times*); the reliable route is the Lap Data per-frame `sector` field as a small additive channel,
-  so until then the track stays one colour. *Cache refresh:* the provider's in-memory cache is not
+  so `cursor_moved` (a distance) snaps the marker to the canonical layout's nearest index.
+- **Sector colouring (done post-2c) uses the Session packet's boundary distances, not a per-frame
+  channel.** The Session packet carries `sector_2/3_lap_distance_start` (absolute metres) and
+  `track_length`; persisting three nullable columns on the session row (`track_length_m` /
+  `sector2_start_m` / `sector3_start_m`, additive migration) is far cheaper than adding a per-frame
+  `sector` trace channel (new Parquet column, re-ingest of every lap) that the earlier note assumed —
+  and both need a re-ingest anyway. `TrackMap` splits the distance-indexed outline at the two
+  boundaries (`sector_bounds`) into three arcs coloured to the F1-map palette. *Always-visible on-map
+  sector labels were tried and removed:* two approaches — an opaque label mask, then a gap cut from the
+  arc's own samples — both hurt readability on complex/overlapping layouts (masked or broke unrelated
+  nearby track; awkward on corner-dense sections) and resisted a robust, tuning-free placement, so the
+  map now conveys sectors by **colour alone** (labels may return later as hover/tooltips). The traces
+  reuse the same two distances only for dashed boundary lines (text labels there would clutter the
+  stacked rows). Old rows are `None` → single colour. *Corner numbers stay deferred (future work):* no
+  telemetry source exists; the clean route is a static per-track metadata snapshot (corner number +
+  distance-from-S/F) transcribed from FastF1/MultiViewer `get_circuit_info`, keyed by our `track_id`
+  and scaled by `track_length_m`. **Licensing reminder:** that corner data is community/unofficial
+  (MultiViewer; FastF1 is non-commercial/personal-use) — fine for private, friends-only use, but must
+  be revisited/replaced before any broad public distribution of the app.
+- **Canonical-map cache refresh stays deferred.** The provider's in-memory cache is not
   invalidated on a mid-run re-ingest (a stale weekend layout persists until app restart) — fine for
   personal/testing use, to be made automatic before any release (likely after 2c; see ROADMAP);
   a persisted `track_layouts/*.parquet` cache also stays deferred.

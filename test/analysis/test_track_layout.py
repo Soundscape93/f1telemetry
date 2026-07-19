@@ -9,7 +9,7 @@ import unittest
 
 import numpy as np
 
-from f1telemetry.src.analysis.track_layout import build_layout
+from f1telemetry.src.analysis.track_layout import build_layout, sector_bounds
 from f1telemetry.src.domain.models import LapTrace
 
 
@@ -64,6 +64,19 @@ class BuildLayoutTests(unittest.TestCase):
         layout = build_layout([_circle(start=0), _circle(start=0), _circle(start=300)])
         self.assertFalse(np.isnan(layout.pos_x).any())
         self.assertFalse(np.isnan(layout.pos_z).any())
+    
+    def test_sector_bounds_split(self):
+        d = np.array([0.0, 100.0, 200.0, 300.0, 400.0])
+        i2, i3 = sector_bounds(d, 150.0, 300.0)         # s2 mid-gap, s3 exactly on a sample
+        self.assertEqual((i2, i3), (2, 3))
+        self.assertTrue(np.all(d[:i2] < 150.0))         # sector 1
+        self.assertTrue(np.all((d[i2:i3] >= 150.0) & (d[i2:i3] < 300.0)))  # sector 2
+    
+    def test_sector_bounds_boundary_outside_range(self):
+        d = np.array([500.0, 600.0, 700.0])   # a lap-1 line starting past the S/F line
+        i2, i3 = sector_bounds(d, 200.0, 650.0)
+        self.assertEqual(i2, 0)               # empty sector 1
+        self.assertEqual(i3, 2)
 
 
 if __name__ == "__main__":

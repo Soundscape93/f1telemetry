@@ -194,6 +194,9 @@ class SessionStore:
             game_mode=result.game_mode,
             player_vehicle_index=result.player_vehicle_index,
             weekend_structure=list(result.weekend_structure),
+            track_length_m=result.track_length_m,
+            sector2_start_m=result.sector2_start_m,
+            sector3_start_m=result.sector3_start_m,
             setup_history=[
                 {"from_lap": snap.from_lap, "setup": _setup_to_dict(snap.setup)}
                 for snap in result.setup_history
@@ -250,6 +253,9 @@ class SessionStore:
             game_mode=row.game_mode,
             player_vehicle_index=row.player_vehicle_index,
             weekend_structure=tuple(row.weekend_structure or ()),
+            track_length_m=row.track_length_m,
+            sector2_start_m=row.sector2_start_m,
+            sector3_start_m=row.sector3_start_m,
             setup_history=tuple(
                 SetupSnapshot(from_lap=item["from_lap"],
                               setup=_setup_from_dict(item["setup"]))

@@ -167,12 +167,21 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   the full SVG command set incl. S/T smooth curves + A arcs (`test_svg_path.py`); tyres, inboard
   **brake blocks** and corner gauges are procedural (from `_CORNERS` / `_TYRE_*` / `_BRAKE_*`). The
   neon glow is on (an early transparent-viewport hover artifact was fixed via `setStyleSheet`).
-  Deferred from 2b.1: **sector colouring** on the map
-  (needs the Lap Data per-frame `sector` field as a small additive trace channel — sector *distances*
-  aren't stored today, only sector *times*) and **automatic canonical-map cache refresh** (the
-  in-memory layout cache isn't invalidated on a mid-run re-ingest — fine for personal use, to be made
-  automatic before any release, likely after 2c). Also pending: the Analytics surface and an
-  edit-calendar action. See `docs/ROADMAP.md`.
+  **Done since 2c — sector colouring & track geometry:** the Session packet's
+  `sector_2/3_lap_distance_start` (+ `track_length`) are now persisted on the session row
+  (`track_length_m` / `sector2_start_m` / `sector3_start_m`; additive migration, `None` for old rows).
+  `TrackMap` colours its outline by sector (F1-map palette in `analysis/track_layout.SECTOR_COLOURS`);
+  the telemetry traces mark the sector boundaries with dashed vertical lines on every row, and a
+  shared vertical cursor tracks the mouse across all trace rows + the map marker (clamped to the lap's
+  distance range so it can't stretch the x-axis). Always-visible sector *labels* on the map were tried
+  (opaque mask, then a cut-out gap in the line) and removed — they reduced readability on complex
+  layouts, so the map conveys sectors by colour alone (labels could return later as hover/tooltips).
+  This used the per-session boundary **distances**, not the per-frame `sector` channel the earlier
+  note assumed.
+  Still deferred: **automatic canonical-map cache refresh**, and **corner numbers** (future work — no
+  telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
+  `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics
+  surface and an edit-calendar action. See `docs/ROADMAP.md`.
 
 ## Where to look
 

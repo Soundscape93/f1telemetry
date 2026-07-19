@@ -95,6 +95,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 total_laps=2,
                 num_sessions_in_weekend=0,
                 weekend_structure=[0] * 12,
+                track_length=5000.0,
+                sector_2_lap_distance_start=1500.0,
+                sector_3_lap_distance_start=3000.0,
             )
         )
 

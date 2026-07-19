@@ -97,10 +97,23 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     keyed `(weekend_link_id, track_id)`. `TrackMap.set_layout` draws it; below `_MIN_LAPS` (3) usable
     laps it falls back to `set_trace` (the driven line). **Hover unchanged:** `cursor_moved` still
     emits a distance; the marker snaps to the nearest index on the canonical layout (both
-    distance-indexed, same world frame). *Deferred follow-ups:* **sector colouring** — needs
-    sector-boundary **distances**, NOT stored today (we keep sector *times*); the reliable route is
-    the Lap Data per-frame `sector` field (0/1/2) as a small additive trace channel — until then the
-    track stays one colour. **Automatic cache refresh** — the provider's in-memory cache isn't
+    distance-indexed, same world frame). *Sector colouring — DONE (post-2c).* The Session packet
+    already carries sector-boundary **distances** (`sector_2/3_lap_distance_start`) + `track_length`,
+    now persisted on the session row (`track_length_m` / `sector2_start_m` / `sector3_start_m`,
+    additive migration). `TrackMap` splits its outline into three coloured arcs
+    (`analysis/track_layout.sector_bounds` + `SECTOR_COLOURS`, F1-map red/cyan/yellow); the traces mark
+    the boundaries with dashed vertical lines every row, and a shared vertical cursor spans all trace
+    rows + the map marker (clamped to the lap's distance range so hovering past the end can't stretch
+    the x-axis). Always-visible map sector *labels* were tried (opaque mask, then a cut-out gap in the
+    line) and removed — poor readability on complex layouts; the map uses colour alone (labels may
+    return as hover/tooltips). The per-frame `sector` channel guessed at earlier proved unnecessary.
+    **Corner
+    numbers — future work:** no telemetry source; the clean route is a static per-track metadata
+    snapshot (corner number + distance-from-S/F) transcribed from FastF1/MultiViewer
+    `get_circuit_info`, keyed by our `track_id` and scaled by `track_length_m`. **Licensing:** that
+    data is community/unofficial (MultiViewer; FastF1 is non-commercial/personal-use) — fine for
+    private, friends-only use, but revisit/replace before any broad public distribution.
+    *Still deferred:* **Automatic cache refresh** — the provider's in-memory cache isn't
     invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
     for personal/testing use, to be made automatic before any release to friends/users (likely after
     2c, unless it bites earlier). A persisted `track_layouts/*.parquet` cache also stays deferred.

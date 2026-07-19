@@ -264,8 +264,11 @@ class MainWindow(QMainWindow):
 
     def _on_failed(self, message: str) -> None:
         """Handle a failure from either the RecorderWorker or IngestWorker; reset the button and show the error."""
-        self._recorder = None
-        self._ingest = None
+        for attr in ("_recorder", "_ingest"):
+            worker = getattr(self, attr)
+            if worker is not None:
+                worker.wait()  # ensure the thread has finished before deleting it
+            setattr(self, attr, None)
         self._reset_button()
         self._status.setText(f"Error: {message}")
 

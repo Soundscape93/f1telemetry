@@ -137,12 +137,16 @@ class DetailPage(QWidget):
         self._base_label = best_lap_label(self._sessions, uid, lap.lap_number)
         self._compare_actions = []
         self._plot = TracePlot(lap.trace, colorblind=self._colorblind) if lap.trace is not None else None
+        if self._plot is not None and session is not None:
+            self._plot.set_sectors(session.sector2_start_m, session.sector3_start_m)
 
         # track map: only when this lap carries Motion; hover on the traces moves its marker.
         # Prefer the canonical median line for the whole weekend; fall back to this lap's own
         # line when the weekend has to few Motion laps to build a stable median.
         if lap.trace is not None and lap.trace.has_motion:
             track_map = TrackMap()
+            if session is not None:
+                track_map.set_sectors(session.sector2_start_m, session.sector3_start_m)
             layout = self._layouts.layout_for(uid)
             if layout is not None:
                 track_map.set_layout(layout)

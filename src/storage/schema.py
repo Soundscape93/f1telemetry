@@ -45,6 +45,10 @@ class SessionRow(Base):
     # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
     # (both report session_type 15). Additive column - [] for rows saved before it existed.
     weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # static track geometry (metres) from the Session packet; None for pre-feature rows.
+    track_length_m: Mapped[int | None] = mapped_column(nullable=True)
+    sector2_start_m: Mapped[float | None] = mapped_column(nullable=True)
+    sector3_start_m: Mapped[float | None] = mapped_column(nullable=True)
     # ordered garage-setup snapshots for the player; JSON list of {from_lap, setup{...}}.
     # Additive column - [] for rows saved before setup history existed.
     setup_history: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))

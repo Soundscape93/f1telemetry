@@ -112,6 +112,18 @@ class RoundTripTest(StorageTestBase):
         self.store.save(make_session(uid=0x1234))   # default: no structure captured
         self.assertEqual(self.store.load(0x1234).weekend_structure, ())
 
+    def test_track_geometry_round_trip(self):
+        """The track length + sector start-distances survive save/load; absent stays None."""
+        with_sectors = SessionResult(**{**vars(make_session()), "track_length_m": 5891,
+                                         "sector2_start_m": 1200.0, "sector3_start_m": 3400.0})
+        self.store.save(with_sectors)
+        loaded = self.store.load(0x8000_0000_0000_0000)
+        self.assertEqual(loaded.track_length_m, 5891)
+        self.assertEqual((loaded.sector2_start_m, loaded.sector3_start_m), (1200.0, 3400.0))
+        self.store.save(make_session(uid=0x1234))   # default: no sector info captured
+        again = self.store.load(0x1234)
+        self.assertEqual((again.sector2_start_m, again.sector3_start_m), (None, None))
+
 
 class UpsertTest(StorageTestBase):
     """Test that saving a session with the same session_uid replaces the existing entry."""

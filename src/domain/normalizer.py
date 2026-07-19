@@ -250,6 +250,9 @@ def normalize_session(packet: "PacketSessionData") -> SessionResult:
         game_mode=packet.game_mode,
         player_vehicle_index=header.player_car_index,
         weekend_structure=tuple(packet.weekend_structure[:packet.num_sessions_in_weekend]),
+        track_length_m=packet.track_length,
+        sector2_start_m=packet.sector_2_lap_distance_start,
+        sector3_start_m=packet.sector_3_lap_distance_start
     )
 
 

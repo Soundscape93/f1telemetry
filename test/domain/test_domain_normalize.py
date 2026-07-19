@@ -64,10 +64,11 @@ class NormalizeSessionTest(unittest.TestCase):
             header=_header(session_uid=12345, packet_format=2026, player_car_index=3),
             season_link_identifier=100, weekend_link_identifier=200, session_link_identifier=300,
             track_id=7, session_type=int(SessionType.RACE), formula=int(Formula.F1_MODERN),
-            weather=int(Weather.CLEAR), game_mode=28, total_laps=5,
+            weather=int(Weather.CLEAR), game_mode=28, total_laps=5, track_length=5891,
             # fixed-length 12 array in the wire struct; only the first num_sessions are real
             num_sessions_in_weekend=9,
-            weekend_structure=[1, 10, 11, 12, 15, 5, 6, 7, 15, 0, 0, 0])
+            weekend_structure=[1, 10, 11, 12, 15, 5, 6, 7, 15, 0, 0, 0],
+            sector_2_lap_distance_start=1234.5, sector_3_lap_distance_start=3456.0)
     
     def test_metadata_and_keys(self):
         """The scaffold has the right metadata and hierarchy keys."""
@@ -93,6 +94,12 @@ class NormalizeSessionTest(unittest.TestCase):
         self.assertEqual(s.participants, ())
         self.assertEqual(s.laps, ())
         self.assertIsNone(s.classification)
+    
+    def test_track_geometry(self):
+        """Track length and the sector 2 & 3 start distances are carried onto the scaffold."""
+        s = normalize_session(self._packet())
+        self.assertEqual(s.track_length_m, 5891)
+        self.assertEqual((s.sector2_start_m, s.sector3_start_m), (1234.5, 3456.0))
 
 
 class BuildTraceTest(unittest.TestCase):

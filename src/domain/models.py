@@ -309,6 +309,14 @@ class SessionResult:
         # RACE (15), so this is what tells them apart - see domain/season.py:weekend_slots.
         weekend_structure: tuple[int, ...] = ()
 
+        # Static track geometry (metres) from the Session packet, kept together for the map and (future)
+        # corner metadata. None for rows saved before this was captured; the game always sends them otherwise.
+        # Sector 1 is 0..sector2_start_m. The track map colours its outline by sector and th traces mark the
+        # boundaries from these.
+        track_length_m: float | None = None
+        sector2_start_m: float | None = None
+        sector3_start_m: float | None = None
+
         # content
         participants: tuple[Participant, ...] = ()
         laps: tuple[Lap, ...] = ()      # the player's completed laps (with traces)

@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...analysis import traces as trace_prep
+from ...analysis.track_layout import SECTOR_COLOURS
 from ...domain.models import LapTrace
 from ..style import MUTED_TEXT_QSS
 
@@ -98,6 +99,9 @@ class TracePlot(QWidget):
         self._labels: list[str | None] = []
         self._link = None                       # the shared-x plot (source of cursor distance)
         self._proxy = None                      # kept alive so the mouse SignalProxy isn't GC'd
+        self._sectors: tuple[float, float] | None = None
+        self._vlines: list = []                       # per-row cursor lines, moved together on hover
+        self._xlim: tuple[float, float] | None = None   # lap distance range; clamps the hover cursor
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -136,6 +140,7 @@ class TracePlot(QWidget):
         if self._pg is None or self._glw is None or not traces:
             return
         self._glw.clear()
+        self._vlines = []
         if len(traces) == 1:
             self._draw_single(traces[0])
         else:
@@ -152,11 +157,24 @@ class TracePlot(QWidget):
         if self._trace:
             self.set_traces(self._trace, self._labels)
     
+    def set_sectors(self, sector2_start: float | None, sector3_start: float | None) -> None:
+        """Mark the sector 2 & 3 boundaries on every row; redraws in place.
+        
+        Boundaries are absolute lap distances (m) on the sharex x-axis. Disabled unless both are
+        given and ordered (0 < s2 < s3).
+        """
+        valid = (sector2_start is not None and sector3_start is not None
+                  and 0.0 < sector2_start < sector3_start)
+        self._sectors = (float(sector2_start), float(sector3_start)) if valid else None
+        if self._trace:
+            self.set_traces(self._trace, self._labels)
+    
     def _draw_single(self, trace: LapTrace) -> None:
         """The single-lap render: one stacked plot per channel group, each in its own colour."""
         pg = self._pg
         pens ={**_PENS, **(CB_PENS if self._colorblind else {})}
         x = np.asanyarray(trace.distance, dtype=float)
+        self._xlim = (float(np.min(x)), float(np.max(x)))
         link = None
         rows = _ROWS + ((_GFORCE_ROW,) if trace.g_lat is not None else ())
         total = _AXIS_PAD
@@ -175,6 +193,10 @@ class TracePlot(QWidget):
                 link = plot
             else:
                 plot.setXLink(link)         # pan/zoom distance together
+            self._add_sector_lines(plot)
+            vline = plot.addLine(x=0, pen=self._pg.mkPen(color="#40f0f0", width=1))
+            vline.hide()        # moved on hover, not shown until then
+            self._vlines.append(vline)
             # The g-force row carries two channels told apart by colour; in single-lap mode add a
             # small in-plot legend so the colours are labelled (lateral vs longitudinal). Overlay
             # mode skips it - the per-lap legend up top would balloon with N laps x 2 channels.
@@ -248,6 +270,10 @@ class TracePlot(QWidget):
                 link = plot
             else:
                 plot.setXLink(link)         # pan/zoom distance together
+            self._add_sector_lines(plot)
+            vline = plot.addLine(x=0, pen=self._pg.mkPen(color="#40f0f0", width=1))
+            vline.hide()        # moved on hover, not shown until then
+            self._vlines.append(vline)
             if channels[0] == "_delta":
                 self._draw_delta_row(plot, x, deltas, lap_pens)
                 continue
@@ -302,12 +328,26 @@ class TracePlot(QWidget):
         self._proxy = pg.SignalProxy(
             self._glw.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_move)
         
+    def _add_sector_lines(self, plot) -> None:
+        """Dashed vertical markers at the sector 2 & 3 boundaries, if set."""
+        if self._sectors is None:
+            return
+        pg = self._pg
+        for x in self._sectors:
+            plot.addLine(x=x, pen=pg.mkPen(color="#6e7681", width=1, style=Qt.PenStyle.DashLine))
+
     def _on_mouse_move(self, event) -> None:
         pos = event[0]  # SignalProxy wraps the original signal in a tuple
         if self._link is None:
             return
         vb = self._link.getViewBox()
-        self.cursor_moved.emit(float(vb.mapSceneToView(pos).x()))
+        x = float(vb.mapSceneToView(pos).x())
+        if self._xlim is not None:                          # clamp to the lap's real distance range so
+            x = min(max(x, self._xlim[0]), self._xlim[1])   # the marker can't drag the x-axis past the lap
+        for v in self._vlines:
+            v.setPos(x)
+            v.show()
+        self.cursor_moved.emit(x)
     
     @staticmethod
     def _apply_yrange(plot, channels, trace) -> None:

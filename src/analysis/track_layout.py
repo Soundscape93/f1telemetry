@@ -27,6 +27,22 @@ from ..domain.models import LapTrace
 _MIN_LAPS = 3       # fewer usable Motion traces than this -> caller falls back to the driven line
 _GRID_NUM = 1000    # points on the canonical distance grid
 
+# Sector colours, shared by the track map and the trace boundary markers: sector 1 / 2 / 3.
+SECTOR_COLOURS = ("#e10600", "#00c0e4", "#f6d411")      # red, cyan, yellow
+
+
+def sector_bounds(distance, sector2_start: float, sector3_start: float) -> tuple[int, int]:
+    """Split an ascending distance axis into three sectors.
+    
+    Returns ``(i2, i3)``: ``distance[:i2]`` is sector 1, ``distance[i2:i3]`` is sector 2 and
+    ``distance[i3:]`` is sector 3. ``searchsorted`` is exact on the sorted lap-distance grid and
+    clamps to the ends, so a boundary past the covered range just yields an empty sector (e.g. a
+    race lap-1 line starting after the S/F line gives an empty sector 1).
+    """
+    i2 = int(np.searchsorted(distance, sector2_start, side="left"))
+    i3 = int(np.searchsorted(distance, sector3_start, side="left"))
+    return i2, i3
+
 
 @dataclass(frozen=True)
 class TrackLayout:

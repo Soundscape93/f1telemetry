@@ -128,15 +128,16 @@ registered already; the work is routing them in `feed()` and snapshotting at the
   not the F1.com broadcast art (matching that needs a per-track constant we deliberately don't ship).
   Also: a race **lap 1** starts at the grid slot (past the S/F line), so its trace misses the
   line→grid piece of the main straight; `TrackMap` closes the path loop to fill that gap generally.
-- **Sector boundaries are stored as TIMES, not DISTANCES** (Session History `sector{1,2,3}_time_*`).
-  There is no sector-boundary *distance* in what we persist today, so the 2b.1 canonical track map
-  can't colour sectors from stored data alone — **sector colouring was deferred; the map stays one
-  colour.** The reliable source **is** available in Lap Data: a per-frame `sector` field (`0/1/2`;
-  parsed already, but the assembler currently reads only `lap_distance` from Lap Data). Capturing it
-  as a small additive trace channel (like the 2b motion channels) yields the exact distances where
-  the sector index increments — the boundaries the canonical map would colour. A no-new-ingest
-  approximation exists (integrate `elapsed_time` over the trace, cross the stored sector times) but
-  is only approximate; prefer the `sector` channel if sector colouring is wanted.
+- **Sector-boundary DISTANCES come from the Session packet** (not from lap timing). Session History
+  stores sector *times* (`sector{1,2,3}_time_*`), but the **Session packet** carries the boundary
+  *distances* directly — `sector_2_lap_distance_start` / `sector_3_lap_distance_start` (absolute
+  metres) — plus `track_length`. These are now persisted on the session row (`track_length_m`,
+  `sector2_start_m`, `sector3_start_m`; additive migration, `None` for pre-feature rows) and drive the
+  track-map sector colouring and the traces' dashed sector-boundary markers (always-visible sector
+  labels on the map were tried and removed — poor readability on complex layouts).
+  Sector 1 is `0..sector2_start_m`. **No per-frame channel was needed:** Lap Data's per-frame `sector`
+  field (`0/1/2`) stays parsed-but-unused — the earlier plan to capture it as a trace channel is moot.
+  A re-ingest populates the values for older captures.
 
 ## Session type: Sprint Race == Race (both report 15)
 The game reports `session_type` **RACE (15)** for *both* the Sprint Race and the Grand Prix — a
