@@ -71,9 +71,14 @@ class SetupField:
 
     @property
     def fraction(self) -> float:
-        """Marker position in 0..1 along min->max, clamped so any out-of-band value stays on track."""
+        """Marker position in 0..1 along min->max, clamped so any out-of-band value stays on track.
+        
+        Supports both ascending (min<max) and descending (min>max) ranges, e.g. brake bias 70->50
+        ranges: the left end is always ``minimum`` and the right end is always ``maximum``, so a
+        negative span still maps correctly. Only a zero-width range is degenerate.
+        """
         span = self.maximum - self.minimum
-        if span <= 0:
+        if span == 0:
             return 0.0
         return min(1.0, max(0.0, (self.value - self.minimum) / span))
 

@@ -63,6 +63,32 @@ class SetupFieldsTest(unittest.TestCase):
         self.assertEqual(fields["Front Right Tyre Pressure"].display, "23.5PSI")
         self.assertEqual(fields["Rear Left Tyre Pressure"].display, "22.0PSI")
         self.assertEqual(fields["Rear Right Tyre Pressure"].display, "22.5PSI")
+    
+    def test_reversed_range_fraction(self):
+        # Front Brake Bias has a descending spec range (70 on the left, 50 on the right):
+        # a higher value must sit further RIGHT, not slam the marker to the left edge.
+        fields = {f.label: f for _, f in setup_fields(make_setup()) if f is not None}
+
+        bias = fields["Front Brake Bias"]
+        self.assertEqual((bias.min_display, bias.max_display), ("70", "50"))
+        self.assertAlmostEqual(bias.fraction, (58 - 70) / (50 - 70))  # 0.6
+        self.assertGreater(bias.fraction, 0.5)  # 58 is nearer the 50 (right) end
+
+        # extremes land on the correct edges for a reversed range
+        left = fields["Front Brake Bias"].__class__(
+            label="x", value=70, minimum=70, maximum=50,
+            display="", min_display="", max_display="")
+        right = fields["Front Brake Bias"].__class__(
+            label="x", value=50, minimum=70, maximum=50,
+            display="", min_display="", max_display="")
+        self.assertAlmostEqual(left.fraction, 0.0)
+        self.assertAlmostEqual(right.fraction, 1.0)
+
+        # out-of-band values still clamp onto the track
+        over = fields["Front Brake Bias"].__class__(
+            label="x", value=90, minimum=70, maximum=50,
+            display="", min_display="", max_display="")
+        self.assertAlmostEqual(over.fraction, 0.0)
 
 
 if __name__ == "__main__":
