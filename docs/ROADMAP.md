@@ -113,6 +113,8 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
     `get_circuit_info`, keyed by our `track_id` and scaled by `track_length_m`. **Licensing:** that
     data is community/unofficial (MultiViewer; FastF1 is non-commercial/personal-use) — fine for
     private, friends-only use, but revisit/replace before any broad public distribution.
+    **Priority:** deferred behind league-readiness work (packaging, GP roster import, cache
+    refresh) — a visual enhancement only, not needed before the next league season.
     *Still deferred:* **Automatic cache refresh** — the provider's in-memory cache isn't
     invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
     for personal/testing use, to be made automatic before any release to friends/users (likely after

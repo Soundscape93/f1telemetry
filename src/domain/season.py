@@ -36,6 +36,13 @@ class SeasonMode(IntEnum):
     LEAGUE = 3
 
 
+# Season modes driven against other people, so they resolve standings through a hand-maintained
+# roster (online names + race numbers). LEAGUE is the game's League Racing; GRAND_PRIX covers
+# multiplayer GP lobbies - used for 2026 leagues, whose DLC cars aren't available in League Racing.
+# The solo career modes (MY_TEAM, DRIVER_CAREER) race fixed-identity AI and never need a roster.
+ROSTER_SEASON_MODES = frozenset({SeasonMode.LEAGUE, SeasonMode.GRAND_PRIX})
+
+
 @dataclass(frozen=True)
 class SeasonRound:
     """One round in a season's calendar; an ordingal and the track it's run at."""

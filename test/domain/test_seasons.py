@@ -6,7 +6,7 @@ import unittest
 
 from f1telemetry.src.domain.calendars import official_calendar
 from f1telemetry.src.domain.models import Classification, ClassificationEntry, SessionResult
-from f1telemetry.src.domain.season import SeasonMode, SeasonRound
+from f1telemetry.src.domain.season import ROSTER_SEASON_MODES, SeasonMode, SeasonRound
 from f1telemetry.src.protocol.enums import Formula, ResultReason, ResultStatus, SessionType, Weather
 from f1telemetry.src.storage.sessions import SessionStore
 from f1telemetry.src.storage.seasons import SeasonStore
@@ -141,6 +141,27 @@ class AssignmentTest(StoreTestBase):
         self.assertEqual(austria.sessions[0].classification.winner.driver_name, "After",
                          "Austria round should have the reingested session's classification after reingestion")
         
+
+class RosterSeasonModesTest(unittest.TestCase):
+    """Which season modes offer the roster workflow (online-name + race-number standings).
+
+    LEAGUE (game League Racing) and GRAND_PRIX (multiplayer GP lobbies - used for 2026 leagues
+    whose DLC cars aren't in League Racing) are driven against people and are roster-aware; the
+    solo career modes race fixed-identity AI and must not surface a roster.
+    """
+
+    def test_multiplayer_modes_are_roster_aware(self):
+        self.assertIn(SeasonMode.LEAGUE, ROSTER_SEASON_MODES,
+                      "LEAGUE seasons must offer the roster workflow")
+        self.assertIn(SeasonMode.GRAND_PRIX, ROSTER_SEASON_MODES,
+                      "GRAND_PRIX seasons must offer the roster workflow (2026 GP-multiplayer leagues)")
+
+    def test_solo_modes_are_not_roster_aware(self):
+        self.assertNotIn(SeasonMode.MY_TEAM, ROSTER_SEASON_MODES,
+                         "MY_TEAM races fixed-identity AI and must not surface a roster")
+        self.assertNotIn(SeasonMode.DRIVER_CAREER, ROSTER_SEASON_MODES,
+                         "DRIVER_CAREER races fixed-identity AI and must not surface a roster")
+
 
 if __name__ == "__main__":
     unittest.main()

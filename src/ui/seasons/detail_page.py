@@ -26,7 +26,7 @@ from ...analysis.standings import (
     standings_for_rounds,
 )
 from ...domain.roster import LeagueRoster
-from ...domain.season import SeasonMode, grand_prix_session
+from ...domain.season import ROSTER_SEASON_MODES, grand_prix_session
 from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
 from ..formatting import race_winner_summary
@@ -215,14 +215,16 @@ class DetailPage(QWidget):
         self._constructor_empty.setVisible(not constructor_rows)
 
     def _league_roster_for_detail(self, season, rounds) -> LeagueRoster | None:
-        """Return a roster for LEAGUE seasons and update the roster status panel.
+        """Return a roster for roster-aware seasons and update the roster status panel.
 
-        Read-only: a saved file is loaded, otherwise a capture-seeded roster is shown without
-        writing. The file is created only by the Create/Import buttons.
+        Roster-aware modes are LEAGUE and GRAND_PRIX (see ``ROSTER_SEASON_MODES``); both are run
+        against other people and resolve standings by roster. Read-only: a saved file is loaded,
+        otherwise a capture-seeded roster is shown without writing. The file is created only by the
+        Create/Import buttons.
         """
-        is_league = season.mode == SeasonMode.LEAGUE
-        self._roster_panel.setVisible(is_league)
-        if not is_league:
+        is_roster_mode = season.mode in ROSTER_SEASON_MODES
+        self._roster_panel.setVisible(is_roster_mode)
+        if not is_roster_mode:
             return None
 
         try:

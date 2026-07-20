@@ -24,7 +24,7 @@ from ..domain.roster import (
     roster_from_rounds,
     save_roster,
 )
-from ..domain.season import RoundResults, Season, SeasonMode
+from ..domain.season import RoundResults, Season
 
 # A lazy source of all seasons: only invoked when a roster actually needs seeding, so the common
 # "file already exists" render path does not pay for a seasons query.
@@ -97,15 +97,13 @@ class SeasonRosterFiles:
         return roster
 
     def _previous_roster(
-        self,
-        season: Season,
-        all_seasons: SeasonsSource,
+        self, season: Season, all_seasons: SeasonsSource,
     ) -> LeagueRoster | None:
-        """Load the most recent previous LEAGUE season roster, if one exists."""
+        """Load the most recent previous same-mode season roster, if one exists."""
         candidates = [
             candidate
             for candidate in all_seasons()
-            if candidate.mode == SeasonMode.LEAGUE
+            if candidate.mode == season.mode
             and candidate.season_id != season.season_id
             and candidate.number < season.number
             and self.path_for(candidate.season_id).exists()
