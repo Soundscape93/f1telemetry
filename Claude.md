@@ -195,3 +195,7 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
 - **`docs/TELEMETRY_NOTES.md`** — F1-UDP spec facts and quirks, and the diagnostic tools; read
   before touching the parser, normalizer, or assembler.
 - **`docs/ROADMAP.md`** — planned work and deferred ideas.
+- **`docs/PACKAGING.md`** — the packaging/release plan: PyInstaller one-folder (Windows first),
+  the `paths.py` data-root refactor, DB migration vs pipeline-version auto-reingest, GitHub
+  Releases/Actions, the Windows-11 clean-machine checklist, and tester instructions. Read before
+  starting Phase 0. This is the priority pre-season work.

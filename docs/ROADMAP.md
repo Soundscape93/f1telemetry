@@ -144,32 +144,33 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
 - **Dashboard** — recent sessions / summaries (the record header already lives above it).
 
 ## Packaging (before sharing a built app with colleagues)
-- **A single writable data root (`data_root()`), not CWD-relative paths.** Today `captures/`,
-  `rosters/`, and the SQLite DB are all bare relative paths (`Path("captures")`,
-  `SeasonRosterFiles(root="rosters")`, the DB path), resolved against the *current working
-  directory*. Fine in dev (launched from the workspace root); broken once frozen
-  (PyInstaller/briefcase), where the code lives inside a read-only bundle and CWD is
-  unpredictable. Add one helper that returns the OS per-user data dir when packaged
-  (`QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)` → `~/.local/share/…`,
-  `%APPDATA%\…`, `~/Library/Application Support/…`) and the repo folder in dev, then route
-  captures, rosters, and the DB through it *together*. `SeasonRosterFiles` already takes an
-  injectable `root`, so it's ready for this.
-- **Auto-update + version-gated data backfill (two *separate* concerns).**
-  - *Auto-update (distribution):* GitHub Actions builds per-OS frozen artifacts, publishes a
-    Release; the app checks the Releases API on startup and an updater downloads/swaps the build.
-    Rougher in Python than the C#/ClickOnce world — a real option is `tufup` (TUF-based). Per-OS
-    fiddly; packaging-time work.
-  - *Data backfill:* `ensure_schema` adds a new column but can't fill a *capture-derived* value in
-    old rows (e.g. `nationality_id`, upcoming `best_lap_num`) — those need re-deriving from the
-    capture. For end users with many sessions, manual re-ingest is painful. Plan: store a
-    "backfill version" in a metadata table; on startup, if the app expects a higher version, run a
-    **background, non-blocking, idempotent** re-ingest of retained captures (reuse the
-    `IngestWorker` pattern, show progress) — *not* a startup gate. Already safe to automate: ingest
-    replaces by uid, tombstones aren't resurrected, round assignments survive (no FK). Best-effort:
-    only sessions whose capture still exists can be back-filled (surface "N of M updated").
-    Decoupled from auto-update — it matters even with manual updates. Lever: persisting more
-    capture-derived data now means fewer future columns need a capture-reparse backfill (some
-    become fast pure-SQL migrations instead).
+**Full plan, phases, clean-machine checklist, risks, release workflow, and tester instructions
+now live in [`docs/PACKAGING.md`](PACKAGING.md).** This is the priority pre-season work (≈2–3
+weeks). Summary of the locked direction:
+- **Tool: PyInstaller, one-folder. Windows first**; macOS/Linux best-effort later; no paid
+  signing/notarization while private/free (unsigned + documented SmartScreen / Gatekeeper
+  click-through). Briefcase/installer polish deferred.
+- **Phase 0 (the only hard part — everything depends on it):** dependency manifest (none exists
+  yet); a `paths.py` with `data_root()` (per-user writable dir when frozen —
+  `QStandardPaths.AppLocalDataLocation` = `%LOCALAPPDATA%` / `~/Library/Application Support` /
+  `~/.local/share`; CWD-relative in dev so existing usage is unchanged; `F1TELEMETRY_DATA_DIR`
+  override) **and** `resource_path()` for bundled assets (flag SVGs — frozen-aware `_MEIPASS`);
+  route DB + `captures/` + `lap_traces/` + `rosters/` through it *together*; **file logging** +
+  **global exception hook → crash dialog** (a windowed build has no console); a `__version__`.
+- **Phase 1:** PyInstaller Windows one-folder build (hidden imports for **pyqtgraph** + **zstandard**
+  — lazy imports the packager otherwise misses and ships the fallback; exclude QtWebEngine/Qml/etc.;
+  bundle flag SVGs). Pass the Win11 clean-machine checklist.
+- **Phase 2 — migration vs pipeline-version vs auto-reingest (three distinct concerns):**
+  additive schema stays silent via `ensure_schema`; a separate **`PIPELINE_VERSION`** in a meta row
+  gates a **guided, progress-barred, non-blocking, idempotent** re-ingest of the archived captures
+  the `captures`/`capture_sessions` tables enumerate (round assignments/rosters survive — no FK,
+  stable `session_uid`). Tell the user *"this may take a few minutes"*; surface *"N of M updated"*
+  when archives are missing (only present archives can be rebuilt; `recorded_by` can't be).
+- **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release; in-app **notify-only** update
+  check against the Releases API (real self-updater — velopack/Sparkle/`tufup` — deferred).
+- **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
+- **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
+  is shared with a few trusted testers.
 
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:
