@@ -24,6 +24,7 @@ from ..domain.roster import (
     roster_from_rounds,
     save_roster,
 )
+from ..paths import rosters_dir
 from ..domain.season import RoundResults, Season
 
 # A lazy source of all seasons: only invoked when a roster actually needs seeding, so the common
@@ -34,8 +35,8 @@ SeasonsSource = Callable[[], Iterable[Season]]
 class SeasonRosterFiles:
     """Manage canonical per-season roster JSON files for LEAGUE seasons."""
 
-    def __init__(self, root: str | Path = "rosters") -> None:
-        self._root = Path(root)
+    def __init__(self, root: str | Path | None = None) -> None:
+        self._root = Path(root) if root is not None else rosters_dir()
 
     def path_for(self, season_id: int | None) -> Path:
         """Return the canonical roster JSON path for a saved season."""

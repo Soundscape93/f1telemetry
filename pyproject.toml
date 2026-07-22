@@ -1,0 +1,24 @@
+[project]
+name = "f1telemetry"
+# Runtime source of truth is src/version.py; keep this mirror in sync. Phase 3 CI will stamp
+# both from the git tag. (Not using dynamic=version: the f1telemetry.src-vs-src double root
+# makes an attr= resoultion fragile.)
+version = "0.1.0"
+description = "F1 2025/2026 UDP telemetry capture, analysis and results viewer"
+requires-python = ">=3.11"
+
+# Pinned to the versions the packaged build is validated against (reproducible builds).
+dependencies = [
+    "PySide6==6.11.1",
+    "numpy==2.4.2",
+    "pyarrow==24.0.0",
+    "SQLAlchemy==2.0.51",
+    # Lazy/optional at runtime but required in the bundle - PyInstaller must force-include these
+    # (they're imorted inside branches; missing them silently ships the fallback path.)
+    "pyqtgraph==0.14.0",
+    "zstandard==0.25.0",
+]
+
+[project.optional-dependencies]
+# Build time only (Phase 1); listed here so the CI has a single manifest to install from.
+package = ["pyinstaller>=6.0"]

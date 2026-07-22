@@ -5,8 +5,9 @@ Python, pip, PySide6, or anything else installed**. This file is the authoritati
 reference; the ROADMAP has only a short pointer. Written so a future session can start **Phase 0**
 without re-deriving the discussion.
 
-**Status:** planning only. No packaging code exists yet. No dependency manifest exists yet. All
-data paths are still CWD-relative (the thing Phase 0 fixes).
+**Status:** **Phase 0 done** (dependency manifest, `paths.py`, file logging, crash hook,
+`__version__` — see "Phase 0 — done" below). No PyInstaller packaging yet (Phase 1). Dev runs are
+unchanged: source runs still resolve every data path against the CWD.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -71,10 +72,14 @@ There are **two different** location needs — do not conflate them:
    - **Source:** the repo path.
    - Never in `data_root()`. These must also be added to PyInstaller's `datas` so they ship.
 
-`app.py` already sets `setApplicationName`/`setOrganizationName("f1telemetry")`, so `QStandardPaths`
-needs nothing extra. `SeasonRosterFiles` already takes an injectable `root`; `LapStore` already
-takes `trace_dir` — so the blast radius is mostly `main_window.py`'s constants plus the four store
-`_DEFAULT_URL`s. Route captures, DB, traces, and rosters through `data_root()` **together**.
+`app.py` sets `setApplicationName`/`setOrganizationName("f1telemetry")`; `paths._frozen_data_root()`
+does not depend on that having run (it uses `GenericDataLocation` and appends `f1telemetry` itself,
+so it works before the `QApplication` exists — logging is configured first). **As implemented, the
+routing lives at the app entry points, not in the stores:** `MainWindow`, `IngestWorker`, and
+`SeasonRosterFiles`'s default `root` resolve through `data_root()` together, so every production
+store gets a `paths.db_url()`. The four store `_DEFAULT_URL` constants were intentionally left as
+harmless relative fallbacks — no production code hits them, and every test passes an explicit temp
+URL, which kept the storage layer free of import-time side effects and the suite untouched.
 
 ---
 
@@ -174,11 +179,8 @@ Staged — do not build a self-updater now.
 
 ## Phased plan
 
-- **Phase 0 — pre-package refactor (the only non-trivial code; everything depends on it):**
-  dependency manifest; `paths.py` (`data_root()` + `resource_path()`, frozen-aware, env override,
-  dev-preserving); route all stores + assets through it; **file logging** to `logs/`; **global
-  exception hook → crash dialog + log**; `__version__`. The app must run correctly from an
-  arbitrary CWD writing to the user dir — *before* any PyInstaller work.
+- **Phase 0 — pre-package refactor (the only non-trivial code; everything depends on it): DONE.**
+  See "Phase 0 — done" below.
 - **Phase 1 — Windows package:** PyInstaller one-folder spec (hidden imports for
   pyqtgraph/zstandard, exclude heavy Qt modules, bundle flag SVGs); build on the Win11 boot; pass
   the clean-machine checklist below.
@@ -188,6 +190,37 @@ Staged — do not build a self-updater now.
   (notify-only).
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer, later a
   real auto-updater (velopack).
+
+---
+
+## Phase 0 — done
+
+Landed modules and what they do:
+
+- **`src/version.py`** — `__version__` (SemVer) + `PIPELINE_VERSION` (kept independent; the latter
+  gates the Phase 2 re-ingest). `app.py` sets `app.setApplicationVersion(__version__)` and logs it
+  at startup.
+- **`src/paths.py`** — the path authority. `data_root()` (env override → frozen per-user dir →
+  CWD), `resource_path(*parts)` (`_MEIPASS`-aware, keyed relative to the `src` package), plus
+  `db_url()`, `captures_dir()`, `trace_dir()`, `rosters_dir()`, `logs_dir()`, `config_path()`.
+- **`src/logging_setup.py`** — `configure_logging()`: a rotating file log at
+  `data_root()/logs/f1telemetry.log` (2 MB × 5), plus a console handler in dev only. Called first
+  in `main()`.
+- **`src/crash.py`** — `install_excepthook(log_file)`: logs any uncaught exception and shows a
+  `QMessageBox` pointing at the log. Installed after the `QApplication`. (Worker threads already
+  emit `failed`; a `threading.excepthook` is a later add.)
+- **`pyproject.toml`** (repo root) — the dependency manifest, deps pinned `==` to the validated
+  versions, with `pyqtgraph`/`zstandard` listed explicitly (Phase 1 must force-include them) and
+  `pyinstaller` under an optional `package` extra. Version is a static mirror of `src/version.py`
+  (CI will stamp both in Phase 3).
+
+### Contract Phase 1 must honor (bundled assets)
+
+`resource_path(*parts)` resolves frozen assets under
+`sys._MEIPASS / "f1telemetry" / "src" / *parts`. So the PyInstaller `datas` entry for the flag SVGs
+must ship them at **`f1telemetry/src/ui/assets/flags/`** inside the bundle (preserve the
+`f1telemetry/src/...` layout). Add any future runtime asset the same way and read it via
+`resource_path`.
 
 ---
 

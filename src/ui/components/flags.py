@@ -11,13 +11,14 @@ nationality or a missing asset yields ``None`` so the cell simply shows no flag 
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+    
+from ...paths import resource_path
 
-_FLAGS_DIR = Path(__file__).resolve().parent.parent / "assets" / "flags"
+_FLAGS_DIR = resource_path("ui", "assets", "flags")
 _FLAG_HEIGHT = 24               # px; flag-icons 4x3 flags render to 32x24, scaled by the view
 
 # nationality id -> flag-icons code (ISO 3166-1 alpha-2, or a GB subdivision code).

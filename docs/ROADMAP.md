@@ -150,13 +150,14 @@ weeks). Summary of the locked direction:
 - **Tool: PyInstaller, one-folder. Windows first**; macOS/Linux best-effort later; no paid
   signing/notarization while private/free (unsigned + documented SmartScreen / Gatekeeper
   click-through). Briefcase/installer polish deferred.
-- **Phase 0 (the only hard part — everything depends on it):** dependency manifest (none exists
-  yet); a `paths.py` with `data_root()` (per-user writable dir when frozen —
-  `QStandardPaths.AppLocalDataLocation` = `%LOCALAPPDATA%` / `~/Library/Application Support` /
-  `~/.local/share`; CWD-relative in dev so existing usage is unchanged; `F1TELEMETRY_DATA_DIR`
-  override) **and** `resource_path()` for bundled assets (flag SVGs — frozen-aware `_MEIPASS`);
-  route DB + `captures/` + `lap_traces/` + `rosters/` through it *together*; **file logging** +
-  **global exception hook → crash dialog** (a windowed build has no console); a `__version__`.
+- **Phase 0 (the only hard part — everything depends on it): DONE.** Dependency manifest
+  (`pyproject.toml`); `src/paths.py` with `data_root()` (per-user writable dir when frozen —
+  `%LOCALAPPDATA%` / `~/Library/Application Support` / `~/.local/share`; CWD-relative in dev so
+  existing usage is unchanged; `F1TELEMETRY_DATA_DIR` override) **and** `resource_path()` for
+  bundled assets (flag SVGs — frozen-aware `_MEIPASS`); DB + `captures/` + `lap_traces/` +
+  `rosters/` routed through it via the app entry points; **file logging** (`src/logging_setup.py`) +
+  **global exception hook → crash dialog** (`src/crash.py` — a windowed build has no console); a
+  `__version__` (`src/version.py`, with a separate `PIPELINE_VERSION`).
 - **Phase 1:** PyInstaller Windows one-folder build (hidden imports for **pyqtgraph** + **zstandard**
   — lazy imports the packager otherwise misses and ships the fallback; exclude QtWebEngine/Qml/etc.;
   bundle flag SVGs). Pass the Win11 clean-machine checklist.

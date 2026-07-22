@@ -36,11 +36,10 @@ from ..storage.laps import LapStore
 from .seasons import SeasonsView
 from .laps import LapsView
 from .style import MUTED_TEXT_QSS
+from .. import paths
 
-# Defaults; these become user settings later.
-_CAPTURE_DIR = Path("captures")
-_DB_URL = "sqlite:///f1league.db"
-_TRACE_DIR = "lap_traces"  # where each lap's dense Parquet trace is written
+# Data paths (DB, captures, lap traces, rosters) resolve through ``paths`` so a frozen build
+# writes to the per-user data dir while dev keeps using the workspace-root layout.
 _HOST = "0.0.0.0"
 _PORT = 20777
 
@@ -76,14 +75,17 @@ class MainWindow(QMainWindow):
         self._recorder: RecorderWorker | None = None
         self._ingest: IngestWorker | None = None
 
+        # Resolve the per user data pahts once; the workers reuse them on their own threads.
+        self._db_url = paths.db_url()
+        self._trace_dir = str(paths.trace_dir())
+
         # Stores the UI reads on the GUI thread. The IngestWorker keeps its own store on its
-        # own thread (SQLite dislikes a connection shared across threads); these point to the
-        # same database file.
-        self._session_store = SessionStore(_DB_URL)
-        self._season_store = SeasonStore(_DB_URL)
-        # The UI reads laps/traces on the GUI thread from its own LapStore (same DB file and
-        # trace_dir the IngestWorker writes to). Consumed by the Laps View; disposed on close.
-        self._lap_store = LapStore(_DB_URL, trace_dir=_TRACE_DIR)
+        # own thread (SQLite dislikes a connecetion shared across threads); these point to the same DB file.
+        self._season_store = SeasonStore(self._db_url)
+        self._session_store = SessionStore(self._db_url)
+        # The UI reads lap/traces on the GUI thread from its own LapStore (same DB file and
+        # trace_dir the IngestWorker writes to). Consumed by the LapsView; disposed on close.
+        self._lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
 
         self.setCentralWidget(self._build_central())
 
@@ -178,7 +180,7 @@ class MainWindow(QMainWindow):
         """TEMP: pick an existing .f1cap and ingest it, to test storing a captured weekend."""
         if self._recorder is not None or self._ingest is not None:
             return
-        start_dir = str(_CAPTURE_DIR) if _CAPTURE_DIR.exists() else ""
+        start_dir = str(paths.captures_dir())
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose a .f1cap / .f1cap.gz / .f1cap.zst to ingest", start_dir,
              "Captures (*.f1cap *.f1cap.gz *.f1cap.zst);;All files (*)"
@@ -192,8 +194,8 @@ class MainWindow(QMainWindow):
 
     def _start_recording(self) -> None:
         """Start recording live telemetry to a .f1cap file in the captures directory."""
-        _CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
-        path = str(_CAPTURE_DIR / f"{datetime.now():%Y%m%d_%H%M%S}.f1cap")
+        capture_dir = paths.captures_dir()
+        path = str(capture_dir / f"{datetime.now():%Y%m%d_%H%M%S}.f1cap")
 
         self._recorder = RecorderWorker(path, host=_HOST, port=_PORT)
         self._recorder.status.connect(self._on_record_status)
@@ -233,7 +235,7 @@ class MainWindow(QMainWindow):
 
     def _start_ingest(self, capture_path: str) -> None:
         """Start ingesting the capture file in a background thread."""
-        self._ingest = IngestWorker(capture_path, _DB_URL, trace_dir=_TRACE_DIR)
+        self._ingest = IngestWorker(capture_path, self._db_url, trace_dir=self._trace_dir)
         self._ingest.done.connect(self._on_ingest_done)
         self._ingest.failed.connect(self._on_failed)
         self._ingest.start()

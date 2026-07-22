@@ -136,6 +136,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   file, not the store's curation of it. `session_uid` is deliberately not a FK (mirrors
   `session_assignments` / `laps`). `recorded_by` is plumbed but unset (reserved for league import).
 - Stores are context managers (dispose the engine on exit).
+- **Filesystem paths** — all *writable* data (DB, `captures/`, `lap_traces/`, `rosters/`, `logs/`,
+  `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
+  the single path authority: `data_root()` is the CWD in dev (unchanged) and a per-user dir when
+  frozen, with `F1TELEMETRY_DATA_DIR` overriding both; `resource_path()` is `_MEIPASS`-aware. The
+  app entry points (`MainWindow`, `IngestWorker`, `SeasonRosterFiles`) route through it; callers
+  never hard-code these locations. See [`docs/PACKAGING.md`](PACKAGING.md).
 
 ### analysis/ — derived facts
 - **`standings.py`** — `StandingRow`; `by_driver_name` / `by_race_number` keys;
@@ -255,7 +261,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
   `SessionStore`, `LapStore`, **and** `CaptureStore` in-thread (SQLite dislikes cross-thread
   connections) and calls `pipeline.archive_and_ingest`, so app-side ingest archives the capture,
-  writes laps + Parquet traces (under an injectable `trace_dir`, default `lap_traces/` at the CWD),
+  writes laps + Parquet traces (under an injectable `trace_dir`, which the app supplies from
+  `paths.trace_dir()`),
   and records capture metadata — not just the classification. All three stores are disposed in a
   single `finally`. It's a thin wrapper: the archive/ingest/delete ordering lives in the pipeline.
 - **`formatting.py`** — Qt-free presentation helpers (winner time / gap / +laps / status;
