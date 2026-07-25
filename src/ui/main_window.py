@@ -35,6 +35,7 @@ from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
 from .seasons import SeasonsView
 from .laps import LapsView
+from .help_page import HelpPage
 from .style import MUTED_TEXT_QSS
 from .. import paths
 
@@ -162,8 +163,8 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._laps_view)
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
-        self._stack.addWidget(_PlaceholderPage(
-            "Help", "The help and documentation will be shown here."))
+        self._help_page = HelpPage()
+        self._stack.addWidget(self._help_page)
         self._stack.addWidget(_PlaceholderPage(
             "Bug report", "The bug report form will be shown here."))
         
