@@ -27,7 +27,7 @@ def _show_dialog(exc: BaseException, log_file: Path) -> None:
         return
     box = QMessageBox()
     box.setIcon(QMessageBox.Icon.Critical)
-    box.setWindowTable("F1 Telemetry - unexpected error")
+    box.setWindowTitle("F1 Telemetry - unexpected error")
     box.setText("The app hit an unexpected error and may be unstable")
     box.setInformativeText(
         f"{type(exc).__name__}: {exc}\n\n"

@@ -105,3 +105,27 @@ class IngestWorker(QThread):
         """Return a human-readable description of a session for the GUI."""
         stype = getattr(session.session_type, "name", session.session_type)
         return f"{stype} (uid {session.session_uid})"
+
+
+class UpdateCheckWorker(QThread):
+    """Runs the GitHub Releases check off the GUI thread; emits one results object.
+    
+    The network + pasring live in ``update_check.check_for_update`` (imported lazily so the app
+    start-up path never imports urllib). That function never raises; the try/except here is a
+    final guard so a worker failure still surfaces a calm result rather than a silent thread.
+    """
+    
+    result_ready = Signal(object)  # update_check.CheckResult
+
+    def __init__(self, current_version: str, parent=None) -> None:
+        super().__init__(parent)
+        self._current_version = current_version
+    
+    def run(self) -> None:
+        from ..update_check import check_for_update, UpdateCheckResult, CheckStatus
+        try:
+            result = check_for_update(self._current_version)
+        except Exception:
+            result = UpdateCheckResult(
+                CheckStatus.ERROR, message="Could not check for updates right now. Please try again later.")
+        self.result_ready.emit(result)
