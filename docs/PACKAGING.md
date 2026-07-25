@@ -5,9 +5,12 @@ Python, pip, PySide6, or anything else installed**. This file is the authoritati
 reference; the ROADMAP has only a short pointer. Written so a future session can start **Phase 0**
 without re-deriving the discussion.
 
-**Status:** **Phase 0 done** (dependency manifest, `paths.py`, file logging, crash hook,
-`__version__` — see "Phase 0 — done" below). No PyInstaller packaging yet (Phase 1). Dev runs are
-unchanged: source runs still resolve every data path against the CWD.
+**Status:** **Phases 0 and 1 done.** Phase 0 = dependency manifest, `paths.py`, file logging, crash
+hook, `__version__` (see "Phase 0 — done"). Phase 1 = the PyInstaller one-folder Windows build
+(`packaging/` spec + entry point) **plus a notify-only update check** (pulled forward from Phase 3),
+built on the author's Windows 11 boot and verified against the clean-machine checklist on
+2026-07-25 (see "Phase 1 — done"). Dev runs are unchanged: source runs still resolve every data path
+against the CWD.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -172,6 +175,10 @@ Staged — do not build a self-updater now.
 - Release: bump version → update `CHANGELOG.md` → tag `vX.Y.Z` → push → CI builds + publishes.
   Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
   partial).
+- **Release zip contents:** the one-folder build, plus **`USER_GUIDE.pdf`** (convert
+  `docs/USER_GUIDE.md`) and **`roster_template.csv`** at the top level. Publish a **full** GitHub
+  Release — not a draft/prerelease, or `/releases/latest` returns 404 and the in-app update check
+  can't see it.
 - **Do not break dev:** the `sys.frozen`-aware `paths.py` keeps source runs on CWD-relative dirs.
 - **Never `git commit` from tooling** (repo convention) — suggest the message, author runs it.
 
@@ -181,15 +188,18 @@ Staged — do not build a self-updater now.
 
 - **Phase 0 — pre-package refactor (the only non-trivial code; everything depends on it): DONE.**
   See "Phase 0 — done" below.
-- **Phase 1 — Windows package:** PyInstaller one-folder spec (hidden imports for
-  pyqtgraph/zstandard, exclude heavy Qt modules, bundle flag SVGs); build on the Win11 boot; pass
-  the clean-machine checklist below.
+- **Phase 1 — Windows package + notify-only update check: DONE (2026-07-25).** PyInstaller
+  one-folder spec + entry point (`packaging/`); hidden imports for pyqtgraph/zstandard; heavy Qt
+  modules excluded; flag SVGs bundled. Built on the Win11 boot and passed the clean-machine
+  checklist. The notify-only update check (`src/update_check.py` + the Help page's "Check for
+  updates") was pulled forward from Phase 3. See "Phase 1 — done" below.
 - **Phase 2 — migration / reingest:** `PIPELINE_VERSION` + startup detect + progress-barred
   auto-reingest from `captures`.
-- **Phase 3 — CI + release:** GitHub Actions Windows build on tag → Release; in-app update check
-  (notify-only).
-- **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer, later a
-  real auto-updater (velopack).
+- **Phase 3 — CI + release:** GitHub Actions Windows build on tag → Release (the notify-only update
+  check already shipped in Phase 1). PR-label-driven version bump + auto-Release is the planned shape.
+- **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
+  home for the Windows Firewall allow-rule so testers never see the prompt), later a real
+  auto-updater (velopack).
 
 ---
 
@@ -221,6 +231,42 @@ Landed modules and what they do:
 must ship them at **`f1telemetry/src/ui/assets/flags/`** inside the bundle (preserve the
 `f1telemetry/src/...` layout). Add any future runtime asset the same way and read it via
 `resource_path`.
+
+---
+
+## Phase 1 — done
+
+Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine checklist below).
+
+- **`packaging/f1telemetry.spec`** (one-folder) + **`packaging/entry.py`** (entry point →
+  `f1telemetry.src.ui.app:main`). The spec finds the repo root by the `src/` marker (robust to
+  whether `SPECPATH` resolves to the repo root or the `packaging/` subdir), puts the parent on
+  `pathex` so `f1telemetry.src.*` imports resolve, ships the flag SVGs at
+  `f1telemetry/src/ui/assets/flags` (honoring `resource_path`), force-includes **pyqtgraph** +
+  **zstandard** (+ `zstandard.backend_c`, `PySide6.QtSvg`) as hidden imports, and excludes the heavy
+  Qt modules. Build: `pip install -e ".[package]"` then `pyinstaller packaging/f1telemetry.spec`
+  from the repo root → `dist/f1telemetry/`. (The `.spec` is force-tracked past the `*.spec` gitignore
+  rule via a `!packaging/f1telemetry.spec` negation.)
+- **Notify-only update check** — `src/update_check.py` (stdlib `urllib`, GitHub Releases API, a tiny
+  SemVer compare, never raises; `GITHUB_OWNER`/`GITHUB_REPO` constants) + `UpdateCheckWorker`
+  (off the GUI thread) + the Help page's "Check for updates" button and a manual-download dialog. No
+  self-replacement; offline / rate-limit / bad response all fold into a calm "couldn't check"
+  message. `test/test_update_check.py` covers version compare + fetch/parse/error paths (no network).
+- **Frozen-only bugs found & fixed** (only reachable in a packaged build, so untested until now):
+  `paths.py` `_frozen_data_root` did `str / str` (QStandardPaths returns a `str`) → wrap in
+  `Path(base)`; `crash.py` `setWindowTable` typo → `setWindowTitle` (the crash dialog itself was
+  crashing); `recorder.py` had `return` inside a `finally` (swallowed exceptions) → moved after it.
+
+### Known issues (Phase 1 build)
+
+- **Live Windows light/dark switch** doesn't fully recolor the UI. `app._install_theme_refresh`
+  (on `QStyleHints.colorSchemeChanged`) re-polishes widgets so backgrounds follow, but **QSS-styled
+  label text keeps its old colour** — a `setStyleSheet` pins the palette-derived text colour. Fix
+  deferred (move those labels' font sizing off `setStyleSheet` onto `QFont`, or re-apply palette on
+  the signal). Workaround: **restart the app after switching the Windows theme.**
+- **pyqtgraph bloat:** the contrib hook pulls in `pyqtgraph.examples.*` (harmless, pure `.pyc`).
+  Trim via `excludes` in a later size pass before wider distribution — not worth destabilizing a
+  verified build now.
 
 ---
 

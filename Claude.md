@@ -33,13 +33,15 @@ design depends on it.
 
 ## Tech stack
 
-- Python 3.10+ (modern syntax: `X | None`, etc.), developed on Linux; the game runs on a PS5.
+- Python 3.11+ (modern syntax: `X | None`, etc.), developed on Linux; the game runs on a PS5.
+  (`pyproject.toml` pins `requires-python >=3.11`; the Windows build machine uses 3.14.)
 - **UI:** PySide6 (+ PyQtGraph for charts).
 - **Storage:** SQLite via SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`/`mapped_column`), kept
   engine-agnostic so it *could* move to Postgres if a hosted server is ever built.
-- **Hand-managed runtime deps (no requirements file):** `pyarrow` (Parquet traces), `pyqtgraph`
-  (charts), `zstandard` (new capture archives). Install the PyPI wheels by hand; `zstandard`'s
-  wheel statically bundles libzstd, which avoids a version clash with the one Qt loads.
+- **Dependency manifest:** `pyproject.toml` (deps pinned `==`; `pyinstaller` under a `[package]`
+  extra) — added in packaging Phase 0. Runtime third-party: PySide6, numpy, pyarrow, SQLAlchemy,
+  plus lazy `pyqtgraph` (charts) + `zstandard` (new capture archives). `zstandard`'s wheel
+  statically bundles libzstd, avoiding a version clash with the copy Qt loads.
 - **Wire parsing:** `ctypes.LittleEndianStructure` (`_pack_ = 1`), one struct set per format.
 
 ## Repository layout
@@ -64,6 +66,7 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
     README.md
     docs/                       # ARCHITECTURE, DECISIONS, TELEMETRY_NOTES, ROADMAP
     src/
+      version.py, paths.py, logging_setup.py, crash.py, update_check.py  # packaging + update check
       ingest/    recording.py (.f1cap read/write), recorder.py, sources.py,
                  archive.py (gzip/zstd codec dispatch + HashingReader), inspect.py (CLI)
       protocol/  base.py, header.py, enums.py, reference.py, registry.py, parser.py,
@@ -72,11 +75,12 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
       session/   assembler.py
       storage/   schema.py, sessions.py, seasons.py, laps.py, captures.py
       analysis/  standings.py
-      ui/        app.py, main_window.py, season_roster.py, workers.py, formatting.py,
+      ui/        app.py, main_window.py, help_page.py, season_roster.py, workers.py, formatting.py,
                  seasons/ (view.py=SeasonsView container + overview/create/detail/weekend
                    _page.py, labels.py) — pages coordinated by navigation signals
                  components/ (tables.py, classification_table.py) — shared widgets
       pipeline.py               # Qt-free ingest orchestration (ingest_capture, archive_and_ingest)
+    packaging/                  # PyInstaller one-folder spec (f1telemetry.spec) + entry.py
     test/                       # unittest suites (test_*.py); run from the repo root:
                                 #   python3 -m f1telemetry.test.<name>
 ```
@@ -187,6 +191,10 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
   `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics
   surface and an edit-calendar action. See `docs/ROADMAP.md`.
+- **Packaging (Phases 0–1 done):** a per-user data root + `resource_path` (`paths.py`), file logging
+  + crash dialog, `__version__`/`PIPELINE_VERSION` (`version.py`), a PyInstaller one-folder Windows
+  build (`packaging/`), and a notify-only GitHub-Releases update check (`update_check.py` + Help
+  page). Verified on Windows 11 (2026-07-25). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 
 ## Where to look
 
