@@ -76,7 +76,7 @@ class SessionRecorder:
                 file.close()
             if on_status is not None:
                 on_status(self.packet_count, self.byte_count, time.perf_counter() - start)
-            return self.packet_count
+        return self.packet_count
         
     def record_forever(self, status_interval: float = 2.0) -> None:
         """CLI entry: capture until Ctrl-C, printing status on stdout."""
