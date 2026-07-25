@@ -150,6 +150,31 @@ what would trigger revisiting it.
   dense-trace storage lands). *Trigger to adopt Alembic:* the first non-additive migration
   (a rename / type change / drop / backfill). `create_all` does NOT alter existing tables, so an
   additive column today still requires deleting the dev DB and re-ingesting.
+- **The pipeline version lives in a `meta` table, not `PRAGMA user_version`** (packaging Phase 2).
+  Both were on the table. The PRAGMA is one integer for free, but it is SQLite-only, and the storage
+  layer is deliberately kept engine-agnostic (it could move to Postgres if a hosted version ever
+  happens) — a PRAGMA would be the first thing to break that. A *table* costs nothing to migrate
+  into existence (`create_all`, the `deleted_sessions` / `captures` precedent) and generalises to
+  the next piece of app-level state that belongs to no aggregate. `PIPELINE_VERSION` stays a
+  separate integer from the app's SemVer: a UI-only release must not force a re-ingest, and a
+  pipeline change without a release still needs the bump.
+- **An unstamped database that already holds sessions counts as version 0, not "current".** It was
+  written before the stamp existed, so its rows were derived by an unknown older pipeline — and in
+  practice they genuinely are stale (rows saved before iteration 2c hold no tyre/brake/engine
+  temperatures; before the sector work, no `track_length_m` or sector distances). Adopting them
+  silently would be a lie that permanently hides recoverable data. An unstamped *empty* database is
+  the opposite case: nothing has been derived, so it is stamped immediately and a first launch never
+  prompts.
+- **Missing capture archives do not block the new stamp; a cancel or an ingest error does.** Only
+  captures still on disk can be rebuilt, so a database whose archives are gone can *never* reach a
+  complete rebuild — refusing to stamp would re-offer the same impossible upgrade on every launch.
+  It is stamped and the summary says how many sessions stayed stale. A cancel or a genuine failure
+  is different: both are worth retrying, so the stamp stays put and the offer returns. The
+  "Don't ask again" button is the same escape hatch reached deliberately.
+- **The re-ingest offer is never a gate.** It is a dialog on a painted window (fired one event-loop
+  turn after start-up), the app is fully usable whichever button is pressed, and the rebuild itself
+  is modeless and cancellable. Rationale: it can take minutes on a 1.5 GB weekend, and a blocking
+  "please wait" on launch is exactly how a tester concludes the app has hung.
 
 ## Identity & rosters
 - **League driver identity resolves by race number first.** Leagues enforce unique numbers, so

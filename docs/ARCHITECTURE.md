@@ -134,7 +134,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   re-ingest lookup; `known_files()` is the cheap name+size pre-filter for a folder scan. The
   `capture_sessions` list includes sessions ingest *skipped* as tombstoned — it describes the
   file, not the store's curation of it. `session_uid` is deliberately not a FK (mirrors
-  `session_assignments` / `laps`). `recorded_by` is plumbed but unset (reserved for league import).
+  `session_assignments` / `laps`). `recorded_by` is plumbed but unset (reserved for league import) —
+  a re-ingest feeds the stored value back so it isn't erased.
+- **`meta.py`** *(packaging Phase 2)* — `MetaStore` over a `meta` key/value table: app-level state
+  that belongs to no aggregate. Today one key, `pipeline_version` — the `PIPELINE_VERSION` the
+  stored *derived* data was produced by, compared on startup against this build's to offer a guided
+  re-ingest. A table rather than SQLite's `PRAGMA user_version` because the schema is kept
+  engine-agnostic, and a new table needs no migration. A corrupt/unparseable value reads as
+  unstamped rather than crashing start-up.
 - Stores are context managers (dispose the engine on exit).
 - **Filesystem paths** — all *writable* data (DB, `captures/`, `lap_traces/`, `rosters/`, `logs/`,
   `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
@@ -270,7 +277,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`pipeline.py`** (`src/pipeline.py`) — the Qt-free ingest orchestration, extracted so it's
   testable without Qt: `ingest_capture(path, store, ...)` (parse → assemble → persist, plus the
   capture-metadata scan) and `archive_and_ingest(...)` (the archive-first flow the worker wraps —
-  see [Capture compression](#capture-compression)).
+  see [Capture compression](#capture-compression)). *(Packaging Phase 2)* it also owns the
+  pipeline-version gate and the guided rebuild: `check_pipeline_version(meta_store, session_store)`
+  → `PipelineState` (CURRENT / UPGRADE_AVAILABLE / AHEAD, adopting an unstamped *empty* database),
+  and `reingest_all(...)` → `ReingestSummary`, which re-derives every stored session from the
+  capture archives `captures` enumerates. It ingests archives **in place** (`ingest_capture`, never
+  `archive_and_ingest`: nothing re-compressed, nothing deleted), resolves each capture through
+  `resolve_capture_path` (recorded path → captures-dir fallback, since `CaptureRow.path` is
+  advisory), skips a capture whose archive is gone rather than failing, and polls its `cancelled`
+  predicate **between** captures so a session is never left half-written. Idempotent and resumable:
+  replace-by-uid + replace-by-hash, and the no-FK invariants mean rebuilding derived rows never
+  touches standings, round placements or rosters.
 
 ## Capture compression
 
@@ -310,6 +327,14 @@ Recording and ingest run on `QThread`s so the UI stays responsive. SQLite dislik
 shared across threads, so the **`IngestWorker` creates its own stores in-thread** (session, lap,
 capture — disposed in a `finally`), while the UI reads through stores owned by the main window on
 the GUI thread — both pointing at the same database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
+
+**`ReingestWorker`** (packaging Phase 2) follows the same shape for the guided rebuild: its four
+stores (session, lap, capture, meta) are built on its own thread and disposed in one `finally`, it
+reports `progress(index, total, file_name)` to a modeless progress dialog, and its cooperative stop
+is a `threading.Event` polled between captures — a capture is never interrupted mid-way, so the
+store never holds a partial session. It writes the new `PIPELINE_VERSION` stamp only when the pass
+completed without errors or a cancel. `MainWindow` disables the record/ingest controls while it
+runs, so there is never a second writer.
 
 ## Invariants (see also CLAUDE.md and DECISIONS.md)
 

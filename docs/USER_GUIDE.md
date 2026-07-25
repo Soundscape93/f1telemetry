@@ -87,7 +87,32 @@ version exists it shows the version and a link to the download page. Updates are
 download the new zip and replace your folder. The app never auto-installs and works fully offline
 (a failed check just says so).
 
-## 8. Reporting a bug
+## 8. After an update: re-reading your captures
+
+Some updates read **more** out of a capture than earlier versions did (extra temperatures, track
+geometry, new chart channels). Existing sessions in your database were stored before that, so they
+can't show the new details until they're rebuilt.
+
+When that's the case, the app asks once at start-up:
+
+- **Update now** — re-reads every saved capture and rebuilds your stored sessions. A progress window
+  shows which capture it's on. **This can take a few minutes for a full weekend** — the app has not
+  frozen, you can keep using it, and you can cancel at any time (it stops after the capture it's
+  working on, and picks up again later — nothing is left half-finished).
+- **Not now** — nothing happens; you'll be asked again next time you start the app.
+- **Don't ask again** — stops the question for good. Use this if you no longer have the capture
+  files.
+
+You can also start it yourself at any time from **Help → Re-read captures…**.
+
+**Your seasons, round assignments and imported rosters are kept** — only the data read out of the
+captures is rebuilt, and sessions you deleted stay deleted.
+
+Only captures that are still in your `captures` folder can be rebuilt. If some are missing, the app
+says so ("*N of M sessions updated*") — those sessions keep their old data, which is harmless: they
+simply won't show the newest details.
+
+## 9. Reporting a bug
 
 Note your version (shown on the Help page) and attach the latest log from the `logs/` folder under
 `%LOCALAPPDATA%\f1telemetry`. Describe what you did and what happened.

@@ -163,12 +163,17 @@ weeks). Summary of the locked direction:
   verified on the Win11 clean-machine checklist. **Also pulled forward from Phase 3: a notify-only
   update check** (`src/update_check.py` + Help page). User-facing setup now lives in
   `docs/USER_GUIDE.md`; the Help page carries the same in-app.
-- **Phase 2 — migration vs pipeline-version vs auto-reingest (three distinct concerns):**
-  additive schema stays silent via `ensure_schema`; a separate **`PIPELINE_VERSION`** in a meta row
-  gates a **guided, progress-barred, non-blocking, idempotent** re-ingest of the archived captures
-  the `captures`/`capture_sessions` tables enumerate (round assignments/rosters survive — no FK,
-  stable `session_uid`). Tell the user *"this may take a few minutes"*; surface *"N of M updated"*
-  when archives are missing (only present archives can be rebuilt; `recorded_by` can't be).
+- **Phase 2 — migration vs pipeline-version vs auto-reingest: DONE (2026-07-25, dev).** Additive
+  schema stays silent via `ensure_schema`; a separate **`PIPELINE_VERSION`** in a `meta` table
+  (`storage/meta.py`, engine-agnostic — not `PRAGMA user_version`) gates a **guided,
+  progress-barred, non-blocking, cancellable, idempotent** re-ingest of the archived captures the
+  `captures`/`capture_sessions` tables enumerate (round assignments/rosters survive — no FK, stable
+  `session_uid`). `pipeline.check_pipeline_version` + `reingest_all` are the Qt-free half,
+  `ReingestWorker` the thread, offered at startup and re-runnable from Help → *Re-read captures…*.
+  A populated DB with no stamp counts as legacy (0) and is offered the upgrade; a fresh one is
+  adopted silently. Missing archives are surfaced (*"N of M updated"*) but don't block the stamp —
+  they can never be rebuilt. `recorded_by` *is* preserved (fed back from the `captures` row).
+  Windows re-verification pending on the next build.
 - **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release (the **notify-only** update check
   already shipped in Phase 1; real self-updater — velopack/Sparkle/`tufup` — deferred). A
   PR-label-driven version bump + auto-Release is the desired shape.

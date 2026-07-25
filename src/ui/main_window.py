@@ -12,10 +12,11 @@ Of the sibebar section, Seasons is the first view, the rest are placeholders for
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -23,13 +24,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMainWindow,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from .workers import IngestWorker, RecorderWorker
+from .workers import IngestWorker, RecorderWorker, ReingestWorker
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
@@ -43,6 +46,8 @@ from .. import paths
 # writes to the per-user data dir while dev keeps using the workspace-root layout.
 _HOST = "0.0.0.0"
 _PORT = 20777
+
+log = logging.getLogger(__name__)
 
 # sidebar sections, on order. Seasons is real; reast are placeholders for future work.
 _SECTIONS = ["Dashboard", "Seasons", "Sessions", "Laps", "Analytics", "Help", "Bug report"]
@@ -75,6 +80,8 @@ class MainWindow(QMainWindow):
 
         self._recorder: RecorderWorker | None = None
         self._ingest: IngestWorker | None = None
+        self._reingest: ReingestWorker | None = None
+        self._reingest_dialog: QProgressDialog | None = None
 
         # Resolve the per user data pahts once; the workers reuse them on their own threads.
         self._db_url = paths.db_url()
@@ -89,6 +96,11 @@ class MainWindow(QMainWindow):
         self._lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
 
         self.setCentralWidget(self._build_central())
+
+        # Deferred one event-loop turn so the window is painted before any dialog appears - and
+        # so it runs after every store's constructor has done create_all + ensure_schema (the
+        # silent additive migration must precede the pipeline-version comparison).
+        QTimer.singleShot(0, self._check_pipeline_version)
 
     # --- layout ------------------------------------------------------------
 
@@ -164,6 +176,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
         self._help_page = HelpPage()
+        self._help_page.reingest_requested.connect(self._on_manual_reingest)
         self._stack.addWidget(self._help_page)
         self._stack.addWidget(_PlaceholderPage(
             "Bug report", "The bug report form will be shown here."))
@@ -179,7 +192,7 @@ class MainWindow(QMainWindow):
 
     def _on_test_ingest(self) -> None:
         """TEMP: pick an existing .f1cap and ingest it, to test storing a captured weekend."""
-        if self._recorder is not None or self._ingest is not None:
+        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
             return
         start_dir = str(paths.captures_dir())
         path, _ = QFileDialog.getOpenFileName(
@@ -257,21 +270,16 @@ class MainWindow(QMainWindow):
         elif archive_error:
             message += f"Capture kept uncompressed: {archive_error}"
         self._status.setText(message)
-
-        # a freshly-stored session may be on an open surface; refresh whichever is showing.
-        current = self._stack.currentWidget()
-        if current is self._seasons_view:
-            self._seasons_view.refresh()
-        elif current is self._laps_view:
-            self._laps_view.refresh()
+        self._refresh_current_view()
 
     def _on_failed(self, message: str) -> None:
-        """Handle a failure from either the RecorderWorker or IngestWorker; reset the button and show the error."""
-        for attr in ("_recorder", "_ingest"):
+        """Handle a failure from any worker; reset the button and show the error."""
+        for attr in ("_recorder", "_ingest", "_reingest"):
             worker = getattr(self, attr)
             if worker is not None:
                 worker.wait()  # ensure the thread has finished before deleting it
             setattr(self, attr, None)
+        self._close_reingest_dialog()
         self._reset_button()
         self._status.setText(f"Error: {message}")
 
@@ -281,6 +289,153 @@ class MainWindow(QMainWindow):
         self._record_button.setEnabled(True)
         self._test_ingest_button.setEnabled(True)  # TEMP: remove with the test button
 
+    def _refresh_current_view(self) -> None:
+        """Refresh whichever data surface is showing, after stored sessions changed."""
+        current = self._stack.currentWidget()
+        if current is self._seasons_view:
+            self._seasons_view.refresh()
+        elif current is self._laps_view:
+            self._laps_view.refresh()
+
+    # --- pipeline version / guieded re-ingest ------------------------------------------------------------
+
+    def _check_pipeline_version(self) -> None:
+        """Offer a guided re-ingest when this build derives data the stored rows lack.
+
+        Never a silent start-up gate (docs/PACKAGING.md -> Phase 2): the app is fully usable
+        whatever the answer, and a failure here is logged and ignored rather than blocking
+        launch. ``pipeline`` is imported inside the method, not at module scope, so the
+        parse/assemble stack stays out of the start-up path (same reason as ``IngestWorker``).
+        """
+        from ..pipeline import PipelineState, check_pipeline_version
+        from ..storage.meta import MetaStore
+
+        try:
+            with MetaStore(self._db_url) as meta_store:
+                check = check_pipeline_version(meta_store, self._session_store)
+        except Exception as exc:
+            log.exception("Pipeline-version check failed; continuing without it")
+            return
+
+        log.info("Pipeline version: stored %s, this build %s (%s)",
+                 check.stored, check.current, check.state.name)
+        if check.state is PipelineState.UPGRADE_AVAILABLE:
+            self._offer_reingest()
+        elif check.state is PipelineState.AHEAD:
+            # Written by a newer build: re-ingesting here would *downgrade* the derived data, 
+            # so say nothing and touch nothing
+            log.warning("Database was written by a newer pipeline (%s > %s)",
+                        check.stored, check.current)
+
+    def _offer_reingest(self) -> None:
+        """Ask - never force - whether to rebuild stored data from the archived captures."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Update stored data")
+        box.setText("This version reads more from your captures than your stored data holds.")
+        box.setInformativeText(
+            "Your saved captures can be re-read to fill in the new details. Your seasons, round "
+            "assignments and rosters are kept.\n\n"
+            "A full weekend can take a few minutes. The app keeps working while it runs and you "
+            "can cancel at any time — or start it later from Help.")
+        update_btn = box.addButton("Update now", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        skip_btn = box.addButton("Don't ask again", QMessageBox.ButtonRole.DestructiveRole)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is update_btn:
+            self._start_reingest()
+        elif clicked is skip_btn:
+            self._stamp_pipeline_version()
+
+    def _stamp_pipeline_version(self) -> None:
+        """Record this build's PIPELINE_VERSION without rebuilding anything.
+
+        The escape hatch for someone who no longer has the capture archives (or simply doesn't
+        want the rebuild): without it, a database that can never be fully rebuilt would be
+        offered the same upgrade on every single launch.
+        """
+        from ..storage.meta import MetaStore
+        from ..version import PIPELINE_VERSION
+
+        try:
+            with MetaStore(self._db_url) as meta_store:
+                meta_store.set_pipeline_version(PIPELINE_VERSION)
+        except Exception:
+            log.exception("Could not stamp the pipeline version")
+
+    def _on_manual_reingest(self) -> None:
+        """Help -> "Re-read captures": the same guided rebuild, on demand."""
+        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+            self._status.setText("Busy - wait for the current job to finish.")
+            return
+        answer = QMessageBox.question(
+            self, "Re-read captures",
+            "Re-read every stored capture and rebuild your stored sessions?\n\n"
+            "Seasons, round assignments and rosters are kept. This can take a few minutes.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_reingest()
+
+    def _start_reingest(self) -> None:
+        """Rebuild every stored session from its capture archive on a background thread."""
+        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+            return
+        self._record_button.setEnabled(False)
+        self._test_ingest_button.setEnabled(False)
+
+        dialog = QProgressDialog(
+            "Re-reading your captures …\nThis can take a few minutes — the app hasn't frozen.",
+            "Cancel", 0, 0, self
+        )
+        dialog.setWindowTitle("Updating stored data")
+        dialog.setWindowModality(Qt.WindowModality.NonModal)        # the rest of the app stays usable    
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)          # closed when the worker reports, not when the bar fills
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self._cancel_reingest)
+        dialog.show()
+        self._reingest_dialog = dialog
+
+        self._reingest = ReingestWorker(
+            self._db_url, trace_dir=self._trace_dir, captures_dir=str(paths.captures_dir()))
+        self._reingest.progress.connect(self._on_reingest_progress)
+        self._reingest.done.connect(self._on_reingest_done)
+        self._reingest.failed.connect(self._on_failed)
+        self._reingest.start()
+        self._status.setText("Updating stored data from your captures ...")
+
+    def _cancel_reingest(self) -> None:
+        """Ask the pass to stop; it finishes the capture it's on so no session is left partial."""
+        if self._reingest is not None:
+            self._reingest.cancel()
+            self._status.setText("Finishing the current capture, then stopping ...")
+
+    def _on_reingest_progress(self, index: int, total: int, file_name: str) -> None:
+        if self._reingest_dialog is None:
+            return
+        self._reingest_dialog.setMaximum(total)
+        self._reingest_dialog.setValue(index - 1)       # index-1 finished; this one is in progress
+        self._reingest_dialog.setLabelText(
+             f"Re-reading capture {index} of {total}: {file_name}\n"
+            "This can take a few minutes — the app can be used while it runs.")
+
+    def _on_reingest_done(self, summary) -> None:
+        worker, self._reingest = self._reingest, None
+        if worker is not None:
+            worker.wait()  # ensure the thread has finished before deleting it
+
+        self._close_reingest_dialog()
+        self._reset_button()
+        self._status.setText(_reingest_message(summary))
+        self._refresh_current_view()
+
+    def _close_reingest_dialog(self) -> None:
+        if self._reingest_dialog is not None:
+            self._reingest_dialog.close()
+            self._reingest_dialog = None
+
     # --- shutdown ------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
@@ -288,6 +443,9 @@ class MainWindow(QMainWindow):
         if self._recorder is not None:
             self._recorder.stop()
             self._recorder.wait()
+        if self._reingest is not None:
+            self._reingest.wait()
+            self._reingest.wait()
         if self._ingest is not None:
             self._ingest.wait()
         self._session_store.close()
@@ -302,3 +460,23 @@ def _line(shape: QFrame.Shape) -> QFrame:
     line.setFrameShape(shape)
     line.setFrameShadow(QFrame.Shadow.Sunken)
     return line
+
+
+def _reingest_message(summary) -> str:
+    """One status line describing what a re-ingest pass managed to rebuild.
+
+    Deliberately explicit about what it could NOT do: only captures whose archive is still on
+    disk can be rebuilt, and the sessions behind a missing archive silently keep their old data
+    unless we say so (docs/PACKAGING.md -> "Honest limit").
+    """
+    if summary.captures_total == 0:
+        return "No captures were found to re-read - nothing to update."
+
+    parts = [f"Updated {summary.sessions_rebuilt} of {summary.sessions_total} stored session(s) "
+             f"from {summary.captures_ingested} capture(s)."]
+    if summary.missing:
+        parts.append(f"{len(summary.missing)} capture file(s) could not be found, so their "
+                     "sessions keep the old data.")
+    if summary.errors:
+        parts.append(f"{len(summary.errors)} capture(s) failed: {summary.errors[0]}")
+    return " ".join(parts)

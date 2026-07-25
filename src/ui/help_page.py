@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -52,7 +52,11 @@ _SETUP_HTML = (
 
 
 class HelpPage(QWidget):
-    """About + notify-only update check page."""
+    """About + notify-only update check page.
+    The page asks; MainWindow owns the worker (it also owns the record/ingest jobs this must
+    not run alongside) - the same emit-and-let-the-container-act split as the seasons pages. 
+    """
+    reingest_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -82,6 +86,13 @@ class HelpPage(QWidget):
         self._status.setOpenExternalLinks(True)         # clickable release link in the label
         self._status.setStyleSheet(MUTED_TEXT_QSS)
 
+        self._reingest_btn = QPushButton("Re-read captures")
+        self._reingest_btn.setMinimumHeight(32)
+        self._reingest_btn.setToolTip(
+            "Rebuild your stored sessions from the saved capture files. Needed after an update "
+            "that reads more from a capture; your seasons and rosters are kept.")
+        self._reingest_btn.clicked.connect(self.reingest_requested)
+        
         setup_title = QLabel("Setup / Configuration")
         setup_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
         setup_body = QLabel(_SETUP_HTML)
@@ -95,6 +106,8 @@ class HelpPage(QWidget):
         layout.addSpacing(6)
         layout.addWidget(self._check_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self._status)
+        layout.addSpacing(6)
+        layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(setup_title)
         layout.addWidget(setup_body)

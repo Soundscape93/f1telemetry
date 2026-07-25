@@ -5,12 +5,14 @@ Python, pip, PySide6, or anything else installed**. This file is the authoritati
 reference; the ROADMAP has only a short pointer. Written so a future session can start **Phase 0**
 without re-deriving the discussion.
 
-**Status:** **Phases 0 and 1 done.** Phase 0 = dependency manifest, `paths.py`, file logging, crash
-hook, `__version__` (see "Phase 0 — done"). Phase 1 = the PyInstaller one-folder Windows build
+**Status:** **Phases 0, 1 and 2 done.** Phase 0 = dependency manifest, `paths.py`, file logging,
+crash hook, `__version__` (see "Phase 0 — done"). Phase 1 = the PyInstaller one-folder Windows build
 (`packaging/` spec + entry point) **plus a notify-only update check** (pulled forward from Phase 3),
 built on the author's Windows 11 boot and verified against the clean-machine checklist on
-2026-07-25 (see "Phase 1 — done"). Dev runs are unchanged: source runs still resolve every data path
-against the CWD.
+2026-07-25 (see "Phase 1 — done"). Phase 2 = the `PIPELINE_VERSION` stamp in the database plus the
+guided, cancellable re-ingest of the archived captures (see "Phase 2 — done") — verified on
+dev/Linux 2026-07-25; its clean-machine items are **still to be re-checked on the next Windows
+build**. Dev runs are unchanged: source runs still resolve every data path against the CWD.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -123,26 +125,39 @@ Three change types — this is what decides "must the user re-ingest?":
 3. **Non-additive** (rename / retype / drop / backfill): needs **Alembic** — adopted only at the
    first such migration (deferred; additive-only until then).
 
-### Mechanism (planned): a `PIPELINE_VERSION` separate from the app SemVer
+### Mechanism (Phase 2, implemented): a `PIPELINE_VERSION` separate from the app SemVer
 
-- Store a `PIPELINE_VERSION` integer in the DB (a `meta` row or SQLite `PRAGMA user_version`),
-  distinct from the app's release version. Bump it **only** when ingest starts producing
-  different/new derived data.
-- On startup: run `create_all` + `ensure_schema` first (silent additive migrate). Then compare the
-  stored `PIPELINE_VERSION` to the app's. If the app is higher, **detect it and offer a guided
+- A `PIPELINE_VERSION` integer is stored in the DB, distinct from the app's release version. Bump
+  it **only** when ingest starts producing different/new derived data.
+- **A `meta` key/value table, not SQLite's `PRAGMA user_version`** — the schema is kept
+  engine-agnostic (a PRAGMA is not), and a *new table* needs no migration at all: `create_all`
+  creates it, the `deleted_sessions` / `captures` precedent.
+- On startup: `create_all` + `ensure_schema` run first (every store does both in its constructor,
+  so the silent additive migrate always precedes the comparison). Then the stored
+  `PIPELINE_VERSION` is compared to the app's. If the app is higher, the app **offers a guided
   re-ingest** of the archived captures the `captures` table enumerates (by `content_hash`, with
   `path` / `codec` to reopen them).
+- **An unstamped database is two different things**, and the difference is the whole upgrade story:
+  *no sessions* = brand new, so it is stamped with the current version immediately (a first launch
+  must never prompt); *has sessions* = it predates the stamp itself, so its rows were derived by an
+  unknown older pipeline — treated as `LEGACY_PIPELINE_VERSION` (0) and offered the re-ingest. Only
+  a completed rebuild (or an explicit "don't ask again") writes the new stamp.
 - **Safe by design:** seasons, `season_assignments`, and laps are deliberately *not* FK'd to
   `sessions`, and `session_uid` is stable from the game — so wiping+rebuilding derived rows
   preserves standings / round assignments / rosters. `content_hash` dedupe makes it idempotent and
   resumable. (See core invariant #4 and the `capture_sessions` "which file re-ingests this uid?"
   design.)
 - **UX is mandatory:** a weekend is ~1.5 GB of datagrams, so re-ingest is a **progress-barred,
-  non-blocking background job** (reuse the `IngestWorker` pattern) with an explicit *"this may take
+  non-blocking background job** (reuses the `IngestWorker` pattern) with an explicit *"this may take
   a few minutes — the app hasn't frozen"* message. Never a silent startup gate.
-- **Honest limit:** only captures whose archive is still present can be rebuilt. Surface
-  *"N of M sessions updated; the rest are missing their capture archive."* `recorded_by` is the one
-  field a re-ingest can't restore (it isn't in the file).
+- **Honest limit:** only captures whose archive is still present can be rebuilt. The result line is
+  *"Updated N of M stored session(s)… X capture file(s) could not be found, so their sessions keep
+  the old data."* Missing archives deliberately **do not** block the new stamp — nothing the app can
+  ever do will rebuild those rows, so refusing to stamp would re-offer the same impossible upgrade
+  on every launch. A cancel or a real ingest error *does* block it; both are worth retrying.
+- `recorded_by` **is** preserved: it isn't in the capture file, but it is in the `captures` row the
+  re-ingest reads, and is fed back through `ingest_capture` — without that, a re-ingest would
+  actively erase it. (This corrects the earlier note that called it unrecoverable.)
 
 ---
 
@@ -150,10 +165,13 @@ Three change types — this is what decides "must the user re-ingest?":
 
 Staged — do not build a self-updater now.
 
-- **Phase 1 (now): notify-only.** GitHub Releases + an in-app "check for updates" that queries the
-  Releases API, compares versions, and shows a notification with a **manual download link**. No
-  self-replacement.
-- **Phase 2 (later): real self-updater.** Best modern cross-platform option is **velopack**
+*(These two stages are the update story only — don't confuse them with the packaging phases below;
+the self-updater is packaging Phase 4.)*
+
+- **Stage 1 (shipped in Phase 1): notify-only.** GitHub Releases + an in-app "check for updates"
+  that queries the Releases API, compares versions, and shows a notification with a **manual
+  download link**. No self-replacement.
+- **Stage 2 (later): real self-updater.** Best modern cross-platform option is **velopack**
   (delta updates, GitHub-Releases appcast); per-OS alternatives are Sparkle (mac) / Squirrel (Win);
   `tufup` (TUF-based) is a Python-native option. Full self-replace is fiddly with a *running*
   one-folder app on Windows (file locks) — deferred deliberately.
@@ -193,8 +211,9 @@ Staged — do not build a self-updater now.
   modules excluded; flag SVGs bundled. Built on the Win11 boot and passed the clean-machine
   checklist. The notify-only update check (`src/update_check.py` + the Help page's "Check for
   updates") was pulled forward from Phase 3. See "Phase 1 — done" below.
-- **Phase 2 — migration / reingest:** `PIPELINE_VERSION` + startup detect + progress-barred
-  auto-reingest from `captures`.
+- **Phase 2 — migration / reingest: DONE (2026-07-25, dev).** `PIPELINE_VERSION` stamped in a `meta`
+  table + startup detect + a cancellable, progress-barred re-ingest from `captures`. See
+  "Phase 2 — done" below.
 - **Phase 3 — CI + release:** GitHub Actions Windows build on tag → Release (the notify-only update
   check already shipped in Phase 1). PR-label-driven version bump + auto-Release is the planned shape.
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
@@ -270,6 +289,56 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
 
 ---
 
+## Phase 2 — done
+
+Verified against a real dev database on 2026-07-25 (Linux/source run). The Windows items are folded
+into the clean-machine checklist below and are **still to be re-checked on the next build**. No new
+dependency and no new bundled asset — the PyInstaller spec is untouched.
+
+- **`src/storage/schema.py` → `MetaRow`** — the `meta` key/value table (TEXT values, so the table
+  stays generic; the store parses the one integer key it owns). A new table ⇒ `create_all` handles
+  it, no migration.
+- **`src/storage/meta.py` → `MetaStore`** — repository-per-aggregate sibling for the one thing that
+  belongs to no aggregate. `get`/`set` plus `pipeline_version()` / `set_pipeline_version()`. An
+  unparseable stamp (hand-edited, corrupt) reads as *unstamped* rather than crashing start-up.
+  `LEGACY_PIPELINE_VERSION = 0` lives here.
+- **`src/storage/sessions.py` → `SessionStore.stored_uids()`** — reads only the primary-key column,
+  so the re-ingest can size its work and report "N of M" without hydrating every classification.
+- **`src/pipeline.py`** — the Qt-free half: `PipelineState` (CURRENT / UPGRADE_AVAILABLE / AHEAD),
+  `check_pipeline_version` (the gate, including adopting a fresh database), `resolve_capture_path`
+  (recorded path → `captures_dir()/file_name` fallback, because `CaptureRow.path` is advisory and a
+  data root moves between a dev checkout and a frozen build), `ReingestSummary` (+ `is_complete`,
+  which decides whether the stamp moves) and `reingest_all`. Archives are ingested **in place** via
+  `ingest_capture` — never `archive_and_ingest` — so nothing is re-compressed and no file is ever
+  deleted by a re-ingest. One bad archive is recorded and skipped rather than aborting the pass.
+- **`src/ui/workers.py` → `ReingestWorker`** — the `IngestWorker` pattern verbatim: stores created
+  on *its* thread, disposed in one `finally`, heavy imports inside `run`. Cancellation is a
+  `threading.Event` polled **between** captures, so a capture is never interrupted half-way and the
+  store never holds a partial session. Stamps `PIPELINE_VERSION` only when `summary.is_complete`.
+- **`src/ui/main_window.py`** — the check fires via `QTimer.singleShot(0, …)` so the window is
+  painted before any dialog appears (and after every store's constructor has migrated). Three-button
+  offer: *Update now* / *Not now* / *Don't ask again* — the last stamps without rebuilding, the
+  escape hatch for someone whose archives are gone, without which the prompt could never terminate.
+  A modeless `QProgressDialog` reports "capture i of n" with the *"the app hasn't frozen"* line; the
+  record/ingest buttons are disabled for the duration and the visible view is refreshed at the end.
+  A `PipelineState.AHEAD` database (written by a *newer* build) is logged and left alone —
+  re-ingesting there would downgrade the derived data.
+- **`src/ui/help_page.py` → `reingest_requested`** — a "Re-read captures…" button, so *Not now* is
+  not a wait-for-next-launch dead end. The page emits; `MainWindow` owns the worker (it also owns
+  the record/ingest jobs this must not run alongside).
+- **Tests:** `test/storage/test_meta.py` (stamp round-trip, replace-not-accumulate, corrupt value,
+  the `LEGACY < PIPELINE_VERSION` invariant) and `test/ingest/test_reingest.py` (the gate's states,
+  path resolution, rebuild accounting, missing archive, one-bad-archive, cancel, `recorded_by`
+  survival, progress). Fixture-free: `reingest_all`'s `ingest` hook is injected, the same style as
+  `check_for_update`'s `urlopen`.
+
+### When to bump `PIPELINE_VERSION`
+
+Bump the integer in `src/version.py` **in the same commit** as an ingest change that makes stored
+rows stale — a new capture-derived column, a changed derivation, a new trace channel. Do *not* bump
+it for UI-only work or for an additive column whose value doesn't come from the packets. The release
+notes' "re-ingest needed?" line is then simply "yes" whenever the number moved.
+
 ## Clean-machine test checklist (Windows 11)
 
 Run on the author's Windows 11 boot; ideally from a fresh user with no Python installed.
@@ -289,6 +358,18 @@ Run on the author's Windows 11 boot; ideally from a fresh user with no Python in
 - [ ] **Flag SVGs render** (bundled `resource_path()` resolves).
 - [ ] Start against an **old DB** → additive columns added silently; against a **fresh** machine →
       DB created cleanly.
+- [ ] **Re-ingest (Phase 2)** — a **fresh** `%LOCALAPPDATA%\f1telemetry` shows **no** prompt on first
+      launch, and `meta` holds the current `pipeline_version`.
+- [ ] **Re-ingest** — a **pre-Phase-2 DB** offers the upgrade once; **Not now** leaves the app fully
+      usable and the offer returns next launch.
+- [ ] **Re-ingest** — **Update now** on a real weekend: the progress dialog counts captures, the app
+      stays responsive (switch pages while it runs), and the result line reads "N of M".
+- [ ] **Re-ingest** — after it completes, relaunching is silent, and seasons / round assignments /
+      rosters are unchanged.
+- [ ] **Re-ingest** — **Cancel** mid-pass recovers cleanly and the offer returns next launch; closing
+      the window mid-pass doesn't hang shutdown.
+- [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
+      still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
 - [ ] Open the app **twice** → SQLite doesn't wedge (WAL mode; handle "database is locked").
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
@@ -307,8 +388,9 @@ Run on the author's Windows 11 boot; ideally from a fresh user with no Python in
 - **Unsigned Windows exe / SmartScreen** "unknown publisher." Fallback: one-folder (fewer flags) +
   documented "More info → Run anyway"; code-signing cert only if it scares testers.
 - **macOS Gatekeeper** (unsigned). Fallback: documented right-click→Open; notarize later if ever.
-- **Auto-reingest slow / archives missing.** Fallback: optional + resumable + progress; surface
-  un-upgradable sessions.
+- **Auto-reingest slow / archives missing.** *Handled in Phase 2:* the rebuild is optional,
+  cancellable, idempotent/resumable and progress-barred, and the summary names how many sessions
+  stayed stale because their archive is gone.
 - **Self-updater complexity on Windows** (file locks while running). Fallback: stay notify-only.
 
 ---
