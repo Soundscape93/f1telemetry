@@ -8,10 +8,12 @@ background thread and reports the result through signals.
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Iterator
-from dataclasses import replace
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from enum import Enum, auto
 
 from .domain.captures import CaptureMeta
 from .domain.models import SessionResult
@@ -21,7 +23,12 @@ from .ingest.recording import read_header, read_packet
 from .protocol.parser import PacketParser
 from .protocol.registry import build_registry
 from .session.assembler import assemble
+from .storage.captures import CaptureStore
+from .storage.meta import LEGACY_PIPELINE_VERSION, MetaStore
 from .storage.sessions import SessionStore
+from .version import PIPELINE_VERSION
+
+log = logging.getLogger(__name__)
 
 
 class _CaptureScan:
@@ -185,3 +192,182 @@ def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None,
         os.remove(raw_to_delete)
     
     return sessions, archive_path, archive_error
+
+
+# --- pipeline version gate & guieded re-ingest -------------------------------------------------------------
+#
+# Three change types decide "must the user re-ingest?" (docs/PACKAGING.md):
+#   1. additive schema changes                  -> silent, ``ensure_schema`` on every store reconstruction
+#   2. additive + needs values from packets     -> the column exists, but rows are stale;
+#                                               THIS is what PIPELINE_VERSION gates
+#  3. non-additive                              -> Albemic, deffered unit the first one exists
+# Only (2) is handled here. The version is bumped in ``version.py`` when ingest starts producing
+# diffrent or new derived data - never for a UI-only release.
+
+
+class PipelineState(Enum):
+    """How a database's derived data relates to this build's ingest pipeline."""
+
+    CURRENT = auto()      # stamped with this build's version - nothing to do
+    UPGRADE_AVAILABLE = auto()  # older: this build derives data the stored rows don't have
+    AHEAD = auto()        # newer: written by a later build. Re-ingest would DOWNGRADE
+
+
+@dataclass(frozen=True)
+class PipelineCheck:
+    """The start-up check comparison result: what the database holds vs what this build produces."""
+
+    state: PipelineState
+    stored: int
+    current: int
+
+
+def check_pipeline_version(meta_store: MetaStore, session_store: SessionStore,
+                           current: int = PIPELINE_VERSION) -> PipelineCheck:
+    """Compare the database's pipeline stamp with this build's, adopting an unstamped one.
+    
+    Runs *after* ``create_all`` + ``ensure_schema`` (every store does both in its constructor),
+    so the silent additive migration always precedes this: the column exists by the time we ask
+    whether its values are stale.
+
+    An **unstamped** database is one of two things, and the difference matters:
+
+    * **no sessions** - brand new, nothing has been derived yet, so it is stamped with
+      ``current`` immediately. A first launch must never prompt.
+    * **has sessions** - it predates the stamp itself, so its rows were derived by an unknown
+      older pipeline: treated as :data:`LEGACY_PIPELINE_VERSION` and offered the re-ingest. It
+      is deliberately *not* stamped here - only a completed rebuild (or an explicit
+      "don't ask again") writes the new value.
+
+    Writing is confined to that one adopt-a-fresh-database case; every other path is read-only.
+    """
+    stored = meta_store.pipeline_version()
+    if stored is None:
+        if session_store.stored_uids():      # has sessions, predates the stamp
+            stored = LEGACY_PIPELINE_VERSION
+        else:                                 # no sessions, adopt the current build's version
+            stored = current
+            meta_store.set_pipeline_version(current)
+
+    if stored < current:
+        state = PipelineState.UPGRADE_AVAILABLE
+    elif stored > current:
+        state = PipelineState.AHEAD
+    else:
+        state = PipelineState.CURRENT
+    return PipelineCheck(state=state, stored=stored, current=current)
+
+
+def resolve_capture_path(meta: CaptureMeta, captures_dir: str | os.PathLike | None = None) -> str:
+    """Where a known capture's bytes are *now*, or None if the archive can't be found.
+
+    ``CaptureRow.path`` is advisory by design (DECISIONS -> Storage): captures move between
+    machines and data roots, and the content hash - not the location - is the identity. So the
+    recorded path is tried first, then the app's captures directory under the recorded file
+    name. That second lookup covers the case that actually happens: a data root that moved
+    (a dev checkout's ``captures/`` vs a frozen build's ``%LOCALAPPDATA%``), or a capture
+    ingested from Downloads and later copied into place."""
+    if meta.path and os.path.isfile(meta.path):
+        return meta.path
+    if captures_dir:
+        candidate = os.path.join(str(captures_dir), meta.file_name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+@dataclass(frozen=True)
+class ReingestSummary:
+    """What one guided re-ingest pass managed to rebuild."""
+
+    captures_total: int
+    captures_ingested: int
+    sessions_total: int                 # stored sessions when the pass started
+    sessions_rebuilt: int               # of those, how many were re-derived from a capture
+    missing: tuple[str, ...] = ()       # captures whose archive is gone - unrebuildable
+    errors: tuple[str, ...] = ()        # "<file name: error>", one per capture that failed
+    cancelled: bool = False
+
+    @property
+    def is_complete(self) -> bool:
+        """Whether the pass finished cleanly enough to stamp the new PIPELINE_VERSION.
+
+        Missing archives deliberately do NOT block it: nothing the app can ever do will rebuild
+        those rows, so refusing to stamp would re-offer the same impossible upgrade on every
+        launch. A cancel or a real ingest error does block it - both are worth retrying.
+        """
+        return not self.cancelled and not self.errors
+
+
+def reingest_all(capture_store: CaptureStore, session_store: SessionStore, *,
+                 lap_store=None,
+                 captures_dir: str | os.PathLike | None = None,
+                 on_progress: Callable[[int, int, str], None] | None = None,
+                 cancelled: Callable[[], bool] | None = None,
+                 ingest: Callable[..., list[SessionResult]] = ingest_capture) -> ReingestSummary:
+    """Re-derive every stored session from the capture archives ``captures`` enumerates.
+
+    The Qt-free half of the guided re-ingest (docs/PACKAGING.md -> Phase 2); the UI's
+    ``ReingestWorker`` is a thin wrapper that runs this on a background thread and forwards
+    ``on_progress`` as Qt signals - the same split as ``archive_and_ingest`` / ``IngestWorker``.
+
+    **Idempotent and resumable by construction**, so a cancelled or half-finished pass costs
+    nothing and can simply be run again: ``ingest_capture`` replaces by ``session_uid`` and
+    ``CaptureStore.record`` by content hash, while season assignments, rosters and tombstones
+    are keyed on the uid and deliberately not FK'd to ``sessions`` (core invariant #4) - so
+    rebuilding derived rows never touches standings, round placements or curation. Sessions the
+    user deleted stay deleted: ingest skips tombstoned uids.
+
+    Archives are ingested **in place** (``ingest_capture``, not ``archive_and_ingest``): nothing
+    is re-compressed, and a re-ingest never deletes a file. ``recorded_by`` is fed back from the
+    existing metadata row - it isn't in the capture file, so this is the only thing that keeps a
+    re-ingest from erasing it.
+
+    ``cancelled`` is a zero-arg predicate polled *between* captures: a capture is never
+    interrupted half-way, so the store is never left holding a partial session. ``ingest`` is
+    injectable purely so the tests can drive the accounting without a real capture.
+    """
+    captures = capture_store.list_captures()
+    total = len(captures)
+    stored_before = session_store.stored_uids()
+    rebuilt: set[int] = set()
+    missing: list[str] = []
+    errors: list[str] = []
+    ingested = 0
+    was_cancelled = False
+
+    log.info("Re-ingest starting: %d captures, %d stored sessions", total, len(stored_before))
+    for index, meta in enumerate(captures, start=1):
+        if cancelled is not None and cancelled():
+            was_cancelled = True
+            log.info("Re-ingest cancelled at %d of %d captures", index - 1, total)
+            break
+        if on_progress is not None:
+            on_progress(index, total, meta.file_name)
+
+        path = resolve_capture_path(meta, captures_dir)
+        if path is None:
+            log.info("Re-ingest: no archive found for %s", meta.file_name, meta.path)
+            missing.append(meta.file_name)
+            continue
+        try:
+            sessions = ingest(path, session_store, lap_store=lap_store,
+                              capture_store=capture_store, recorded_by=meta.recorded_by)
+        except Exception as exc:                    # one bad archive must not abort the whole pass
+            log.exception("Re-ingest failed for %s", path)
+            errors.append(f"{meta.file_name}: {exc}")
+            continue
+        rebuilt.update((int(s.session_uid) for s in sessions))
+        ingested += 1
+
+    summary = ReingestSummary(
+        captures_total=total,
+        captures_ingested=ingested,
+        sessions_total=len(stored_before),
+        sessions_rebuilt=len(rebuilt & stored_before),
+        missing=tuple(missing),
+        errors=tuple(errors),
+        cancelled=was_cancelled,
+    )
+    log.info("Re-ingest finished: %s", summary)
+    return summary

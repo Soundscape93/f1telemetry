@@ -249,3 +249,22 @@ class SeasonAssignmentRow(Base):
     session_uid: Mapped[str]  = mapped_column(String, unique=True)  # FK to sessions intentionally omitted, see class docstring
 
     season: Mapped[SeasonRow] = relationship(back_populates="assignments")
+
+
+class MetaRow(Base):
+    """One key/value of app-level state that belong to no aggregate.
+    
+    Today it holds exactly one key, ``pipeline_version``: the ``PIPELINE_VERSION`` the stored
+    derived data was produced by, compared against this build's on start-up to offer a guieded
+    re-ingest (docs/PACKAGING.md -> "DB migration & pipeline-version").
+
+    A table rather than SQLite's ``PRAGMA user_version`` for twor reasons: the schema is kept
+    engine-agnostic (a PRAGMA is not), and a *new table* needs no migration at all -
+    ``create_all`` creates it, the ``deleted_sessions`` / ``captures``precedent. Values are TEXT
+    so the table stays generic; the store parses the one integer key it owns.
+    """
+    
+    __tablename__ = "meta"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)

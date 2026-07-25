@@ -131,6 +131,15 @@ class SessionStore:
             return True
 
     # --- read ---------------------------------------------------------------
+    def stored_uids(self) -> set[int]:
+        """Every stored session's uid - the cheap "what would a re-ingest refresh?" query.
+        
+        Reads only the primary-key column, so the guieded re-ingest can size its work (and 
+        report "N of M sessions updated") without hydrating every classification. 
+        """
+        with self._Session.begin() as db:
+            return {int(uid) for uid in db.scalars(select(SessionRow.session_uid)).all()}
+
     def load(self, session_uid:int) -> SessionResult | None:
         """Reconstruct a stored SessionResult, or None if it isn't present."""
         with self._Session.begin() as db:

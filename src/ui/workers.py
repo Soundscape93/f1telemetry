@@ -129,3 +129,65 @@ class UpdateCheckWorker(QThread):
             result = UpdateCheckResult(
                 CheckStatus.ERROR, message="Could not check for updates right now. Please try again later.")
         self.result_ready.emit(result)
+
+
+class ReingestWorker(QThread):
+    """Rebuilds every stored session from its archived capture, off the GUI thread.
+
+    The Phase-2 counterpart of ``IngestWorker`` and built the same way: its stores are created
+    on THIS thread (SQLite dislikes a connection shared across threads) and disposed in a single
+    ``finally``, and the heavy pipeline imports live inside ``run`` so they stay out of start-up.
+
+    A pass takes minutes on a real weekend, so it is cooperatively cancellable through
+    ``stop_event`` - polled between captures by ``reingest_all``, never mid-capture.
+    """
+
+    progress = Signal(int, int, str)  # capture index (1-based), total, capture file name
+    done = Signal(object)             # pipeline.ReingestSummary
+    failed = Signal(str)                # error message
+
+    def __init__(self, db_url: str, *, trace_dir: str = "lap_traces",
+                 captures_dir: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._db_url = db_url
+        self._trace_dir = trace_dir
+        self._captures_dir = captures_dir
+        self.stop_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the pass to stop after the capture it's on; safe from the GUI thread."""
+        self.stop_event.set()
+
+    def run(self) -> None:
+        from ..pipeline import reingest_all
+        from ..storage.captures import CaptureStore
+        from ..storage.laps import LapStore
+        from ..storage.meta import MetaStore
+        from ..storage.sessions import SessionStore
+        from ..version import PIPELINE_VERSION
+
+        store = lap_store = capture_store = meta_store = None
+        try:
+            store = SessionStore(self._db_url)
+            lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            capture_store = CaptureStore(self._db_url)
+            meta_store = MetaStore(self._db_url)
+            summary = reingest_all(
+                capture_store, store,
+                lap_store=lap_store,
+                captures_dir=self._captures_dir,
+                on_progress=self.progress.emit,
+                cancelled=self.stop_event.is_set,
+            )
+            # Only a clean, complete pass moves the stamp: a cancelled or failed one leaves the
+            # database on the old version, so the offer comes back next launch. Missing archives
+            # don't count as failure - see ReingestSummary.is_complete.
+            if summary.is_complete:
+                meta_store.set_pipeline_version(PIPELINE_VERSION)
+            self.done.emit(summary)
+        except Exception as exc:            # surface any failure to the UI rather than dying silently
+            self.failed.emit(str(exc))
+        finally:
+            for s in (meta_store, capture_store, lap_store, store):
+                if s is not None:
+                    s.close()
