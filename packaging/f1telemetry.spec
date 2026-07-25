@@ -23,8 +23,8 @@ datas += collect_data_files("pyqtgraph")                # colormaps / icons pyqt
 
 # Lazy import PyInstaller can't see by static analysis (imported inside branches).
 hiddenimports = (
-    collect_submodules("pyqtgraph"),
-    + collect_submodules("zstandard"),
+    collect_submodules("pyqtgraph")
+    + collect_submodules("zstandard")
     + ["zstandard.backend_c", "PySide6.QtSvg"]
 )
 
