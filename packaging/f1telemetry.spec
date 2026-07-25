@@ -9,11 +9,14 @@ Output dist/f1telemetry/f1telemetry.exe (+ its _internal folder).
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# SPECPATH is .../f1-telemetry/f1telemetry/packaging
-REPO_ROOT = os.path.dirname(os.path.dirname(SPECPATH))      # .../f1-telemetry/f1telemetry
+# SPECPATH resolves to the repo root on some PyInstaller/OS combos and the packaging/
+# subdir on others. Detect the repo root by marker (the dir that contains 'src') rather than
+# assuming a fixed deph, so this pec works on Windows and Linux alike.
+_here = os.path.abspath(SPECPATH)
+REPO_ROOT = _here if os.path.isdir(os.path.join(_here, "src")) else os.path.dirname(_here)      # .../f1-telemetry/f1telemetry
 IMPORT_ROOT = os.path.dirname(REPO_ROOT)                          # .../f1-telemetry (has the f1telemetry pkg)
 
-entry = os.path.join(SPECPATH, "entry.py")
+entry = os.path.join(REPO_ROOT, "packaging", "entry.py")
 
 # Flag SVGs must ship preserving the f1telemetry/sr/... layout, so resource_path() finds them
 # under sys_MEIPASS (see paths.resource_path /docs/PACKAGING.md "Contract Phase 1 must honor").
