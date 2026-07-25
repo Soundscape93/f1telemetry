@@ -19,6 +19,21 @@ from ..version import __version__
 from .main_window import MainWindow
 
 
+def _install_theme_refresh(app: QApplication) -> None:
+    """Re-polish every widget when Windows switches light/dark at runtime.
+
+    Qt updates the application palette on a live OS theme change but doesn't always repaint
+    every widget (item views like the sidebar can keep their old ground). Re-polishing the
+    whole tree forces them to pick up the new palette.
+    """
+    def _repolish(_scheme=None):
+        for w in app.allWidgets():
+            w.style().unpolish(w)
+            w.style().polish(w)
+            w.update()
+    app.styleHints().colorSchemeChanged.connect(_repolish)
+
+
 def main() -> None:
     log_file = configure_logging()
     logging.getLogger(__name__).info(
@@ -31,6 +46,7 @@ def main() -> None:
     app.setApplicationVersion(__version__)
     
     install_excepthook(log_file)
+    _install_theme_refresh(app)
 
     window = MainWindow()
     window.show()

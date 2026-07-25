@@ -158,17 +158,20 @@ weeks). Summary of the locked direction:
   `rosters/` routed through it via the app entry points; **file logging** (`src/logging_setup.py`) +
   **global exception hook → crash dialog** (`src/crash.py` — a windowed build has no console); a
   `__version__` (`src/version.py`, with a separate `PIPELINE_VERSION`).
-- **Phase 1:** PyInstaller Windows one-folder build (hidden imports for **pyqtgraph** + **zstandard**
-  — lazy imports the packager otherwise misses and ships the fallback; exclude QtWebEngine/Qml/etc.;
-  bundle flag SVGs). Pass the Win11 clean-machine checklist.
+- **Phase 1 — DONE (2026-07-25).** PyInstaller Windows one-folder build (`packaging/` spec + entry;
+  hidden imports for **pyqtgraph** + **zstandard**; exclude QtWebEngine/Qml/etc.; bundle flag SVGs),
+  verified on the Win11 clean-machine checklist. **Also pulled forward from Phase 3: a notify-only
+  update check** (`src/update_check.py` + Help page). User-facing setup now lives in
+  `docs/USER_GUIDE.md`; the Help page carries the same in-app.
 - **Phase 2 — migration vs pipeline-version vs auto-reingest (three distinct concerns):**
   additive schema stays silent via `ensure_schema`; a separate **`PIPELINE_VERSION`** in a meta row
   gates a **guided, progress-barred, non-blocking, idempotent** re-ingest of the archived captures
   the `captures`/`capture_sessions` tables enumerate (round assignments/rosters survive — no FK,
   stable `session_uid`). Tell the user *"this may take a few minutes"*; surface *"N of M updated"*
   when archives are missing (only present archives can be rebuilt; `recorded_by` can't be).
-- **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release; in-app **notify-only** update
-  check against the Releases API (real self-updater — velopack/Sparkle/`tufup` — deferred).
+- **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release (the **notify-only** update check
+  already shipped in Phase 1; real self-updater — velopack/Sparkle/`tufup` — deferred). A
+  PR-label-driven version bump + auto-Release is the desired shape.
 - **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.

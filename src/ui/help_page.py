@@ -6,12 +6,17 @@ usable offline (a failed check just shows a message).
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QFileDialog,
+    QFrame,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -22,6 +27,29 @@ from ..version import __version__
 from .style import MUTED_TEXT_QSS
 from .workers import UpdateCheckWorker
 
+_ROSTER_CSV_TEMPLATE = "name,race_number,online_names\n"
+
+_SETUP_HTML = (
+    "<b>In-game telemetry settings:</b> (F1 game → Settings → Telemetry Settings):<br>"
+    "- Supported Telemetry Formats: <b>2025</b> and <b>2026</b> (older formats not supported) <br>"
+    "- UDP Telemetry <b>On</b> <br>"
+    "- UDP Broadcast Mode <b>On</b> <br>"
+    "- UDP Port <b>20777</b> <br>"
+    "- Set your online name/id to <b>Public</b> so online names come through. <br><br>"
+    "<b>Windows Firewall:</b> the first time you record, click <b>Allow</b> on the prompt. "
+    "If you dismissed or denied it, delete the <i>f1telemetry</i> rule under "
+    "Windows Defender Firewall → Inbound Rules, then press Record again.<br><br>"
+    "<b>League / multiplayer rostering:</b> if members don't set their online name to <b>Public</b>, "
+    "import a driver roster CSV (Seasons → pick a season → import roster). <br>" 
+    "The CSV needs a <b>header row</b> with columns <code>name</code>, <code>race_number</code>, "
+    "and <code>online_names</code> (optional, multiple online names separated by semicolons). "
+    "Column names are case-insensitive. "
+    "<a href='#save-template'>Save a blank template CSV…</a><br> "    
+    "<b>name</b> = canonical name shown in standings<br> "
+    "<b>race_number</b> = the stable anchor <br> "
+    "<b>online_names</b> = are used for standings if they are provided either by the telemetry data or the roster CSV. "
+)
+
 
 class HelpPage(QWidget):
     """About + notify-only update check page."""
@@ -30,7 +58,8 @@ class HelpPage(QWidget):
         super().__init__(parent)
         self._worker: UpdateCheckWorker | None = None
 
-        layout = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(8)
 
@@ -53,13 +82,47 @@ class HelpPage(QWidget):
         self._status.setOpenExternalLinks(True)         # clickable release link in the label
         self._status.setStyleSheet(MUTED_TEXT_QSS)
 
+        setup_title = QLabel("Setup / Configuration")
+        setup_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
+        setup_body = QLabel(_SETUP_HTML)
+        setup_body.setWordWrap(True)
+        setup_body.setStyleSheet(MUTED_TEXT_QSS)
+        setup_body.linkActivated.connect(self._on_setup_link)
+
         layout.addWidget(title)
         layout.addWidget(version)
         layout.addWidget(data_dir)
-        layout.addSpacing(12)
+        layout.addSpacing(6)
         layout.addWidget(self._check_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self._status)
+        layout.addSpacing(6)
+        layout.addWidget(setup_title)
+        layout.addWidget(setup_body)
         layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+    def _on_setup_link(self, href: str) -> None:
+        if href == "#save-template":
+            self._save_roster_template()
+
+    def _save_roster_template(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save blank roster template", "roster_template.csv", "CSV files (*.csv)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(_ROSTER_CSV_TEMPLATE, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save template", str(exc))
+
 
     # --- update check ---------------------------------------------------------------------------------
 
