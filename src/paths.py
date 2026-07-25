@@ -46,7 +46,7 @@ def _frozen_data_root() -> Path:
     from PySide6.QtCore import QStandardPaths
 
     base = QStandardPaths.writableLocation(QStandardPaths.GenericDataLocation)
-    return base / _APP_DIR_NAME
+    return Path(base) / _APP_DIR_NAME
 
 
 def _resolve_data_root() -> Path:
