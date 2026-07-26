@@ -90,10 +90,13 @@ jobs:
       - name: Install pandoc + xelatex
         run: |
           sudo apt-get update
-          # texlive-fonts-recommended supplies pzdr.tfm (ZapfDingbats), which hyperref's xetex
-          # driver needs for link annotations - without it xelatex dies on "Font \XeTeXLink@font".
+          # Both extras are only *Recommends* of texlive-xetex, so --no-install-recommends drops
+          # them, and each fails the build with an error naming a font rather than a package:
+          #   texlive-fonts-recommended -> pzdr.tfm (ZapfDingbats), used by hyperref's xetex driver
+          #   lmodern                   -> lmodern.sty, loaded unconditionally by pandoc's template
+          # fontspec/unicode-math need no line: texlive-xetex -> -latex-extra -> -latex-recommended.
           sudo apt-get install -y --no-install-recommends \
-            pandoc texlive-xetex texlive-fonts-recommended fonts-dejavu
+            pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu
       - name: Build USER_GUIDE.pdf
         run: |
           pandoc docs/USER_GUIDE.md -o USER_GUIDE.pdf \
