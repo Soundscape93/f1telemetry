@@ -174,9 +174,17 @@ weeks). Summary of the locked direction:
   adopted silently. Missing archives are surfaced (*"N of M updated"*) but don't block the stamp —
   they can never be rebuilt. `recorded_by` *is* preserved (fed back from the `captures` row).
   Windows re-verification pending on the next build.
-- **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release (the **notify-only** update check
-  already shipped in Phase 1; real self-updater — velopack/Sparkle/`tufup` — deferred). A
-  PR-label-driven version bump + auto-Release is the desired shape.
+- **Phase 3 — DONE (2026-07-26).** **Label-driven release:** write the entry under `## Unreleased`,
+  label the PR `major`/`minor`/`patch`, merge — `bump.yml` bumps `src/version.py` + `pyproject.toml`
+  + the changelog on `main`, tags it, and calls `release.yml` (preflight gate + test suite →
+  `USER_GUIDE.pdf` on Linux via pandoc/xelatex + the PyInstaller Windows build → a **full** GitHub
+  Release). CI **verifies** the version, never stamps it (`packaging/check_version.py`), so the
+  artifact is exactly the tagged commit. The PDF and `roster_template.csv` ship **beside the exe**,
+  reachable from the Help page's **Open user guide** via the new `paths.app_dir()` (third path kind)
+  with a PDF → source-`.md` → GitHub fallback chain; **Open data / captures / logs folder** actions
+  landed alongside (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer rather than the
+  data moving). Real self-updater — velopack/Sparkle/`tufup` — still deferred. Details + rationale in
+  `docs/PACKAGING.md`.
 - **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.

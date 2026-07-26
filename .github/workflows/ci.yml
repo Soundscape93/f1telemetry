@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # labeled/unlabeled included so the changelog gate re-runs when you add a bump label to an
+    # already-open PR.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out into a folder named f1telemetry
+        uses: actions/checkout@v4
+        with:
+          path: f1telemetry          # the suite imports f1telemetry.src.* from the parent dir
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        working-directory: f1telemetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1
+      - name: Version files agree
+        working-directory: f1telemetry
+        run: python packaging/check_version.py
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s f1telemetry/test -t .
+
+  # Only PRs that will actually cut a release must carry release notes.
+  changelog:
+    if: >-
+      github.event_name == 'pull_request' &&
+      (contains(github.event.pull_request.labels.*.name, 'major') ||
+       contains(github.event.pull_request.labels.*.name, 'minor') ||
+       contains(github.event.pull_request.labels.*.name, 'patch'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: The Unreleased section is release-ready
+        run: python packaging/bump_version.py --check

@@ -16,6 +16,9 @@ one-time game + firewall setup, and day-to-day use.
 
 No Python or other installs are needed; everything is bundled.
 
+Next to `f1telemetry.exe` you'll also find **`USER_GUIDE.pdf`** (this guide) and
+**`roster_template.csv`** (section 5). Inside the app, **Help → Open user guide** opens the PDF.
+
 ## 2. First-time setup
 
 ### In-game telemetry (F1 game → Settings → Telemetry Settings)
@@ -80,6 +83,15 @@ Your database, captures, lap traces, rosters and logs are stored under:
 
 Back up this folder to preserve your seasons and captures. The exact path is shown on the Help page.
 
+This folder is **hidden in Explorer by default** — you don't need to go looking for it. Use
+**Help → Open data folder**, **Open captures folder** or **Open logs folder** and the app opens
+Explorer there for you.
+
+**Please don't hand-edit `f1league.db`** with DB Browser for SQLite or similar tools. It's easy to
+break the app's data that way, and it makes bug reports much harder to diagnose. You don't need to:
+your captures are the real source of truth, so if the database ever misbehaves, **Help → Re-read
+captures…** rebuilds it from them.
+
 ## 7. Checking for updates
 
 **Help → Check for updates** compares your version with the latest GitHub release. If a newer
@@ -115,7 +127,8 @@ simply won't show the newest details.
 ## 9. Reporting a bug
 
 Note your version (shown on the Help page) and attach the latest log from the `logs/` folder under
-`%LOCALAPPDATA%\f1telemetry`. Describe what you did and what happened.
+`%LOCALAPPDATA%\f1telemetry` (the Help page can open that folder for you). Describe what you did and
+what happened. Don't send a hand-edited database — see section 6.
 
 ## Known issues
 
