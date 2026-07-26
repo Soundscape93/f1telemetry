@@ -496,6 +496,26 @@ The PDF is built on **`ubuntu-latest` with `--pdf-engine=xelatex` + DejaVu**, no
 runner: pandoc alone cannot emit a PDF, a TeX install on Windows is slow and fragile, and the guide
 contains `→` / `—` / `…`, which the default Latin Modern font silently drops.
 
+**The apt set is load-bearing, and `--no-install-recommends` is a trap here.** Two of the packages
+pandoc's default LaTeX template needs are only *Recommends* of `texlive-xetex`, so they are silently
+skipped — and each one fails the build with an error that names a font, not a package:
+
+| Missing | Error | Comes from |
+|---|---|---|
+| `pzdr.tfm` (ZapfDingbats, used by `hyperref`'s xetex driver) | `Font \XeTeXLink@font=pzdr … not loadable` | `texlive-fonts-recommended` |
+| `lmodern.sty` | `LaTeX Error: File 'lmodern.sty' not found` | `lmodern` |
+
+`fontspec` / `unicode-math` need no extra line — they are hard dependencies
+(`texlive-xetex` → `texlive-latex-extra` → `texlive-latex-recommended`). The full set is therefore
+**`pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu`**, and `ci.yml` builds the
+PDF on every PR so a gap can never take a release down again.
+
+**If a release job does fail after the tag was pushed** (`bump.yml` tags before `release.yml` runs),
+don't delete the tag and don't bump again: fix the workflow on `main` with an **unlabelled** PR, then
+**Actions → release → Run workflow** with **tag = the existing tag**. The dispatch uses the *fixed*
+workflow file from `main` but checks out the *tagged* source, so the artifact is still exactly the
+tagged commit.
+
 ---
 
 ## Clean-machine test checklist (Windows 11)

@@ -48,3 +48,28 @@ jobs:
           python-version: "3.14"
       - name: The Unreleased section is release-ready
         run: python packaging/bump_version.py --check
+  # The guide PDF used to build only during a release, so one missing TeX package took a release
+  # down with the tag already pushed. Building it here costs ~2 min (nearly all apt) and fails on
+  # the PR instead. Keep the two steps in sync with release.yml's guide-pdf job.
+  guide-pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pandoc + xelatex
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu
+      - name: Build USER_GUIDE.pdf
+        run: |
+          pandoc docs/USER_GUIDE.md -o USER_GUIDE.pdf \
+            --pdf-engine=xelatex \
+            --toc \
+            -V geometry:margin=2.5cm \
+            -V mainfont="DejaVu Serif" \
+            -V monofont="DejaVu Sans Mono" \
+            -V colorlinks=true
+      - uses: actions/upload-artifact@v4      # download it from the PR to eyeball the arrows
+        with:
+          name: user-guide-pdf-preview
+          path: USER_GUIDE.pdf
