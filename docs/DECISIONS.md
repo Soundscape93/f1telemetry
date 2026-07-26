@@ -158,6 +158,13 @@ what would trigger revisiting it.
   the next piece of app-level state that belongs to no aggregate. `PIPELINE_VERSION` stays a
   separate integer from the app's SemVer: a UI-only release must not force a re-ingest, and a
   pipeline change without a release still needs the bump.
+- **CI verifies the release version; it never stamps it** (packaging Phase 3). The alternative was
+  writing `__version__` from the git tag inside the build job. Rejected: the artifact would then
+  differ from the tagged commit, and `pip install -e .` in a checkout would report a different
+  version than the exe's Help page. Instead the PR label (`major`/`minor`/`patch`) drives a real
+  bump commit on `main` *before* the tag, and `packaging/check_version.py` fails the build if the
+  tag, `src/version.py` and `pyproject.toml` ever disagree. Consequence worth remembering: the bump
+  is a bot commit pushed to `main`, so branch protection must grant GitHub Actions a bypass.
 - **An unstamped database that already holds sessions counts as version 0, not "current".** It was
   written before the stamp existed, so its rows were derived by an unknown older pipeline — and in
   practice they genuinely are stale (rows saved before iteration 2c hold no tyre/brake/engine

@@ -124,3 +124,30 @@ def resource_path(*parts: str) -> Path:
     else:
         base = _SRC_DIR
     return base.joinpath(*parts)
+
+
+# --- beside the exe (the third path kind) ----------------------------------------------------
+
+def app_dir() -> Path:
+    """The directory the app itself lives in - *beside the exe* in a packaged build.
+
+    A third location kind, distinct from both above (docs/PACKAGING.md, Phase 3): in a one-folder
+    PyInstaller build ``sys.executable`` is ``dist/f1telemetry/f1telemetry.exe`` while
+    ``_MEIPASS`` is ``dist/f1telemetry/_internal``. Files the *user* is meant to find without
+    launching the app (``USER_GUIDE.pdf``, ``roster_template.csv``) ship here - never under
+    :func:`resource_path`, which would bury them inside ``_internal``.
+
+    In a source run there is no exe, so the repo root (the parent of ``src``) is the analogue.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return _SRC_DIR.parent
+
+
+def source_docs_dir() -> Path:
+    """``docs/`` in a source checkout - dev-run fallback for the user guide.
+    
+    Meaningless in a frozen build (``docs/`` is not shipped); callers test for existence rather
+    than for :func:`is_frozen`, so the answer is the same either way.
+    """
+    return _SRC_DIR.parent / "docs"

@@ -5,14 +5,17 @@ Python, pip, PySide6, or anything else installed**. This file is the authoritati
 reference; the ROADMAP has only a short pointer. Written so a future session can start **Phase 0**
 without re-deriving the discussion.
 
-**Status:** **Phases 0, 1 and 2 done.** Phase 0 = dependency manifest, `paths.py`, file logging,
+**Status:** **Phases 0, 1, 2 and 3 done.** Phase 0 = dependency manifest, `paths.py`, file logging,
 crash hook, `__version__` (see "Phase 0 — done"). Phase 1 = the PyInstaller one-folder Windows build
 (`packaging/` spec + entry point) **plus a notify-only update check** (pulled forward from Phase 3),
 built on the author's Windows 11 boot and verified against the clean-machine checklist on
 2026-07-25 (see "Phase 1 — done"). Phase 2 = the `PIPELINE_VERSION` stamp in the database plus the
-guided, cancellable re-ingest of the archived captures (see "Phase 2 — done") — verified on
-dev/Linux 2026-07-25; its clean-machine items are **still to be re-checked on the next Windows
-build**. Dev runs are unchanged: source runs still resolve every data path against the CWD.
+guided, cancellable re-ingest of the archived captures (see "Phase 2 — done") — verified on dev/Linux
+2026-07-25 and re-verified on the 2nd Windows build 2026-07-26. Phase 3 = the label-driven release
+pipeline (GitHub Actions → a full GitHub Release), the CI-generated `USER_GUIDE.pdf`, and the Help
+page's guide + folder actions (see "Phase 3 — done"); its clean-machine items are **still to be
+checked on the first published build**. Dev runs are unchanged: source runs still resolve every data
+path against the CWD.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -233,20 +236,41 @@ the self-updater is packaging Phase 4.)*
 ### GitHub Actions
 
 - Prereq: the dependency manifest.
-- Matrix: `windows-latest` (priority), later `macos-latest` + `macos-14` (arm) and `ubuntu-latest`.
-  Each runs PyInstaller, uploads its artifact; a tag push (`v*`) creates a Release and attaches the
-  artifacts, body from the changelog.
+- Implemented in Phase 3 as **`.github/workflows/release.yml`**: `preflight` (version + notes gate,
+  then the test suite) → `guide-pdf` (Linux) + `windows-build` (PyInstaller) → `release`.
+  Only `windows-latest` builds today; `macos-latest` / `macos-14` (arm) / `ubuntu-latest` are Phase 4.
 - **Windows** folder → zip is the clean primary artifact. **macOS** builds are unsigned/unnotarized
   → Gatekeeper blocks (right-click→Open; no Apple account while free). **Linux** → a tarball first;
   AppImage later.
+- **Any checkout CI makes must be in a folder named `f1telemetry`** (`actions/checkout` with
+  `path: f1telemetry`): imports are absolute `f1telemetry.src.*` and the spec puts that folder's
+  *parent* on `pathex`.
 
 ### Versioning & dev release process
 
-- One `__version__` in the package (CI can stamp it from the git tag). SemVer `MAJOR.MINOR.PATCH`.
-  Keep **`PIPELINE_VERSION` separate** (bumped only when ingest output changes).
-- Release: bump version → update `CHANGELOG.md` → tag `vX.Y.Z` → push → CI builds + publishes.
-  Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
-  partial).
+- One `__version__` in the package. SemVer `MAJOR.MINOR.PATCH`. Keep **`PIPELINE_VERSION` separate**
+  (bumped only when ingest output changes). `1.0.0` is reserved for "packaging finished / ready for
+  users outside the league"; until then everything is `0.x.y`.
+- **Label-driven release (Phase 3).** Write the entry under `## Unreleased` in `CHANGELOG.md` in the
+  PR → label the PR **`major`** / **`minor`** / **`patch`** → merge. `.github/workflows/bump.yml`
+  then bumps `src/version.py` + `pyproject.toml`, renames the Unreleased section to
+  `## vX.Y.Z — <date>`, commits that to `main`, tags it, and calls `release.yml`. **A merged PR with
+  none of those labels releases nothing** — that is the "no release" path, not a failure.
+- **CI verifies the version, it never stamps it** (`packaging/check_version.py`). The bump is a real
+  commit on `main` *before* the tag, so the tag points at source that already carries the version:
+  the published artifact is exactly the tagged commit, and an editable install in a checkout reports
+  the same version as the exe's Help page. A build-time stamp would break both.
+- **`bump.yml` calls `release.yml` directly** (a `workflow_call`), instead of relying on the tag push
+  to trigger it: a tag pushed with the default `GITHUB_TOKEN` does **not** trigger `on: push: tags`
+  workflows (GitHub's recursion guard). The `push: tags` trigger is kept anyway, because a tag *you*
+  push by hand does trigger it.
+- Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
+  partial). This is enforced twice: `bump_version.py --check` on the PR (via `ci.yml`, only for
+  labelled PRs) and `release_notes.py` in the release preflight.
+- **Local checks** before merging: `python packaging/bump_version.py --check` (silence = the
+  Unreleased section is release-ready) and `python packaging/check_version.py` (no argument — the two
+  version files agree). The tag forms of both only make sense *after* a bump has happened, or if you
+  are tagging by hand.
 - **Release zip contents:** the one-folder build, plus **`USER_GUIDE.pdf`** (convert
   `docs/USER_GUIDE.md`) and **`roster_template.csv`** at the top level. Publish a **full** GitHub
   Release — not a draft/prerelease, or `/releases/latest` returns 404 and the in-app update check
@@ -268,10 +292,9 @@ the self-updater is packaging Phase 4.)*
 - **Phase 2 — migration / reingest: DONE (2026-07-25).** `PIPELINE_VERSION` stamped in a `meta`
   table + startup detect + a cancellable, progress-barred re-ingest from `captures`. Verified on dev
   and re-verified on the Windows 11 build (2nd build). See "Phase 2 — done" below.
-- **Phase 3 — CI + release:** GitHub Actions Windows build on tag → Release (the notify-only update
-  check already shipped in Phase 1). PR-label-driven version bump + auto-Release is the planned shape.
-  Scoped in during Phase-3 prep (see "Phase 3 — agreed scope additions" below): **generate
-  `USER_GUIDE.pdf` in CI** and **a Help-page action that opens the user guide**.
+- **Phase 3 — CI + release: DONE (2026-07-26).** Label-driven version bump → tag → GitHub Actions
+  Windows build → a full GitHub Release, plus the CI-generated `USER_GUIDE.pdf` and the Help page's
+  guide / folder actions. See "Phase 3 — done" below.
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
   home for the Windows Firewall allow-rule so testers never see the prompt), later a real
   auto-updater (velopack).
@@ -397,10 +420,11 @@ notes' "re-ingest needed?" line is then simply "yes" whenever the number moved.
 
 ---
 
-## Phase 3 — agreed scope (prep decisions, nothing built yet)
+## Phase 3 — done
 
-Discussed and accepted in the Phase-2 wrap-up (2026-07-26) so the implementation session doesn't
-have to re-derive them.
+Landed 2026-07-26. The scope below was agreed in the Phase-2 wrap-up; "What landed" at the end of
+the section lists the files, and the release process itself is documented under "Versioning & dev
+release process" above.
 
 **1. `USER_GUIDE.pdf` generation + a Help-page action that opens it.** The Help page deliberately
 stays a short setup/troubleshooting card; the guide is the long form. The release zip already
@@ -441,6 +465,36 @@ Can land any time; needs no release artifact to verify.
 
 **3. Nothing else moves.** See "Data layout & the database" for the two placement decisions that were
 re-confirmed rather than changed.
+
+### What landed
+
+- **`src/paths.py` → `app_dir()`** (frozen: `Path(sys.executable).parent`; source: the repo root)
+  and **`source_docs_dir()`**. The third path kind, per the table above.
+- **`src/user_guide.py`** — Qt-free `resolve_guide()` returning a `GuideTarget` (a local path *or* a
+  URL — the caller must know which, since only a path goes through `QUrl.fromLocalFile`). The three
+  steps are injectable, so the chain is tested without a frozen build.
+- **`src/ui/help_page.py`** — "Open user guide" plus a row of **Open data / captures / logs folder**
+  buttons (`_FOLDER_ACTIONS` → `QDesktopServices.openUrl`). `QDesktopServices` reports failure only
+  by returning `False`, so `_open()` surfaces that in a dialog — a windowed build has no console.
+  Still no "Open database" action, deliberately.
+- **`packaging/check_version.py`** — the verify-don't-stamp gate (tag ↔ `src/version.py` ↔
+  `pyproject.toml`). **`packaging/bump_version.py`** — the bump arithmetic + the `## Unreleased`
+  rewrite, and `--check`, the PR gate. **`packaging/release_notes.py`** — extracts a tag's section
+  as the Release body.
+- **`.github/workflows/`** — `release.yml` (preflight → guide-pdf + windows-build → release),
+  `bump.yml` (labels → bump → tag → call release), `ci.yml` (suite + version agreement on every PR,
+  and the changelog gate on labelled PRs). All Python steps pin **3.14**, matching the boot the
+  verified Windows builds were made on.
+- **`CHANGELOG.md`** — Keep-a-Changelog shape; `## Unreleased` is where entries accumulate.
+- **Tests:** `test/test_user_guide.py` (the fallback chain), `test/test_bump_version.py` (bump
+  arithmetic, the changelog rewrite, and that the instruction comment never counts as release notes),
+  plus `AppDirTest` in `test/test_paths.py`.
+- **Unchanged on purpose:** `packaging/f1telemetry.spec`. The PDF ships *beside* the exe, so it must
+  not become a `datas` entry — that would bury it in `_internal/` where `resource_path()` hides it.
+
+The PDF is built on **`ubuntu-latest` with `--pdf-engine=xelatex` + DejaVu**, not on the Windows
+runner: pandoc alone cannot emit a PDF, a TeX install on Windows is slow and fragile, and the guide
+contains `→` / `—` / `…`, which the default Latin Modern font silently drops.
 
 ---
 
@@ -483,6 +537,16 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
 - [ ] Note SmartScreen behavior and the exact click-through for the tester doc.
 
+Phase-3 items (first *published* build — these need the Release, not just a local build):
+
+- [ ] Installed from the **Release zip downloaded from GitHub**, not a local `dist/` folder.
+- [ ] `USER_GUIDE.pdf` and `roster_template.csv` are visible **beside the exe**, not in `_internal/`.
+- [ ] Help → **Open user guide** opens the bundled PDF (proves `app_dir()`, not `_MEIPASS`).
+- [ ] Help → **Open data folder** / **captures** / **logs** each open Explorer at the right folder.
+- [ ] Help → **Check for updates** against the real published Release says "up to date" (this path
+      has never run against an existing Release — until now the API answered 404).
+- [ ] The Release page shows the changelog section as its body, including the re-ingest line.
+
 ### Testing on a clean instance
 
 **Do not uninstall Python from the dev boot.** It costs the dev environment and still isn't clean:
@@ -513,6 +577,9 @@ first:
     no new columns on existing tables, so there was nothing for `ensure_schema` to ALTER;
   - *SmartScreen behaviour / user-doc click-through* — belongs with the published artifact in
     Phase 3's release workflow.
+- **3rd build (pending, Phase 3).** The first build produced *by CI* and published as a Release.
+  Run the Phase-3 checklist items above against the downloaded zip; the earlier items only need a
+  spot-check, since the bundle is built from the same spec.
 
 ---
 

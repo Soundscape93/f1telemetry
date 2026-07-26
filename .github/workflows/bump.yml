@@ -1,0 +1,94 @@
+name: bump
+
+# Label-driven release: merging a PR labelled major / minor / patch bumps the version files and
+# the CHANGELOG on main, tags that commit, and calls the release workflow.
+# A merged PR with none of those labels releases nothing.
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Bump level - use this when no PR label applies (e.g. the very first release)"
+        required: true
+        type: choice
+        options: [major, minor, patch]
+
+# Two PRs merged seconds apart must not compute the same next version.
+concurrency:
+  group: release-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write             # commits the bump to main and pushes the tag
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Resolve the bump level
+        id: level
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          DISPATCH_LEVEL: ${{ inputs.level }}
+        run: |
+          level="$DISPATCH_LEVEL"
+          if [ -z "$level" ]; then
+            for candidate in major minor patch; do        # highest wins if several are set
+              if printf '%s' "$LABELS" | grep -q "\"$candidate\""; then level="$candidate"; break; fi
+            done
+          fi
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+          if [ -n "$level" ]; then
+            echo "Bumping: $level"
+          else
+            echo "No major/minor/patch label on this PR - nothing to release."
+          fi
+
+      # No `path:` here: these scripts are plain files, nothing imports f1telemetry.src.*
+      - name: Check out main
+        if: steps.level.outputs.level != ''
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        if: steps.level.outputs.level != ''
+        with:
+          python-version: "3.14"
+
+      - name: Bump the version files and close the changelog section
+        id: bump
+        if: steps.level.outputs.level != ''
+        run: |
+          version=$(python packaging/bump_version.py "${{ steps.level.outputs.level }}")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        if: steps.level.outputs.level != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/version.py pyproject.toml CHANGELOG.md
+          git commit -m "chore(release): ${{ steps.bump.outputs.tag }}"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+  # Called directly instead of relying on the tag push: a tag pushed with the default
+  # GITHUB_TOKEN does NOT trigger `on: push: tags` workflows (GitHub's recursion guard).
+  release:
+    needs: bump
+    if: needs.bump.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.bump.outputs.tag }}

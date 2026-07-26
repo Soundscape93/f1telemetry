@@ -82,7 +82,13 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                  components/ (tables.py, classification_table.py) — shared widgets
       pipeline.py               # Qt-free ingest orchestration (ingest_capture, archive_and_ingest,
                                 #   check_pipeline_version + reingest_all — the Phase-2 rebuild)
-    packaging/                  # PyInstaller one-folder spec (f1telemetry.spec) + entry.py
+    packaging/                  # PyInstaller one-folder spec (f1telemetry.spec) + entry.py, plus
+                                #   the release scripts: check_version.py (verify tag ↔ version
+                                #   files), bump_version.py (label-driven bump + changelog),
+                                #   release_notes.py (a tag's CHANGELOG section → Release body)
+    .github/workflows/          # ci.yml (suite + gates), bump.yml (label → bump → tag),
+                                #   release.yml (build → full GitHub Release)
+    CHANGELOG.md                # entries accumulate under "## Unreleased"; the bump closes it
     test/                       # unittest suites (test_*.py); run from the repo root:
                                 #   python3 -m f1telemetry.test.<name>
 ```
@@ -207,9 +213,15 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   **one data root** (`%LOCALAPPDATA%` — hidden, so the app opens Explorer for the user rather than the
   data moving), and the **DB is never protected, only rebuildable** from captures (same-user file
   permissions can't enforce anything and would break SQLite's `-wal`/`-journal` siblings) — so no
-  "Open database" action anywhere. **Phase 3 next:** CI build+Release on tag, plus `USER_GUIDE.pdf`
-  generation and a Help action that opens the guide (needs a third path kind, `paths.app_dir()` =
-  beside the exe). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+  "Open database" action anywhere. **Phase 3 (done 2026-07-26) = the release pipeline:** write the
+  entry under `## Unreleased`, label the PR `major`/`minor`/`patch`, merge — `bump.yml` bumps
+  `version.py` + `pyproject.toml` + the changelog on `main`, tags it, and calls `release.yml`
+  (gates + suite → `USER_GUIDE.pdf` via pandoc/xelatex on Linux → PyInstaller on Windows → a **full**
+  GitHub Release). CI **verifies** the version, never stamps it, so the artifact is exactly the
+  tagged commit. The guide PDF + `roster_template.csv` ship **beside the exe** (`paths.app_dir()` —
+  a third path kind, distinct from `data_root()` and `_MEIPASS`), opened from the Help page along
+  with the data / captures / logs folders. First published build still to be checked against the
+  Phase-3 checklist. See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 
 ## Where to look
 

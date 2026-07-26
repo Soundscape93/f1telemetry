@@ -13,6 +13,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -23,11 +24,28 @@ from PySide6.QtWidgets import (
 
 from .. import paths
 from ..update_check import CheckStatus, releases_page
+from ..user_guide import resolve_guide
 from ..version import __version__
 from .style import MUTED_TEXT_QSS
 from .workers import UpdateCheckWorker
 
 _ROSTER_CSV_TEMPLATE = "name,race_number,online_names\n"
+
+# (button text, the noun a failure message uses, tooltip, paths accessor). %LOCALAPPDATA% is
+# hidden in Explorer by default, so the app opens it for the user rather than the data moving.
+# Deliberately NO "Open database" action - the DB is rebuildable, not user-serviceable
+# (docs/PACKAGING.md "Data layout & the database").
+_FOLDER_ACTIONS = (
+    ("Open data folder", "data folder",
+     "Everything the app stores: database, captures, lap traces, rosters and logs.",
+     paths.data_root),
+    ("Open captures folder", "captures folder",
+     "Your saved .f1cap recordings - these are what you can share with the league.",
+     paths.captures_dir),
+    ("Open logs folder", "logs folder",
+     "Attach the newest log file when you report a bug.",
+     paths.logs_dir),
+)
 
 _SETUP_HTML = (
     "<b>In-game telemetry settings:</b> (F1 game → Settings → Telemetry Settings):<br>"
@@ -92,6 +110,25 @@ class HelpPage(QWidget):
             "Rebuild your stored sessions from the saved capture files. Needed after an update "
             "that reads more from a capture; your seasons and rosters are kept.")
         self._reingest_btn.clicked.connect(self.reingest_requested)
+
+        self._guide_btn = QPushButton("Open user guide")
+        self._guide_btn.setMinimumHeight(32)
+        self._guide_btn.setToolTip(
+            "Open the full user guide - the PDF shipped next to the app, or the online copy.")
+        self._guide_btn.clicked.connect(self._on_open_guide)
+
+        folder_row = QHBoxLayout()
+        folder_row.setContentsMargins(0, 0, 0, 0)
+        folder_row.setSpacing(8)
+        for text, noun, tip, accessor in _FOLDER_ACTIONS:
+            btn = QPushButton(text)
+            btn.setMinimumHeight(32)
+            btn.setToolTip(tip)
+            # Bind the loop variables as defaults - a late-binding closure would give every button the last folder.
+            btn.clicked.connect(
+                lambda _checked=False, a=accessor, n=noun: self._on_open_folder(a, n))
+            folder_row.addWidget(btn)
+        folder_row.addStretch(1)
         
         setup_title = QLabel("Setup / Configuration")
         setup_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
@@ -108,6 +145,10 @@ class HelpPage(QWidget):
         layout.addWidget(self._status)
         layout.addSpacing(6)
         layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
+        layout.addWidget(self._guide_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
+        layout.addLayout(folder_row)
         layout.addSpacing(6)
         layout.addWidget(setup_title)
         layout.addWidget(setup_body)
@@ -135,6 +176,30 @@ class HelpPage(QWidget):
             Path(path).write_text(_ROSTER_CSV_TEMPLATE, encoding="utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Could not save template", str(exc))
+
+    # --- user guide + folder actions ----------------------------------------------------------------------
+    
+    def _on_open_guide(self) -> None:
+        target = resolve_guide()
+        url = QUrl.fromLocalFile(str(target.path)) if target.is_local else QUrl(target.url)
+        self._open(url, "user guide")
+
+    def _on_open_folder(self, accessor, noun: str) -> None:
+        try:
+            folder = accessor()         # the paths accessors also create the folder
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not open folder", str(exc))
+            return
+        self._open(QUrl.fromLocalFile(str(folder)), noun)
+
+    def _open(self, url: QUrl, noun: str) -> None:
+        """Hand a file or URL to the desktop, reporting the failure QDesktopServices only
+        signals by returning a False (a windowed build has no console to notice it in)."""
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.information(
+                self, "Could not open",
+                f"Couldn't open the {noun} automatically. It is here:\n"
+                f"{url.toLocalFile() or url.toString()}")
 
 
     # --- update check ---------------------------------------------------------------------------------
