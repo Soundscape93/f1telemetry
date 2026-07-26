@@ -105,7 +105,7 @@ def logs_dir() -> Path:
     return _ensure_subdir("logs")
 
 
-def config_dir() -> Path:
+def config_path() -> Path:
     """Path to the (future) user config file. The file is not created here."""
     return data_root() / "config.json"
 

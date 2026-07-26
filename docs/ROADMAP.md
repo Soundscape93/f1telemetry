@@ -176,7 +176,13 @@ weeks). Summary of the locked direction:
   Windows re-verification pending on the next build.
 - **Phase 3:** GitHub Actions build on tag `v*` → GitHub Release (the **notify-only** update check
   already shipped in Phase 1; real self-updater — velopack/Sparkle/`tufup` — deferred). A
-  PR-label-driven version bump + auto-Release is the desired shape.
+  PR-label-driven version bump + auto-Release is the desired shape. **Scoped in during Phase-2
+  wrap-up:** generate **`USER_GUIDE.pdf`** in CI (pandoc) and add a **Help-page action that opens the
+  user guide** — needs a new `paths.app_dir()` (a third path kind: *beside the exe*, which in a
+  one-folder build is neither `data_root()` nor `_MEIPASS`), with a PDF → source-`.md` → GitHub
+  fallback chain. Also queued, independent of the release artifact: **"Open data / captures / logs
+  folder" actions** on the Help page (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer
+  rather than the data moving). Details + rationale in `docs/PACKAGING.md`.
 - **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.

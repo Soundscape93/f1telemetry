@@ -88,6 +88,60 @@ URL, which kept the storage layer free of import-time side effects and the suite
 
 ---
 
+## Data layout & the database
+
+Both decisions below were re-examined in the Phase-2 wrap-up (2026-07-26) and **kept**. Recorded here
+so they don't get re-opened: the reasoning is the point, not the conclusion.
+
+### One data root, with actions that open it
+
+`captures/` and `lap_traces/` stay under `data_root()` with everything else, even though
+`%LOCALAPPDATA%` is hidden in Explorer by default. Moving the user-visible data elsewhere (Documents,
+say) was considered and rejected:
+
+- `data_root()` would stop being the single path authority — the whole reason `paths.py` exists.
+- "Back up this folder" becomes two folders, and a tester will back up one of them.
+- `F1TELEMETRY_DATA_DIR` would need a second override, or would silently relocate only half the data.
+- **`%LOCALAPPDATA%` is excluded from OneDrive/Documents sync by default**, which is exactly right for
+  multi-GB captures. `Documents\` would have OneDrive users silently uploading 1.5 GB per weekend —
+  a worse support problem than a hidden folder.
+
+The discoverability fix is **the app opening Explorer for the user**, not a different location
+(Phase-3 item 2). If a user-chosen captures directory is ever wanted, the clean route is a setting in
+`config.json` — `paths.config_path()` already reserves the file. Don't pre-build it.
+
+### The database is not protected — it's rebuildable
+
+Making `f1league.db` read-only for the user while the app can still write it **is not achievable**,
+and attempting it would break the app:
+
+- **Windows:** the file's owner implicitly holds `WRITE_DAC`/`WRITE_OWNER`, so a user who can't write
+  the file can always rewrite its ACL and then write it. A restrictive ACL is a speed bump, not
+  protection.
+- **macOS/Linux:** `chmod 444` is undone with `chmod +w`; the owner can always change modes.
+- Real enforcement needs a **different security principal** (a service account owning the file, with
+  IPC) — a client/server architecture for a single-user desktop app.
+- Decisive: **SQLite needs write access to the containing directory, not just the DB file** — it
+  creates `-wal` / `-shm` / `-journal` siblings. A read-only DB file stops *the app* writing too.
+  Flipping the bit per launch is a race and an extra corruption vector; it would produce more corrupt
+  databases than it prevents.
+
+So the DB is not defended, it's made **disposable**: captures are the source of truth, and a wrecked
+database is one *Help → Re-read captures…* away from a good one (Phase 2 shipped exactly that).
+The practical measures are therefore:
+
+- keep it in `data_root()` and **don't surface it** — no "Open database" action anywhere in the UI;
+- expose **captures** and **logs** instead, which is what a tester actually needs;
+- **document** "don't hand-edit the database" in the user guide, together with the rebuild route;
+- queued, not now: **WAL mode** (already a checklist concern for double-launch, and it eases
+  reader/writer contention while a minutes-long re-ingest runs) and a **"Back up database…"** action
+  implemented as SQLite's `VACUUM INTO` — the only safe way to copy a *live* WAL database, and the
+  right primitive for "send me your DB" bug reports.
+
+Tamper *detection* was considered and dropped: cost without benefit for a private league app.
+
+---
+
 ## Dependencies
 
 - **Runtime third-party:** PySide6, numpy, pyarrow, sqlalchemy. **Lazy/optional:** pyqtgraph
@@ -211,11 +265,13 @@ the self-updater is packaging Phase 4.)*
   modules excluded; flag SVGs bundled. Built on the Win11 boot and passed the clean-machine
   checklist. The notify-only update check (`src/update_check.py` + the Help page's "Check for
   updates") was pulled forward from Phase 3. See "Phase 1 — done" below.
-- **Phase 2 — migration / reingest: DONE (2026-07-25, dev).** `PIPELINE_VERSION` stamped in a `meta`
-  table + startup detect + a cancellable, progress-barred re-ingest from `captures`. See
-  "Phase 2 — done" below.
+- **Phase 2 — migration / reingest: DONE (2026-07-25).** `PIPELINE_VERSION` stamped in a `meta`
+  table + startup detect + a cancellable, progress-barred re-ingest from `captures`. Verified on dev
+  and re-verified on the Windows 11 build (2nd build). See "Phase 2 — done" below.
 - **Phase 3 — CI + release:** GitHub Actions Windows build on tag → Release (the notify-only update
   check already shipped in Phase 1). PR-label-driven version bump + auto-Release is the planned shape.
+  Scoped in during Phase-3 prep (see "Phase 3 — agreed scope additions" below): **generate
+  `USER_GUIDE.pdf` in CI** and **a Help-page action that opens the user guide**.
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
   home for the Windows Firewall allow-rule so testers never see the prompt), later a real
   auto-updater (velopack).
@@ -339,13 +395,65 @@ rows stale — a new capture-derived column, a changed derivation, a new trace c
 it for UI-only work or for an additive column whose value doesn't come from the packets. The release
 notes' "re-ingest needed?" line is then simply "yes" whenever the number moved.
 
+---
+
+## Phase 3 — agreed scope (prep decisions, nothing built yet)
+
+Discussed and accepted in the Phase-2 wrap-up (2026-07-26) so the implementation session doesn't
+have to re-derive them.
+
+**1. `USER_GUIDE.pdf` generation + a Help-page action that opens it.** The Help page deliberately
+stays a short setup/troubleshooting card; the guide is the long form. The release zip already
+specifies the PDF **at the top level**, beside the exe — keep it there (a tester who never opens the
+app still finds it) and do *not* bundle it inside `_internal/` where `resource_path()` would hide it.
+
+This needs a **third path kind**, distinct from both existing ones — worth stating plainly because
+it's easy to reach for the wrong helper:
+
+| Kind | Frozen resolves to | Helper |
+|---|---|---|
+| per-user writable | `%LOCALAPPDATA%\f1telemetry` | `data_root()` |
+| bundled read-only | `sys._MEIPASS/f1telemetry/src/…` (= `_internal/…`) | `resource_path()` |
+| **beside the exe** | `Path(sys.executable).parent` | **`app_dir()` — to add** |
+
+In a one-folder PyInstaller 6 build these genuinely differ: `sys.executable` is
+`dist/f1telemetry/f1telemetry.exe` while `_MEIPASS` is `dist/f1telemetry/_internal`.
+
+Open it with a three-step fallback so the action can never dead-end:
+
+1. `USER_GUIDE.pdf` beside the exe (packaged build);
+2. else `docs/USER_GUIDE.md` in the source tree (dev runs — `QDesktopServices` hands it to whatever
+   opens `.md`);
+3. else the guide **on GitHub** (`…/blob/main/docs/USER_GUIDE.md`) — the `update_check`
+   `GITHUB_OWNER`/`GITHUB_REPO` constants already exist, so this costs nothing and works even for
+   someone who unzipped only the exe.
+
+Belongs in Phase 3 rather than earlier **because the artifact doesn't exist yet**: the md→PDF step
+(pandoc on `windows-latest`, or checked in) is a Phase-3 CI decision, and shipping the button first
+would mean only fallback (3) ever runs.
+
+**2. "Open folder" actions on the Help page.** `%LOCALAPPDATA%` is hidden by default, which is a real
+discoverability problem for the capture-sharing workflow — but the fix is opening Explorer *for* the
+user (`QDesktopServices.openUrl(QUrl.fromLocalFile(...))`), not moving the files. Add **Open data
+folder**, **Open captures folder**, **Open logs folder**. The Help page already *displays* the data
+root as selectable text, so this is the natural upgrade. No "Open database" action — see below.
+Can land any time; needs no release artifact to verify.
+
+**3. Nothing else moves.** See "Data layout & the database" for the two placement decisions that were
+re-confirmed rather than changed.
+
+---
+
 ## Clean-machine test checklist (Windows 11)
 
-Run on the author's Windows 11 boot; ideally from a fresh user with no Python installed.
+Run on the author's Windows 11 boot; ideally on a clean Windows instance (see below).
 
 - [ ] Launch by **double-click** from a folder that is *not* the repo (proves CWD independence).
 - [ ] Launch as a **non-admin** user; nothing tries to write beside the exe.
-- [ ] Machine with **no Python** installed at all.
+- [ ] Launched on a **clean Windows instance** — see "Testing on a clean instance" below. (The old
+      wording was "a machine with no Python installed", which is only a *proxy* for the properties
+      that actually matter: no missing VC++ runtime, the Qt platform plugin resolving, no dev-only
+      PATH/env leakage, and a fresh `%LOCALAPPDATA%`.)
 - [ ] Qt starts — **no "could not load the Qt platform plugin"** error.
 - [ ] HiDPI/scaling correct on the laptop panel (fonts/layout).
 - [ ] **Recording:** UDP socket binds → **Windows Firewall prompt appears → Allow** (document it);
@@ -374,6 +482,37 @@ Run on the author's Windows 11 boot; ideally from a fresh user with no Python in
 - [ ] Open the app **twice** → SQLite doesn't wedge (WAL mode; handle "database is locked").
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
 - [ ] Note SmartScreen behavior and the exact click-through for the tester doc.
+
+### Testing on a clean instance
+
+**Do not uninstall Python from the dev boot.** It costs the dev environment and still isn't clean:
+`%LOCALAPPDATA%\Programs\Python`, `%APPDATA%\Python`, pip caches and PATH entries survive, and the
+VC++ redistributable (which the bundle genuinely depends on) stays regardless. Options, cheapest
+first:
+
+1. **Windows Sandbox** — the right tool: a disposable clean Windows instance that boots in seconds,
+   maps a host folder, and resets on close. No ISO, no licence, no upkeep. **Windows 11 Pro /
+   Enterprise / Education only** (Settings → Optional Features → *Windows Sandbox*; needs
+   virtualization enabled in BIOS) — **not available on Windows Home**.
+2. **A second local Windows user account** — two minutes, no virtualization, and the fallback when the
+   boot is Home. Catches per-user PATH leakage, a fresh `%LOCALAPPDATA%`, the firewall prompt as a
+   non-admin, and a **per-user Python install** (the installer's default). Misses machine-wide
+   installs and the system VC redist. Delete the account after a successful build test.
+3. **The first external tester** — a league member's PC *is* a clean machine. Make sure they know to
+   send `logs/` if it won't start; this is the real sign-off.
+
+### Build history
+
+- **1st build (2026-07-25, Phase 1).** Full checklist passed on the author's Windows 11 boot. Found
+  and fixed three frozen-only bugs (see "Phase 1 — done").
+- **2nd build (2026-07-26, Phase 2).** Rebuilt and re-run through the whole checklist including all
+  six Phase-2 re-ingest items — all pass. Three items **deliberately skipped**, not missed:
+  - *clean instance / no Python* — the dev boot has Python + every requirement installed; deferred to
+    a second user account (likely Windows Home) or Sandbox, per above;
+  - *old-DB additive-column migration* — **N/A this phase**: Phase 2 added a new *table* (`meta`),
+    no new columns on existing tables, so there was nothing for `ensure_schema` to ALTER;
+  - *SmartScreen behaviour / user-doc click-through* — belongs with the published artifact in
+    Phase 3's release workflow.
 
 ---
 
@@ -409,7 +548,9 @@ These are **Phase 0 / documentation requirements**, not afterthoughts:
    league a concrete "drop files here / Import folder" procedure (builds on the `captures` metadata
    table + the planned shared-folder import).
 5. **Where's my data?** — document `%LOCALAPPDATA%\f1telemetry` (and the mac/Linux equivalents) so
-   users can back up / send the DB when reporting a bug.
+   users can back up / send the DB when reporting a bug. It's **hidden in Explorer by default**, so
+   documenting the path isn't enough on its own: the app should open the folder for the user
+   (Phase-3 item 2). Never expose the database itself — see "Data layout & the database".
 6. **Bundled zstandard** so one member's captures are readable by all (codec consistency).
 7. **Known-issues note per build** (the app is partial) so testers report *new* bugs.
 8. **WAL mode / double-launch** — minor but real SQLite locking.
@@ -426,8 +567,10 @@ A short README/onboarding for league members should cover:
 - **Allow the Windows Firewall prompt** the first time you record.
 - **Recording a weekend** when the author isn't available.
 - **Sharing captures** back to the league (copy files / import folder).
-- **Where your data lives** (`%LOCALAPPDATA%\f1telemetry`) and how to back it up.
-- **Reporting a bug:** attach the log from `logs/` + note the version; the known-issues list.
+- **Where your data lives** (`%LOCALAPPDATA%\f1telemetry`) and how to back it up — plus the in-app
+  actions that open it, since the folder is hidden by default.
+- **Reporting a bug:** attach the log from `logs/` + note the version; the known-issues list. And
+  **don't hand-edit the database** — if it's misbehaving, re-read the captures instead.
 - **Upgrade note:** whether a new build needs a re-ingest, and that it may take a few minutes.
 
 ---

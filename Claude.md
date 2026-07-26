@@ -203,7 +203,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (`pipeline.reingest_all` + `ReingestWorker`, also on demand from Help). Safe because season
   assignments / laps / rosters are keyed on `session_uid` and never FK'd to `sessions` (invariant
   #4). Bump `PIPELINE_VERSION` in the same commit as any ingest change that makes stored rows stale.
-  See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+  Verified on the Windows 11 build (2nd build, 2026-07-26). **Two standing data decisions:** there is
+  **one data root** (`%LOCALAPPDATA%` — hidden, so the app opens Explorer for the user rather than the
+  data moving), and the **DB is never protected, only rebuildable** from captures (same-user file
+  permissions can't enforce anything and would break SQLite's `-wal`/`-journal` siblings) — so no
+  "Open database" action anywhere. **Phase 3 next:** CI build+Release on tag, plus `USER_GUIDE.pdf`
+  generation and a Help action that opens the guide (needs a third path kind, `paths.app_dir()` =
+  beside the exe). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 
 ## Where to look
 

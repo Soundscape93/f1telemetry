@@ -171,6 +171,26 @@ what would trigger revisiting it.
   It is stamped and the summary says how many sessions stayed stale. A cancel or a genuine failure
   is different: both are worth retrying, so the stamp stays put and the offer returns. The
   "Don't ask again" button is the same escape hatch reached deliberately.
+- **The database is not protected — it is rebuildable.** Making `f1league.db` read-only for the user
+  while the app can still write it is **not achievable** when both run as the same account: on
+  Windows the file's owner implicitly holds `WRITE_DAC`/`WRITE_OWNER` (rewrite the ACL, then write),
+  and on macOS/Linux `chmod 444` is undone with `chmod +w`. Real enforcement needs a separate
+  security principal (a service account + IPC) — a client/server design for a single-user desktop
+  app. And it would break us: **SQLite needs write access to the containing directory, not just the
+  DB file** (`-wal` / `-shm` / `-journal` siblings), so a read-only DB file stops the *app* writing
+  too; flipping the bit per launch is a race and an extra corruption vector. So the DB isn't
+  defended, it's made **disposable** — captures are the source of truth and a wrecked database is one
+  *Help → Re-read captures…* away from a good one. Practically: keep it in the data root, never
+  surface it (no "Open database" action), expose captures/logs instead, and document "don't
+  hand-edit it". Tamper *detection* was considered and dropped as cost without benefit. Queued:
+  WAL mode, and a backup action via `VACUUM INTO` (the only safe way to copy a live WAL database).
+- **One data root; discoverability is solved by opening it, not by moving data.** `captures/` and
+  `lap_traces/` stay under `data_root()` even though `%LOCALAPPDATA%` is hidden in Explorer. Splitting
+  them out (to `Documents`, say) would end `paths.py`'s single-authority invariant, make "back up this
+  folder" two folders, need a second `F1TELEMETRY_DATA_DIR` override — and lose a real benefit:
+  `%LOCALAPPDATA%` is **excluded from OneDrive sync by default**, which is what you want for 1.5 GB of
+  datagrams per weekend. Instead the app opens Explorer at the folder. A user-chosen captures
+  directory, if ever wanted, belongs in `config.json` (`paths.config_path()` reserves it).
 - **The re-ingest offer is never a gate.** It is a dialog on a painted window (fired one event-loop
   turn after start-up), the app is fully usable whichever button is pressed, and the rebuild itself
   is modeless and cancellable. Rationale: it can take minutes on a 1.5 GB weekend, and a blocking
