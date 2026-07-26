@@ -13,6 +13,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.2.0 — 2026-07-26
+
 First published build for league testers.
 
 **Re-ingest needed: no** — a fresh database is stamped silently on first launch.
@@ -30,3 +32,4 @@ First published build for league testers.
   restart to fix.
 - Dashboard, Sessions and Analytics pages are placeholders.
 - The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+

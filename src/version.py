@@ -8,7 +8,7 @@ without a release still needs the bump.
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Bump only when ingest output changes (see docs/PACKAGING.md "DB migration & pipeline-version").
 PIPELINE_VERSION = 1
