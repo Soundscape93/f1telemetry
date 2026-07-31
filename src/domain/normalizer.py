@@ -407,6 +407,7 @@ def normalize_classification(
                 result_status=safe_enum(ResultStatus, car.result_status),
                 result_reason=safe_enum(ResultReason, car.result_reason),
                 tyre_stints=stints,
+                is_ai=bool(participant.is_ai) if participant else False,
             )
         )
 
@@ -493,6 +494,7 @@ def reconstruct_classification(
                 result_status=safe_enum(ResultStatus, lap.result_status),
                 result_reason=safe_enum(ResultReason, 0),
                 tyre_stints=stints,
+                is_ai=bool(participant.is_ai) if participant else False,
             )
         )
     

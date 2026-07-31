@@ -93,6 +93,8 @@ class ClassificationEntryRow(Base):
     result_status: Mapped[int]  # raw enum value -> safe_enum on load
     result_reason: Mapped[int]  # raw enum value -> safe_enum on load
     tyre_stints: Mapped[list] = mapped_column(JSON)  # list of tyre stint dicts, denormalized for simplicity
+    # AI vs human, from Participants Packet. server_default to ensure_schema's ADD COLUMN, back-fills existing rows
+    is_ai: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
 
     session: Mapped[SessionRow] = relationship(back_populates="entries")
 

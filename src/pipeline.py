@@ -347,7 +347,8 @@ def reingest_all(capture_store: CaptureStore, session_store: SessionStore, *,
 
         path = resolve_capture_path(meta, captures_dir)
         if path is None:
-            log.info("Re-ingest: no archive found for %s", meta.file_name, meta.path)
+            log.info("Re-ingest: no archive found for %s (last known path: %s)",
+                     meta.file_name, meta.path)
             missing.append(meta.file_name)
             continue
         try:

@@ -22,13 +22,13 @@ def _reason():
     return getattr(ResultReason, "INVALID", None) or getattr(ResultReason, "NONE", 0)
 
 
-def _entry(name, number, position, points):
+def _entry(name, number, position, points, is_ai=False):
     return ClassificationEntry(
         vehicle_index=position-1, position=position, driver_name=name, team_id=0,
         race_number=number, nationality_id=0, is_player=False, grid_position=position, points=points,
         num_laps=5, num_pit_stops=1, best_lap_time_ms=70000, best_lap_num=3, total_race_time_s=300.0,
         penalties_time_s=0.0, num_penalties=0, result_status=ResultStatus.FINISHED,
-        result_reason=_reason(), tyre_stints=())
+        result_reason=_reason(), tyre_stints=(), is_ai=is_ai)
 
 
 def make_session(uid, stype, results):
@@ -106,6 +106,22 @@ class ComputeStandingsTest(unittest.TestCase):
         table = standings_for_rounds(rounds)
         self.assertEqual((table[0].driver_name, table[0].points), ("Alice", 50),
                         "Standings should sum points across rounds")
+
+    def test_group_overrides_the_per_entry_key(self):
+        # a classification-wide resolver sees the whole grid; here it splits by AI-ness, which
+        # a bare race-number key cannot do
+        entries = (_entry("Fabibyte", 11, 2, 18), _entry("Sergio Perez", 11, 9, 2, is_ai=True))
+        race = SessionResult(
+            session_uid=1, season_link_id=0, weekend_link_id=0, session_link_id=0,
+            game_format=2025, track_id=0, session_type=SessionType.RACE, formula=Formula.F1_MODERN,
+            weather=Weather.CLEAR, total_laps=5, game_mode=7, player_vehicle_index=0,
+            classification=Classification(entries=entries))
+
+        merged = compute_standings([race], key=by_race_number)
+        split = compute_standings([race], group=lambda es: [("ai" if e.is_ai else "human", e.race_number) for e in es])
+
+        self.assertEqual(len(merged), 1, "the per-entry number key merges them (the old bug)")
+        self.assertEqual([r.points for r in split], [18, 2], "a session-wide group keeps them apart")
         
 
 class StandingsFromStoreTest(unittest.TestCase):
