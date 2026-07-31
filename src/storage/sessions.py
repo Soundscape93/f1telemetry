@@ -179,6 +179,7 @@ class SessionStore:
                         num_penalties=entry.num_penalties,
                         result_status=int(entry.result_status),
                         result_reason=int(entry.result_reason),
+                        is_ai=entry.is_ai,
                         tyre_stints=[
                             {
                                 "actual": tyres.actual_compound,
@@ -240,6 +241,7 @@ class SessionStore:
                 num_penalties=rows.num_penalties,
                 result_status=safe_enum(ResultStatus, rows.result_status),
                 result_reason=safe_enum(ResultReason, rows.result_reason),
+                is_ai=rows.is_ai,
                 tyre_stints=tuple(
                     TyreStint(
                         actual_compound=tyres["actual"],

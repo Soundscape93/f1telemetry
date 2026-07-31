@@ -233,6 +233,11 @@ class ClassificationEntry:
     `driver_name` and `team_id`, `race_number`, and `nationality_id` are denormalized from the
     participant roster so a results card renders self-contained without a join and league
     standings can key on the (stable per human) race number.
+
+    ``is_ai`` is denormalized for the same reason and keeps identity honest: race numbers are only
+    unique *within* a human field, so an AI driver and a league member can legitimately share one.
+    Standings must never merge across that line. Defaults False for rows stored before it was captured.
+    See `domain.roster.looks_like_ai` for the name based fallback that covers those until a re-ingest.
     """
 
     vehicle_index: int
@@ -254,6 +259,7 @@ class ClassificationEntry:
     result_status: ResultStatus
     result_reason: ResultReason
     tyre_stints: tuple[TyreStint, ...] = ()
+    is_ai: bool = False                # additive + defaulted: pre re-ingest rows load as False
 
 
 @dataclass(frozen=True)

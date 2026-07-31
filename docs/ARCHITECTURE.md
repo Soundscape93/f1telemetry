@@ -56,7 +56,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   laps, classification, `game_mode`), `Participant`, `Classification` (carries `is_reconstructed`
   — True when synthesized from telemetry because no Final Classification packet arrived),
   `ClassificationEntry`
-  (incl. `race_number`), `TyreStint`, `Lap`, `LapTrace` (parallel numpy arrays, distance-indexed).
+  (incl. `race_number` and `is_ai` — AI vs human, which league identity resolution depends on),
+  `TyreStint`, `Lap`, `LapTrace` (parallel numpy arrays, distance-indexed).
   `LapTrace` also carries four **optional** motion channels — `pos_x`, `pos_z`, `g_lat`, `g_long`
   (iteration 2b) — None on laps captured without the Motion packet (`OPTIONAL_CHANNELS`, kept
   distinct from the nine required `CHANNELS` so `analysis/traces.py` and the overlay are unaffected).
@@ -70,8 +71,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   GRAND_PRIX / LEAGUE — *our* categorisation, not the game's `m_gameMode`), `Season`,
   `SeasonRound`, `RoundResults`.
 - **`calendars.py`** — `official_calendar(year)` preset track-id orders for 2025 / 2026.
-- **`roster.py`** — `LeagueMember`, `LeagueRoster.member_for(entry)` /
-  `member_of(entry)` (online-name-first, race-number fallback), `league_display_name(entry,
+- **`roster.py`** — `LeagueMember`, `LeagueRoster.member_for(entry)` / `member_of(entry)` /
+  `member_key(entry)` (online-name-first, race-number fallback **for human cars only**) and
+  `session_keys(entries)` — the classification-wide resolver standings use, which guarantees two
+  cars in one session never share a row. `is_ai_entry` / `looks_like_ai` separate the game's own
+  AI flag from the `DRIVER_NAMES` fallback for rows stored before `is_ai` was captured.
+  `league_display_name(entry,
   roster)` (captured public alias first, roster `online_names[0]` fallback for `"Player"`/blank),
   `load_roster` / `save_roster`, CSV import parsing, roster seeding from round results, and
   roster merging. CSV remains an import format; `rosters/season_<id>.json` is the canonical app
@@ -152,15 +157,16 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 
 ### analysis/ — derived facts
 - **`standings.py`** — `StandingRow`; `by_driver_name` / `by_race_number` keys;
-  `compute_standings(sessions, key, display)`; `standings_for_rounds`;
+  `compute_standings(sessions, key, display, group)`; `standings_for_rounds`;
   `league_standings_for_rounds(rounds, roster)`. Points sum across race-type sessions only 
   (RACE_SESSION_TYPES); the game leaves stale last-race points in non-race classifications' 
   m_points, so other session types are skipped. **Reconstructed classifications
   (`is_reconstructed`) are also skipped** — they have no official points (only a UI estimate), so
   they never enter a championship until an accept/confirm flow lands (Option 3, see ROADMAP).
-  LEAGUE driver standings resolve through the per-season
-  roster and display via `league_display_name`; non-league seasons stay name-keyed. Constructor
-  standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
+  LEAGUE driver standings resolve through the per-season roster's `session_keys` (`group=`, a
+  whole classification at a time — race numbers are unique only among humans) and display via
+  `league_display_name`; AI drivers keep their own rows rather than being filtered; non-league
+  seasons stay name-keyed. Constructor standings aggregate captured in-game `team_id`s. Lap/trace analytics are intentionally
   in-memory and desktop-bound.
 - **`traces.py`** *(lap-view iteration 1b)* — trace preparation for plotting, pure numpy: an
   `AlignedTrace` value object plus `shared_distance_grid` / `resample` / `align` (resample N traces

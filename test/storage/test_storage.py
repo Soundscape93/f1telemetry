@@ -22,7 +22,8 @@ def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=
             grid_position=1, points=25, num_laps=5, num_pit_stops=1, best_lap_time_ms=67000,
             best_lap_num=4, total_race_time_s=280.1, penalties_time_s=0, num_penalties=0,
             result_status=ResultStatus.FINISHED, result_reason=safe_reason(),
-            tyre_stints=(TyreStint(actual_compound="16", visual_compound="16", end_lap=5),)),
+            tyre_stints=(TyreStint(actual_compound="16", visual_compound="16", end_lap=5),),
+            is_ai=True),
         ClassificationEntry(
             vehicle_index=0, position=2, driver_name="Player", team_id=2, race_number=51,
             nationality_id=8, is_player=with_player,
@@ -123,6 +124,13 @@ class RoundTripTest(StorageTestBase):
         self.store.save(make_session(uid=0x1234))   # default: no sector info captured
         again = self.store.load(0x1234)
         self.assertEqual((again.sector2_start_m, again.sector3_start_m), (None, None))
+
+    def test_is_ai_round_trips(self):
+        """AI-vs-human must survive storage: league standings key on it (PIPELINE_VERSION 2)."""
+        self.store.save(make_session())
+        entries = self.store.load(0x8000_0000_0000_0000).classification.entries
+        self.assertEqual([entry.is_ai for entry in entries], [True, False])
+
 
 
 class UpsertTest(StorageTestBase):

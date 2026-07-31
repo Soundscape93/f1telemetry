@@ -15,7 +15,15 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 First published build for league testers.
 
-**Re-ingest needed: no** — a fresh database is stamped silently on first launch.
+**Re-ingest needed: yes** — `PIPELINE_VERSION` moved to 2 so classifications record whether each
+car was AI or human. The app offers the guided re-ingest on first launch; until it runs, driver
+standings fall back to matching AI drivers by name.
+
+- **Fixed:** driver standings merged an AI driver into a league member who shares their race
+  number (the AI field runs the real-world numbers), so the pair showed as one row under the
+  wrong name and with the wrong points total. AI and human drivers are now told apart, and two
+  cars from the same session can never share a standings row. Constructor standings and session
+  result tables were never affected.
 
 - Record F1 25 / F1 26 UDP telemetry, import captures, and browse sessions, laps and standings.
 - Per-user data folder (`%LOCALAPPDATA%\f1telemetry`), file logging and a crash dialog.

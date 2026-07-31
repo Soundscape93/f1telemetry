@@ -226,13 +226,29 @@ what would trigger revisiting it.
   path. Read-only rendering + explicit persistence keeps the file hand-editable while a view
   stays a view. `SeasonRosterFiles` splits this into `load` / `seed` (in-memory) / `roster_for`
   (load-or-seed, read-only) / `create_from_captures` (seed + save) / `import_csv`.
-- **League standings group by the resolved member's race number, not by canonical name.**
-  `LeagueRoster.member_key` returns the matched member's race number (or the entry's own number
-  when unmatched). Number-based because league numbers are unique per driver, so two
-  roster-unknown humans who both show as `"Player"` never collapse into one standings row — a
-  name-based key would have merged them. Display is still `league_display_name` (public alias
-  first). *`member_of` (canonical name) stays for identity/label uses; the grouping key is
-  separate.*
+- **League standings resolve identity per classification, with tagged keys — because race numbers
+  are unique only among humans.** The AI field runs the real-world numbers, so a member on 11
+  shares it with Sergio Perez; the original number-keyed grouping summed the two into one row and
+  the last-seen name relabelled it "Sergio Perez" (found 2026-07-30 on the 2026 league opener).
+  Three rules now hold it together. (1) `ClassificationEntry.is_ai` is captured and stored
+  (PIPELINE_VERSION 2); rows from before that fall back to a name-vs-`DRIVER_NAMES` heuristic
+  (`looks_like_ai`), which may block the number fallback but never overrides an explicit roster
+  alias — only the game's own flag (`is_ai_entry`) is authoritative enough to do that. (2)
+  Resolution is ordered by evidence — online-name alias (case-insensitive, never a generic shown
+  name, never an AI-flagged car), then race number *for human cars only and only when
+  unambiguous*, then the entry's own identity. (3) Keys are tagged tuples (`("member", name)` /
+  `("ai", name)` / `("driver", number)`) resolved for a whole classification at once
+  (`LeagueRoster.session_keys`, passed to `compute_standings` as `group=`), so two cars in one
+  session can never share a standings row; a surviving repeat is split by shown name and then
+  vehicle index rather than merged. Two privacy-restricted humans on one race number are
+  unresolvable by construction — splitting is the honest outcome, and public online names are the
+  fix. AI drivers are deliberately **not** filtered out: standings stay a full-grid championship
+  view, AI simply keep their own rows. A roster may now list two members on one race number, but
+  only if each has an online name; and canonical member names must be unique, since they are the
+  grouping key (the capture seeder qualifies a repeated name with its race number to keep that
+  true when one member changes number mid-season).
+  *`member_of` (canonical name) stays for identity/label uses; `member_key` is the per-entry key
+  and `session_keys` the classification-wide one standings actually use.*
   CSV is a user-friendly import format only: the user can pick a CSV from their own storage,
   the app validates/parses it, then writes the per-season JSON. The CSV file is not copied into
   the app and is not remembered as the live roster path, avoiding broken references if a user

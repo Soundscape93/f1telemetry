@@ -1,15 +1,17 @@
 """Championship standings - points summed per driver across a season's classifications.
 
 Pure computation over ``SessionResult``s (no storage, no Qt, no UI) so the season view computes
-standings by handling it the sessions it already loaded. The only subtlety is driver identity
-across rounds, which is injected as a ``key``: by name (stable for AI, so right for Career and
-MyTeam) or by race number (stable per human, so right for Multiplayer). The league roster slice
-will add a roster-resolved key on top of the same function.
+standings by handing it the sessions it already loaded. The only subtlety is driver identity
+across rounds, which is injected: ``key`` identifies one entry at a time - by name (stable for
+AI, so right for Career and MyTeam) or by race number (stable per human, so right for
+Multiplayer) - while ``group`` identifies a whole classification at once. A league passes
+``group``, because race numbers are unique only among humans: e.g. telling a member on 11 from the AI
+Perez on 11 needs the rest of the grid in view (see ``domain.roster.LeagueRoster.session_keys``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass
 
 from ..domain.models import ClassificationEntry, SessionResult
@@ -56,19 +58,25 @@ class _Accumulator:
 def compute_standings(
         sessions: Iterable[SessionResult],
         key: Callable[[ClassificationEntry], Hashable] = by_driver_name,
-        display: Callable[[ClassificationEntry], str] | None = None) -> tuple[StandingRow, ...]:
+        display: Callable[[ClassificationEntry], str] | None = None,
+        group: Callable[[Sequence[ClassificationEntry]], Sequence[Hashable]] | None = None,
+        ) -> tuple[StandingRow, ...]:
     """Total points per driver across the given sessions, ranked.
 
     Only race-type sessions are counted (``RACE_SESSION_TYPES`` - RACE/RACE_2/RACE_3, which
     includes the sprint race). Every other session type is skipped: the game does NOT zero the
     final classification's ``m_points`` for non-scoring sessions - it leaves the field holding
-    the most recent race's points (so a Shanghai practice/quali/shootout echoes the last race
+    the most recent race's points (so a practice/quali/shootout echoes the last race
     result). The UDP spec defines ``m_points`` as points scored in that session and the packet
     as end-of-race only, so those non-race values are stale and summing them would double-count.
     A season's quali/practice results can therefore be passed in alongside its races and are
-    simply ignored. ``key`` groups drivers across rounds; ``display`` chooses the shown name
-    (default: the entry's own driver name). For a league both are the roster resolver, so rows
-    group and label by canonical member. Ties break by points then name (deterministic); full
+    simply ignored.
+
+    ``key`` groups drivers across rounds one entry at a time. ``group`` is the classification-wide
+    alternative and wins when given: it receives a session's entries and returns one key per
+    entry, so a resolver can use the whole grid as context and guarantee no two cars in a session
+    share a row (a league passes ``roster.session_keys``). ``display`` chooses the shown name
+    (default: the entry's own driver name). Ties break by points then name (deterministic); full
     FIA countback is a later refinement.
     """
     name_of = display or (lambda entry: entry.driver_name)
@@ -80,8 +88,9 @@ def compute_standings(
             continue                       # no Final Classification packet -> no official points
         if session.session_type not in RACE_SESSION_TYPES:
             continue
-        for entry in session.classification.entries:
-            k = key(entry)
+        entries = session.classification.entries
+        keys = list(group(entries)) if group is not None else [key(entry) for entry in entries]
+        for entry, k in zip(entries, keys, strict=True):
             acc = totals.get(k)
             if acc is None:
                 acc = _Accumulator(name=name_of(entry), number=entry.race_number, points=0)
@@ -102,12 +111,13 @@ def compute_standings(
 def standings_for_rounds(
     rounds: Iterable[RoundResults],
     key: Callable[[ClassificationEntry], Hashable] = by_driver_name,
-    display: Callable[[ClassificationEntry], str] | None = None
-    ) -> tuple[StandingRow, ...]:
+    display: Callable[[ClassificationEntry], str] | None = None,
+    group: Callable[[Sequence[ClassificationEntry]], Sequence[Hashable]] | None = None,
+) -> tuple[StandingRow, ...]:
     """Convenience for the season view: flatten ``rounds_with_results`` output into its
     sessions and compute standings over them."""
     sessions = [session for round in rounds for session in round.sessions]
-    return compute_standings(sessions, key, display)
+    return compute_standings(sessions, key=key, display=display, group=group)
 
 
 def compute_constructor_standings(
@@ -147,11 +157,17 @@ def constructor_standings_for_rounds(
 def league_standings_for_rounds(
     rounds: Iterable[RoundResults], roster: LeagueRoster) -> tuple[StandingRow, ...]:
     """League standings across a season's rounds: drivers are grouped and labelled by their
-    resolved roster member (online name first, race number as fallback), so a member whose
-    shown name drifts between lobbies is still one row. Display prefers a captured public
-    online name and falls back to the roster when the capture only says ``Player``."""
+    resolved roster member, so a member whose shown name drifts between lobbies is still one row.
+
+    Grouping goes through ``roster.session_keys`` (a whole classification at a time) rather than a
+    per-entry key, because a member's race number is unique only among humans - the AI field runs
+    the real-world numbers, so an AI sharing a member's number would otherwise be summed into that
+    member's row and could even relabel it. AI drivers are *not* filtered out: this is a full-grid
+    championship view, they simply keep their own rows. Display prefers a captured public online
+    name and falls back to the roster when the capture only says ``Player``.
+    """
     return standings_for_rounds(
         rounds,
-        key=roster.member_key,
         display=lambda entry: league_display_name(entry, roster),
+        group=roster.session_keys,
     )
