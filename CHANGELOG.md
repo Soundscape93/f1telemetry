@@ -13,6 +13,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.3.0 — 2026-07-31
+
 First published build for league testers.
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moved to 2 so classifications record whether each
@@ -38,3 +40,4 @@ standings fall back to matching AI drivers by name.
   restart to fix.
 - Dashboard, Sessions and Analytics pages are placeholders.
 - The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+

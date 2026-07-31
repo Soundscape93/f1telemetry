@@ -8,7 +8,7 @@ without a release still needs the bump.
 """
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Bump only when ingest output changes (see docs/PACKAGING.md "DB migration & pipeline-version").
 # 2: classification entries carry ``is_ai`` (AI vs human), so league standings stop confusing
