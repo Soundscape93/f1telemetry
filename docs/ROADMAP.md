@@ -245,12 +245,34 @@ two look identical in a capture, but only one loses packets). Verified on Linux:
 8388608 B, no false positives on four game-silence gaps, and a screen lock mid-recording did **not**
 stall the recorder — which is why this never showed up in dev.
 
-**Still open.** Those make stalls visible and much cheaper, not gone: a long stall still loses data.
-The real fix is a `SetThreadExecutionState` keep-awake while recording, deliberately held until a
-Windows recording on this build confirms the idle-timer cause via the new `recorder stalled` log
-line — stall lines at ~5-minute intervals would nail it. EcoQoS opt-out held pending the same
-evidence. **The "missing middle laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost
-certainly the same root cause, not a separate bug.**
+**Confirmed on Windows v0.4.1** (capture `20260801_214539`, 2026-08-01). The warning fired:
+`recorder stalled 22.3s`, after 7.5 minutes of activity — squarely inside the machine's 5–10 minute
+idle window. The race completed cleanly (`CHQF` → `SEND` → `RCWN`), and the Final Classification is
+**still missing**, so the cost is real and repeatable.
+
+The 8 MB buffer also **refined the diagnosis**, which is what it was for. A 22.3 s stall at
+0.2 MB/s is ~4.5 MB — well inside 8 MB — so a merely *starved* process would have resumed with a
+~4.5 MB drain. Only **0.3 KB** arrived: nothing was buffered, therefore nothing was received, so
+the NIC was down too. **The machine sleeps (modern standby), it isn't just descheduled.** The old
+64 KB buffer could never show this — it fills in 0.3 s, so awake-and-dropping looks identical to
+asleep.
+
+**Done (v0.4.2).** `src/keep_awake.py` — a `SetThreadExecutionState` context manager
+(`ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED`) wrapped around the capture loop in
+`RecorderWorker.run`. It lives on the worker thread because the flags are per-thread and die with
+the thread that set them; it is a no-op off Windows and never fatal. `ES_DISPLAY_REQUIRED` is the
+one judgement call — it keeps the screen lit, costing laptop battery — and is included because
+screen-off can itself trigger standby; drop it if a Windows test shows `ES_SYSTEM_REQUIRED` alone
+suffices.
+
+**Ruled out: EcoQoS opt-out.** EcoQoS throttles CPU *speed* for background processes; it neither
+suspends for 22 s nor takes the network stack down. The evidence points at sleep, so this would be
+cargo-culting. Not implemented.
+
+**Still open.** Confirm on Windows that a long untouched recording now logs `stay-awake active` and
+**no** `recorder stalled` lines, and that the Final Classification survives. **The "missing middle
+laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly the same root cause,
+not a separate bug.**
 
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:

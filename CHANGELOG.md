@@ -18,6 +18,17 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
+stored moved, so existing captures, sessions and standings are unaffected.
+
+### Fixed
+- Recording: the computer no longer goes to sleep while a recording is running. If you record on a
+  machine you aren't touching — the usual setup when the game runs on a console — Windows saw it as
+  idle and slept it mid-session, and a sleeping machine receives nothing at all. That cost whole
+  minutes of telemetry and, because it usually struck once the session ended, the final
+  classification along with it. The screen now stays on for as long as you are recording and
+  returns to your normal power settings as soon as you stop.
+
 ## v0.4.1 — 2026-08-01
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or

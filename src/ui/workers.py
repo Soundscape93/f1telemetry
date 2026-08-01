@@ -32,11 +32,16 @@ class RecorderWorker(QThread):
         self.stop_event = threading.Event()
 
     def run(self) -> None:
-        """Capture loop; runs in its own thread."""
+        """Capture loop; runs in its own thread.
+        The stay-awake request belongs here rather than in the recorder: SetThreadExecutionState
+        is per-thread, so it has to be asserted on the thread that actually blocks in recvfrom.
+        """
         try:
+            from ..keep_awake import keep_awake
             source = LiveUDPSource(self.host, self.port, stop_event=self.stop_event)
             recorder = SessionRecorder(self._output_path, source)
-            recorder.record(on_status=self._emit_status, status_interval=1.0)
+            with keep_awake():
+                recorder.record(on_status=self._emit_status, status_interval=1.0)
             self.done.emit(self._output_path, recorder.packet_count)
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
