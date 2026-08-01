@@ -106,11 +106,23 @@ def main() -> int:
                         help="bump level, taken from the PR label")
     parser.add_argument("--check", action="store_true",
                         help="only validate the Unreleased section (the pull-request gate)")
+    parser.add_argument("--is-prepared", action="store_true",
+                        help="exit 0 when CHANGELOG.md already carries a section for the version "
+                             "in src/version.py - i.e. the bump has already run on this branch")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the next version, write nothing")
     args = parser.parse_args()
 
     changelog = CHANGELOG.read_text(encoding="utf-8")
+     # Asked before --check, and keyed on the changelog/version pair rather than the tip commit
+    # subject: a merge landing after the bump would hide a subject test, but cannot hide this.
+    # Same reasoning as tag.yml, which keys on the version file for exactly this robustness.
+    if args.is_prepared:
+        version = source_version()
+        prepared = re.search(rf"^##\s+v{re.escape(version)}\b", changelog, re.MULTILINE) is not None
+        print(f"v{version} is {'already' if prepared else 'not yet'} in CHANGELOG.md")
+        return 0 if prepared else 1
+    
     problems = check(changelog)
     if args.check:
         for problem in problems:

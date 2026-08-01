@@ -52,8 +52,9 @@ jobs:
         run: |
           # Once bump.yml has run, those notes have moved into the new version's section and
           # Unreleased is deliberately empty again - re-checking it here would fail the release PR.
-          if git log -1 --pretty=%s | grep -q '^chore(release):'; then
-            echo "Already prepared: $(git log -1 --pretty=%s)"
+          # Keyed on the changelog/version pair, not the tip commit subject: a merge landing on the
+          # branch after the bump pushes that commit off the tip and a subject test then misfires.
+          if python packaging/bump_version.py --is-prepared; then
             exit 0
           fi
           python packaging/bump_version.py --check

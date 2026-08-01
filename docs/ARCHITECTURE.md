@@ -343,7 +343,11 @@ the GUI thread — both pointing at the same database file. The recorder's coope
 That cycle is also the recorder's own health check: `LiveUDPSource` asks for a large `SO_RCVBUF`
 (the OS default — 64 KB on Windows — holds only ~0.3 s of stream, so a descheduled process loses
 everything past it) and warns when one iteration runs far longer than the socket timeout, which
-distinguishes *we weren't running* from *the game wasn't sending*.
+distinguishes *we weren't running* from *the game wasn't sending*. `RecorderWorker.run` wraps the
+capture loop in `keep_awake()` (`src/keep_awake.py`) so the machine can't sleep mid-recording — a
+recorder is often the only thing a machine is doing, and a slept machine receives nothing at all
+because the NIC goes down with it. The request lives on the worker thread because
+`SetThreadExecutionState` is per-thread; it is a no-op off Windows.
 
 **`ReingestWorker`** (packaging Phase 2) follows the same shape for the guided rebuild: its four
 stores (session, lap, capture, meta) are built on its own thread and disposed in one `finally`, it
