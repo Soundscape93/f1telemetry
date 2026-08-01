@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum, auto
@@ -274,6 +274,68 @@ def resolve_capture_path(meta: CaptureMeta, captures_dir: str | os.PathLike | No
         if os.path.isfile(candidate):
             return candidate
     return None
+
+
+# --- missing-capture prune --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PruneSummary:
+    """What one prune pass forgot - and what we deliberately did not."""
+
+    pruned: tuple[str, ...] = ()        # files names whose metadata row was removed
+    kept: tuple[str, ...] = ()         # files names that turned up again before the delete
+
+
+def find_missing_captures(capture_store: CaptureStore,
+                          captures_dir: str | os.PathLike | None = None) -> list[CaptureMeta]:
+    """Known caputes whose archive :func:`resolve_capture_path` can no longer find.
+    
+    The read half of the prune, deliberately separated from the write half so the user can be
+    shown exactly what would be forgotten before anything is. Purely af filter over
+    ``resolve_capture_path``: "missing" means the same thing here as it does to a re-ingest
+    (``ReingestSummary.missing``), never a second, stricter option.
+
+    It cannot tell a **deleted** capture from a **moved** one - only that the bytes are not
+    where the app looks (``CaptureMeta.path`` is advisory; the content hash is the identity).
+    Judging that is the caller's job: the UI warns when *every* capture is missing, which is the
+    signature of a captures folder that moved rather than files were deleted.
+    """
+    return [meta for meta in capture_store.list_captures()
+            if resolve_capture_path(meta, captures_dir) is None]
+
+
+def prune_missing_captures(capture_store: CaptureStore, content_hashes: Iterable[str],
+                           captures_dir: str | os.PathLike | None = None) -> PruneSummary:
+    """Forget the metadata of captures whose archive is gone. **Never** touches a file.
+    
+    Metadata cleanup only: it drops the ``captures`` row (and its ``capture_sessions`` children,
+    by cascade) so future re-ingests stop listing an archive that will never come back under
+    ``ReingestSummary.missing``. Sessions, Laps, season assignments, rosters and tombestones are
+    keyed on ``session_uid`` and not FK'd to ``captures`` (core invariant #4), so standings and
+    curation cannot move. And it is recoverarble: if the file ever turns up, importing it records
+    the row again - replace-by-hash means nothing is duplicated.
+
+    Every hash is **re-checked here** rather than trusted from the caller's list: a confirmation
+    dialog stays open of as long the user takes, and an external drive can be reconnected in
+    that time. A capture that resolves again is kept and reported in ``PruneSummary.kept``.
+    Unkown hashes are skipped, so the pass is idempotent and safe to repeat.
+    """
+    pruned: list[str] = []
+    kept: list[str] = []
+    for content_hash in content_hashes:
+        meta = capture_store.get(content_hash)
+        if meta is None:                # already forgotten - nothing to do
+            continue
+        if resolve_capture_path(meta, captures_dir) is not None:
+            log.info("Prune: %s turned up again, keeping its metadata", meta.file_name)
+            kept.append(meta.file_name)
+            continue
+        capture_store.delete(content_hash)
+        log.info("Prune: forgot %s (last known path: %s)", meta.file_name, meta.path)
+        pruned.append(meta.file_name)
+
+    log.info("Prune finished: %d forgotten, %d kept", len(pruned), len(kept))
+    return PruneSummary(pruned=tuple(pruned), kept=tuple(kept))
 
 
 @dataclass(frozen=True)

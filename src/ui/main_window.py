@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
             "Analytics", "The analytics will be shown here, with charts and graphs."))
         self._help_page = HelpPage()
         self._help_page.reingest_requested.connect(self._on_manual_reingest)
+        self._help_page.prune_captures_requested.connect(self._on_prune_captures)
         self._stack.addWidget(self._help_page)
         self._stack.addWidget(_PlaceholderPage(
             "Bug report", "The bug report form will be shown here."))
@@ -378,6 +379,80 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Yes:
             self._start_reingest()
 
+    # --- missing-captures prune ------------------------------------------------------------
+
+    def _on_prune_captures(self) -> None:
+        """Help -> "Clean up missing captures": forget rows whose archive can't be found.
+        
+        Deliberately synchronous and unthreaded: the whole pass is a handfull of DB reads plus one
+        ``os.path.isfile()`` per capture, so there is nothing to keep a progress dialog busy. Its
+        own short-lived ``CaptureStore`` (the ``MetaStore`` patternn from ``check_pipeline_version()``)
+        - the main window doesn't otherwise hold one, and a store opened and closed inside the handler
+        can't outlive the action.
+
+        **Excplicit only** (docs/ROADMAP -> Capture compression): never on start-up, never folded
+        into a re-ingest. A moved capture and a deleted one look identical at the row level, so a
+        human confirms every prune.
+        """
+        from ..pipeline import find_missing_captures, prune_missing_captures
+        from ..storage.captures import CaptureStore
+
+        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+            self._status.setText("Busy - wait for the current job to finish.")
+            return
+
+        captures_dir = str(paths.captures_dir())
+        try:
+            with CaptureStore(self._db_url) as store:
+                total = len(store.list_captures())
+                missing = find_missing_captures(store, captures_dir)
+                if not missing:
+                    self._status.setText(
+                        "No captures are recorded yet - nothing to clean up." if total == 0
+                        else f"All {total} recorded capture(s) were found - nothing to clean up.")
+                    return
+                if not self._confirm_prune(missing, total):
+                    return
+                summary = prune_missing_captures(
+                    store, [meta.content_hash for meta in missing], captures_dir=captures_dir)
+        except Exception as exc:
+            log.exception("Could not clean up missing captures")
+            self._status.setText(f"Error: {exc}")
+            return
+
+        # No view refresh: noting a data surface shows was touched - only capture metadata
+        self._status.setText(_prune_message(summary))
+
+    def _confirm_prune(self, missing: list, total: int) -> bool:
+        """Show exactly what would be forgotten and that no file is deleted."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Clean up missing captures")
+        box.setText(f"{len(missing)} of {total} recorded capture(s) can't be found.")
+
+        info = (
+            "Their entries can be removed, so re-reading your captures stops listing them.\n\n"
+            "No files are deleted - this only clears the app's record of captures that are "
+            "already gone. Your sessions, seasons, standings and rosters are not affected.\n\n"
+            "If a capture was only moved, put it back in your captures folder (or import it "
+            "again) instead - then it's found again and nothing is lost.")
+        if len(missing) == total:
+            # Every row missing is far more often a removed/disconneted drive than a mass delete.
+            info = ("Every capture the app knows about is missing. That usually means the "
+                    "captures folder itself moved, or is on a drive that isn't connected - "
+                    "check Help -> Open captures folder before continuing.\n\n") + info
+        box.setInformativeText(info)
+        box.setDetailedText(
+            "\n".join(f"{meta.file_name}\n    last seen: {meta.path}" for meta in missing))
+
+        forget_btn = box.addButton(
+            f"Forget {len(missing)} {'entry' if len(missing) == 1 else 'entries'}",
+            QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_btn)            # the safe answer is the one Enter picks
+        box.exec()
+        return box.clickedButton() is forget_btn
+
     def _start_reingest(self) -> None:
         """Rebuild every stored session from its capture archive on a background thread."""
         if self._recorder is not None or self._ingest is not None or self._reingest is not None:
@@ -479,4 +554,18 @@ def _reingest_message(summary) -> str:
                      "sessions keep the old data.")
     if summary.errors:
         parts.append(f"{len(summary.errors)} capture(s) failed: {summary.errors[0]}")
+    return " ".join(parts)
+
+
+def _prune_message(summary) -> str:
+    """One status line for a prune pass - explicit that it removed records, not recordings."""
+    if not summary.pruned:
+        return (f"Nothing was removed - {len(summary.kept)} capture(s) turned up again."
+                if summary.kept else "Nothing was removed.")
+
+    noun = "entry" if len(summary.pruned) == 1 else "entries"
+    parts = [f"Removed {len(summary.pruned)} missing capture {noun} from the app's records. "
+             "No files were deleted."]
+    if summary.kept:
+        parts.append(f"{len(summary.kept)} capture(s) turned up again and were kept.")
     return " ".join(parts)

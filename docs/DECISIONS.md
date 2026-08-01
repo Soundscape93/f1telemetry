@@ -202,6 +202,25 @@ what would trigger revisiting it.
   turn after start-up), the app is fully usable whichever button is pressed, and the rebuild itself
   is modeless and cancellable. Rationale: it can take minutes on a 1.5 GB weekend, and a blocking
   "please wait" on launch is exactly how a tester concludes the app has hung.
+- **The missing-capture prune is manual, confirmed, and re-verified — never a sweep.** `path` is
+  advisory by design, so at the row level a **moved** capture and a **deleted** one are the same
+  fact: "not where the app looked". Nothing cheap can tell them apart — the content hash could, but
+  proving it means decompressing and hashing every candidate archive. So the app never decides:
+  `find_missing_captures` (read) and `prune_missing_captures` (write) are deliberately split, the
+  user is shown every file name and last-known path, and only an explicit *Help → Clean up missing
+  captures* prunes anything. Three things make that safe enough to ship without the hash rescan.
+  **It re-resolves each hash at delete time** rather than trusting the list the dialog was built
+  from — a confirmation box stays open for minutes and an external drive can be reconnected inside
+  that window, so anything that turns up is kept and reported. **It is recoverable**: only a
+  `captures` row (+ its `capture_sessions` children, by cascade) is dropped, and re-importing the
+  file records it again — replace-by-hash, no duplicate. **It cannot reach the data that matters**:
+  sessions, laps, season assignments, rosters and tombstones are keyed on `session_uid` and not
+  FK'd to `captures` (core invariant #4), so no cascade can move a standing. The UI adds the one
+  judgement a filter can't: when *every* known capture is missing it warns first, because that is
+  the signature of a captures folder that moved, not of files that were deleted. *Deferred, and
+  kept possible on purpose:* a "locate moved capture by hash" step slots in **between** the scan
+  and the prune — it only needs a scanner, since `CaptureStore.relocate()` already exists and
+  `known_files()` gives it a name+size pre-filter so only real candidates get hashed.
 
 ## Identity & rosters
 - **League driver identity resolves by race number first.** Leagues enforce unique numbers, so
