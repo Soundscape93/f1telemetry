@@ -75,6 +75,7 @@ class HelpPage(QWidget):
     not run alongside) - the same emit-and-let-the-container-act split as the seasons pages. 
     """
     reingest_requested = Signal()
+    prune_captures_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -111,6 +112,13 @@ class HelpPage(QWidget):
             "that reads more from a capture; your seasons and rosters are kept.")
         self._reingest_btn.clicked.connect(self.reingest_requested)
 
+        self._prune_btn = QPushButton("Clean up missing captures")
+        self._prune_btn.setMinimumHeight(32)
+        self._prune_btn.setToolTip(
+            "Forget capture files the app can no longer find, so re-reading stops listing them. "
+            "Shows you the list first. No files are deleted and no sessions are lost.")
+        self._prune_btn.clicked.connect(self.prune_captures_requested)
+
         self._guide_btn = QPushButton("Open user guide")
         self._guide_btn.setMinimumHeight(32)
         self._guide_btn.setToolTip(
@@ -145,6 +153,8 @@ class HelpPage(QWidget):
         layout.addWidget(self._status)
         layout.addSpacing(6)
         layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
+        layout.addWidget(self._prune_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(self._guide_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)

@@ -124,6 +124,21 @@ Only captures that are still in your `captures` folder can be rebuilt. If some a
 says so ("*N of M sessions updated*") — those sessions keep their old data, which is harmless: they
 simply won't show the newest details.
 
+### Cleaning up captures you deleted
+
+Deleting a capture file leaves its entry behind, so every re-read keeps reporting it as missing.
+**Help → Clean up missing captures** clears those leftovers. It shows the full list first — file
+name and where each was last seen — and nothing happens until you confirm.
+
+**No files are deleted** — it only removes the app's *record* of captures that are already gone.
+Sessions, seasons, standings and rosters are untouched, and if a file ever turns up again,
+importing it puts its entry straight back.
+
+A capture that was only **moved** should be put back rather than forgotten: move it into your
+`captures` folder (or import it again) and it's found. If the app says *every* capture is missing,
+check **Help → Open captures folder** first — that usually means the folder itself moved or is on a
+drive that isn't connected.
+
 ## 9. Reporting a bug
 
 Note your version (shown on the Help page) and attach the latest log from the `logs/` folder under

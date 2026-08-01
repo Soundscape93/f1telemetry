@@ -1,4 +1,5 @@
-"""The Phase-2 guided re-ingest: the version gate, capture resolution, and the rebuild pass.
+"""The Phase-2 guided re-ingest and the missing prune: the version gate, capture resolution,
+the rebuild pass and the forgetting archives that are gone.
 
 Fixture-free: ``reingest_all``'s ``ingest`` hook is injected (the same style as
 ``check_for_update``'s ``urlopen``), so the *accounting* - which captures were re-read, which
@@ -16,8 +17,9 @@ from datetime import datetime, timezone
 
 from f1telemetry.src.domain.captures import CaptureMeta
 from f1telemetry.src.domain.models import SessionResult
-from f1telemetry.src.pipeline import (PipelineState, ReingestSummary, check_pipeline_version,
-                                      reingest_all, resolve_capture_path)
+from f1telemetry.src.pipeline import (PipelineState, PruneSummary, ReingestSummary,
+                                      check_pipeline_version, find_missing_captures,
+                                      prune_missing_captures, reingest_all, resolve_capture_path)
 from f1telemetry.src.protocol.enums import Formula, SessionType, Weather
 from f1telemetry.src.storage.captures import CaptureStore
 from f1telemetry.src.storage.meta import LEGACY_PIPELINE_VERSION, MetaStore
@@ -232,6 +234,87 @@ class ReingestAllTest(unittest.TestCase):
                                ingest=_Recorder({}))
         self.assertEqual(summary, ReingestSummary(0, 0, 0, 0))
         self.assertTrue(summary.is_complete)
+
+
+class PruneMissingCapturesTest(unittest.TestCase):
+    """Forgetting rows whose archive is gone: metadata only, re-checked, never a file."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.mkdtemp(prefix="prune_")
+        self.addCleanup(lambda: shutil.rmtree(self.temp, ignore_errors=True))
+        self.db_url = f"sqlite:///{os.path.join(self.temp, 'test.db')}"
+        self.sessions = SessionStore(self.db_url)
+        self.addCleanup(self.sessions.close)
+        self.captures = CaptureStore(self.db_url)
+        self.addCleanup(self.captures.close)
+
+    def _capture(self, name: str, uids: tuple[str, ...], *, on_disk: bool = True) -> CaptureMeta:
+        path = os.path.join(self.temp, name)
+        if on_disk:
+            with open(path, "wb") as fh:
+                fh.write(b"x")
+        self.captures.record(meta := _meta(name, path, uids))
+        return meta
+
+    def test_finds_only_the_captures_whose_archive_is_gone(self):
+        self._capture("monza.f1cap.zst", ("111",))
+        self._capture("spa.f1cap.zst", ("222",), on_disk=False)
+
+        missing = find_missing_captures(self.captures, self.temp)
+
+        self.assertEqual([meta.file_name for meta in missing], ["spa.f1cap.zst"])
+
+    def test_prune_forgets_the_row_and_its_capture_sessions(self):
+        gone = self._capture("spa.f1cap.zst", ("222",), on_disk=False)
+
+        summary = prune_missing_captures(self.captures, [gone.content_hash],
+                                         captures_dir=self.temp)
+
+        self.assertEqual(summary.pruned, ("spa.f1cap.zst",))
+        self.assertFalse(self.captures.has(gone.content_hash))
+        self.assertEqual(self.captures.for_session("222"), [],
+                         "the capture_sessions children go with the row")
+
+    def test_prune_leaves_the_stored_session_alone(self):
+        """Metadata cleanup, not data deletion - nothing behind the standings may move."""
+        self.sessions.save(_session(222))
+        gone = self._capture("spa.f1cap.zst", ("222",), on_disk=False)
+
+        prune_missing_captures(self.captures, [gone.content_hash], captures_dir=self.temp)
+
+        self.assertIn(222, self.sessions.stored_uids())
+
+    def test_a_capture_that_turned_up_again_is_kept(self):
+        """The caller's list can be minutes old - a drive reconnects while the dialog waits."""
+        here = self._capture("monza.f1cap.zst", ("111",))
+
+        summary = prune_missing_captures(self.captures, [here.content_hash],
+                                         captures_dir=self.temp)
+
+        self.assertEqual((summary.pruned, summary.kept), ((), ("monza.f1cap.zst",)))
+        self.assertTrue(self.captures.has(here.content_hash))
+
+    def test_an_unknown_hash_is_skipped_so_a_prune_can_be_repeated(self):
+        gone = self._capture("spa.f1cap.zst", ("222",), on_disk=False)
+        prune_missing_captures(self.captures, [gone.content_hash], captures_dir=self.temp)
+
+        again = prune_missing_captures(self.captures, [gone.content_hash], captures_dir=self.temp)
+
+        self.assertEqual(again, PruneSummary())
+
+    def test_a_pruned_capture_stops_being_reported_as_missing(self):
+        """The point of the feature: the re-ingest noise goes, the pass still completes."""
+        self.sessions.save(_session(111))
+        self._capture("monza.f1cap.zst", ("111",))
+        gone = self._capture("spa.f1cap.zst", ("222",), on_disk=False)
+        prune_missing_captures(self.captures, [gone.content_hash], captures_dir=self.temp)
+
+        summary = reingest_all(self.captures, self.sessions, captures_dir=self.temp,
+                               ingest=_Recorder({"monza.f1cap.zst": [_session(111)]}))
+
+        self.assertEqual(summary.missing, ())
+        self.assertEqual(summary.captures_total, 1)
+
 
 
 if __name__ == "__main__":

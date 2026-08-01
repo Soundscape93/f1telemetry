@@ -294,6 +294,13 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   predicate **between** captures so a session is never left half-written. Idempotent and resumable:
   replace-by-uid + replace-by-hash, and the no-FK invariants mean rebuilding derived rows never
   touches standings, round placements or rosters.
+  It also owns the **missing-capture prune**, split read-from-write so the user confirms a list
+  before anything is forgotten: `find_missing_captures(...)` → the `CaptureMeta`s
+  `resolve_capture_path` can no longer find (the same definition of "missing" `reingest_all`
+  reports), and `prune_missing_captures(...)` → `PruneSummary`, which drops those `captures` rows
+  (children by cascade) so a re-ingest stops listing archives that will never come back. It
+  **re-resolves every hash at delete time** rather than trusting the caller's list, keeping
+  anything that turned up meanwhile; it touches no file and no session. See DECISIONS → Storage.
 
 ## Capture compression
 

@@ -27,6 +27,16 @@ every result.
   in the session result tables. Constructor standings are unchanged — the game reports nationality
   per driver, not per team. A driver whose nationality isn't recognised simply shows no flag.
 
+- **New:** **Help → Clean up missing captures** clears the leftover entries of capture files you
+  deleted, so re-reading your captures stops reporting them as missing. It shows you the full list
+  first — file name and where each was last seen — and nothing happens until you confirm.
+  **No files are deleted**: this only removes the app's record of captures that are already gone,
+  and your sessions, seasons, standings and rosters are untouched. A capture that was merely
+  *moved* is never forgotten by accident — the app re-checks each one as it goes and keeps any
+  that turns up, and it warns you before continuing if *every* capture looks missing (usually a
+  captures folder that moved, or a drive that isn't connected). If a forgotten file ever comes
+  back, importing it restores its entry.
+
 ## v0.3.0 — 2026-07-31
 
 First published build for league testers.

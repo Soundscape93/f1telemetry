@@ -9,8 +9,7 @@ Two small features are expected to ship together in the next release, grouped on
 branch (see PACKAGING → Versioning & dev release process for the mechanics):
 
 1. **Nationality flags in driver standings** — done, see Seasons UI below.
-2. **Missing-capture prune** — pruning `captures` rows whose file is gone; see Capture
-   compression below. Not implemented yet.
+2. **Missing-capture prune** — done, see Capture compression below.
 
 Neither changes ingest output, so unless something else lands first this release is
 **re-ingest: no**. Both are user-visible, so `minor` is the likely label; `CHANGELOG.md` must
@@ -260,16 +259,25 @@ weeks). Summary of the locked direction:
 - **Next — league capture import.** Build on the metadata table: an "import new captures from a
   shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
   `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
-- **Next — pruning `captures` rows whose file is gone** (queued for the next release; see "Next
-  release" at the top of this file). Deleting a capture file leaves its
-  `captures` row behind, so every future re-ingest lists it under `ReingestSummary.missing` (and
-  logs "no archive found"). Harmless and purely informational today — the pass continues and the
-  stored sessions are untouched — but the noise grows with every deleted recording. Still
-  unimplemented, because the design needs care: a **moved** file is indistinguishable from a
-  **deleted** one at the row level (`path` is advisory by design — the content hash is the
-  identity), so pruning on "file not at `path`" would silently forget a capture the user merely
-  relocated, or one on a drive that happens to be offline. Any real fix needs a rescan/relocate
-  step before a prune, and probably an explicit user action rather than an automatic sweep.
+- **Done — pruning `captures` rows whose file is gone.** Deleting a capture file left its
+  `captures` row behind, so every future re-ingest listed it under `ReingestSummary.missing` (and
+  logged "no archive found") — harmless, but the noise grew with every deleted recording.
+  *Help → Clean up missing captures* now clears them: `pipeline.find_missing_captures` lists what
+  `resolve_capture_path` can't find, the user confirms a dialog showing every file name and
+  last-known path, and `pipeline.prune_missing_captures` drops those rows (children by cascade).
+  Metadata only — no file is deleted, and no session, assignment or roster can be reached.
+  The design problem the deferral was about is **not** solved, it is **handed to the user**: a
+  moved file and a deleted one are still indistinguishable at the row level, so the app never
+  decides on its own. Manual action, explicit confirmation, a re-resolve at delete time (so a
+  drive reconnected while the dialog waits keeps its capture), and a warning when *every* capture
+  is missing — the signature of a moved folder. No schema change, no `PIPELINE_VERSION` bump.
+  See DECISIONS → Storage.
+- **Next — locate a moved capture by content hash.** The other half of the above, and now the only
+  piece missing: scan the captures folder, match each file's hash against `captures`, and
+  `relocate()` the row instead of forgetting it. Cheaper than it sounds — `relocate()` already
+  exists, so this is purely a scanner, and `known_files()` pre-filters by name+size so only real
+  candidates get decompressed and hashed. It slots in **between** `find_missing_captures` and
+  `prune_missing_captures`, which were split for exactly this.
 - **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
   never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
   (it isn't in the file), so the column exists now; wiring waits for the import flow above.
