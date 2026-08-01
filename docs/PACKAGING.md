@@ -562,6 +562,11 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] HiDPI/scaling correct on the laptop panel (fonts/layout).
 - [ ] **Recording:** UDP socket binds → **Windows Firewall prompt appears → Allow** (document it);
       a `.f1cap` lands in `captures/` under `%LOCALAPPDATA%\f1telemetry`.
+- [ ] **Recorder scheduling:** after a recording of 15+ min with the laptop **untouched**, `logs/`
+      contains **no `recorder stalled` lines**. A capture can land and still be missing minutes of
+      data — that log line is the only direct signal. If lines appear, note their intervals:
+      ~5 minutes apart points at the system idle/lock timer (see ROADMAP → *Windows recorder
+      stalls*). The same log records the granted receive-buffer size at every record press.
 - [ ] **Ingest** a real capture: sessions/laps written; **Parquet traces** written and readable
       (pyarrow works in the bundle).
 - [ ] **Track map + telemetry traces render** (pyqtgraph bundled — the *real* widget, not the
