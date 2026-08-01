@@ -11,9 +11,10 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   created only by an explicit action — a "Create roster file" button materializes the seed so it
   can be hand-edited, or CSV import writes it. The user picks a CSV from their own storage, the
   app validates it, and writes the canonical JSON; the CSV remains outside the app and is never
-  the live roster path. League standings group drivers by their resolved member's **race number**
-  (`LeagueRoster.member_key`), so two roster-unknown humans both shown as `"Player"` never
-  collapse into one row. LEAGUE
+  the live roster path. League standings group drivers by **tagged keys resolved a whole
+  classification at a time** (`LeagueRoster.session_keys`): an online-name alias first, then race
+  number *for human cars only* — race numbers are unique only among humans, so an AI sharing a
+  member's number is never that member — and two cars in one session can never share a row. LEAGUE
   driver standings use `league_standings_for_rounds`; career/My-Team/Grand Prix stay on
   `standings_for_rounds`. LEAGUE detail/weekend displays prefer captured public online names;
   if the capture only says `"Player"` or blank, display falls back to the first roster
@@ -31,6 +32,26 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   (`calendar_rules`), the widget in `ui/components/calendar_picker.py`. *Next here:* surface the
   same picker as an edit-calendar action on the detail page (the store already has
   `set_calendar()`).
+
+- **Next here: nationality flags in the driver standings table.** The season detail page's driver
+  standings should read like the session classification table, which already shows a flag in its
+  Driver cell. **Scope is deliberately narrow — the driver standings table only.** Constructor
+  standings get **no** flags: the packet's nationality is per *driver*, not per team, so there is
+  nothing truthful to render there. No new assets: reuse `ui/components/flags.py:flag_icon()` and
+  the bundled flag-icons SVGs (MIT, already attributed in `src/ui/assets/flags/ATTRIBUTION.md`),
+  and reuse the classification table's cell pattern — build the driver cell, then
+  `driver_item.setIcon(flag)` when `flag_icon()` returns one (see
+  `ui/components/classification_table.py`, the `flag_icon(entry.nationality_id)` block) — so icon
+  size and row height match between the two tables. **No storage change and no re-ingest:**
+  `nationality_id` is already stored on every classification entry.
+  *The actual work is aggregation plumbing:* `StandingRow` is `(position, driver_name,
+  race_number, points)` and carries no nationality, so `analysis/standings.py` must thread
+  `nationality_id` through `_Accumulator` onto `StandingRow` using the **same last-seen-wins
+  pattern already applied to `name`/`number`**. Fail soft: an unmapped or missing flag yields
+  `None` and the cell simply shows no icon (`flag_icon` already behaves this way). Nothing else
+  about standings behaviour changes.
+  **Explicitly out of scope:** team logos, platform logos, and any AI/PlayStation/EA branding row
+  — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
 - **Sessions** — a list of every captured session; likely also a *session-centric* assignment
@@ -227,6 +248,15 @@ weeks). Summary of the locked direction:
 - **Next — league capture import.** Build on the metadata table: an "import new captures from a
   shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
   `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
+- **Deferred — pruning `captures` rows whose file is gone.** Deleting a capture file leaves its
+  `captures` row behind, so every future re-ingest lists it under `ReingestSummary.missing` (and
+  logs "no archive found"). Harmless and purely informational today — the pass continues and the
+  stored sessions are untouched — but the noise grows with every deleted recording. Not
+  implemented, because the design needs care: a **moved** file is indistinguishable from a
+  **deleted** one at the row level (`path` is advisory by design — the content hash is the
+  identity), so pruning on "file not at `path`" would silently forget a capture the user merely
+  relocated, or one on a drive that happens to be offline. Any real fix needs a rescan/relocate
+  step before a prune, and probably an explicit user action rather than an automatic sweep.
 - **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
   never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
   (it isn't in the file), so the column exists now; wiring waits for the import flow above.
