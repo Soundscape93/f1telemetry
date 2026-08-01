@@ -3,7 +3,7 @@ name = "f1telemetry"
 # Runtime source of truth is src/version.py; keep this mirror in sync. Phase 3 CI will stamp
 # both from the git tag. (Not using dynamic=version: the f1telemetry.src-vs-src double root
 # makes an attr= resoultion fragile.)
-version = "0.4.0"
+version = "0.4.1"
 description = "F1 2025/2026 UDP telemetry capture, analysis and results viewer"
 requires-python = ">=3.11"
 
