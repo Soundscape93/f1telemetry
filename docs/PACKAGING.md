@@ -251,19 +251,36 @@ the self-updater is packaging Phase 4.)*
 - One `__version__` in the package. SemVer `MAJOR.MINOR.PATCH`. Keep **`PIPELINE_VERSION` separate**
   (bumped only when ingest output changes). `1.0.0` is reserved for "packaging finished / ready for
   users outside the league"; until then everything is `0.x.y`.
-- **Label-driven release (Phase 3).** Write the entry under `## Unreleased` in `CHANGELOG.md` in the
-  PR → label the PR **`major`** / **`minor`** / **`patch`** → merge. `.github/workflows/bump.yml`
-  then bumps `src/version.py` + `pyproject.toml`, renames the Unreleased section to
-  `## vX.Y.Z — <date>`, commits that to `main`, tags it, and calls `release.yml`. **A merged PR with
-  none of those labels releases nothing** — that is the "no release" path, not a failure.
+- **Label-driven release.** Write the entry under `## Unreleased` in `CHANGELOG.md` → label the
+  **`staging` → `main` PR** `major` / `minor` / `patch` → merge. Labelling (not merging) is what
+  starts it: `.github/workflows/bump.yml` bumps `src/version.py` + `pyproject.toml`, renames the
+  Unreleased section to `## vX.Y.Z — <date>`, and commits that **to the PR's head branch**
+  (`staging`). Merging the PR carries that commit into `main`, where
+  `.github/workflows/tag.yml` tags it and calls `release.yml`. **A PR with none of those labels
+  releases nothing** — that is the "no release" path, not a failure.
+- **CI never pushes a commit to `main`** — every change arrives through a PR, which is what the
+  branch protection rule requires. This is why the bump lands on the PR branch rather than on
+  `main`: the older workflow ran `git push origin HEAD:main`, which protection rejects
+  (`GITHUB_TOKEN` is not exempt). Tags are *not* covered by branch protection, so `tag.yml`
+  pushing `vX.Y.Z` is fine — just don't add a protected-tag rule for `v*` without exempting it.
 - **CI verifies the version, it never stamps it** (`packaging/check_version.py`). The bump is a real
-  commit on `main` *before* the tag, so the tag points at source that already carries the version:
-  the published artifact is exactly the tagged commit, and an editable install in a checkout reports
-  the same version as the exe's Help page. A build-time stamp would break both.
-- **`bump.yml` calls `release.yml` directly** (a `workflow_call`), instead of relying on the tag push
+  commit that reaches `main` *before* the tag exists, so the tag points at source that already
+  carries the version: the published artifact is exactly the tagged commit, and an editable install
+  in a checkout reports the same version as the exe's Help page. A build-time stamp would break both.
+- **`tag.yml` keys on the version file, not the commit subject.** Every push to `main` runs it; it
+  reads `source_version()` and releases only when no `vX.Y.Z` tag exists yet, so ordinary merges are
+  a silent no-op and it works whether the release PR is merged or squashed.
+- **`tag.yml` calls `release.yml` directly** (a `workflow_call`), instead of relying on the tag push
   to trigger it: a tag pushed with the default `GITHUB_TOKEN` does **not** trigger `on: push: tags`
   workflows (GitHub's recursion guard). The `push: tags` trigger is kept anyway, because a tag *you*
   push by hand does trigger it.
+- **Two guards exist because the bump runs mid-PR, and both are load-bearing.** (1) `bump.yml` skips
+  when the branch tip is already a `chore(release):` commit — labels get removed and re-added, and a
+  second bump would double the version. (2) `ci.yml`'s changelog gate skips for the same reason:
+  after a bump the Unreleased section is deliberately empty again, so re-running `--check` on the
+  push the bump itself triggered would fail the release PR. That gate must check out
+  `pull_request.head.sha`, since the default `pull_request` checkout is the *merge* commit, whose
+  subject is never `chore(release):`.
 - Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
   partial). This is enforced twice: `bump_version.py --check` on the PR (via `ci.yml`, only for
   labelled PRs) and `release_notes.py` in the release preflight.
@@ -482,9 +499,10 @@ re-confirmed rather than changed.
   rewrite, and `--check`, the PR gate. **`packaging/release_notes.py`** — extracts a tag's section
   as the Release body.
 - **`.github/workflows/`** — `release.yml` (preflight → guide-pdf + windows-build → release),
-  `bump.yml` (labels → bump → tag → call release), `ci.yml` (suite + version agreement on every PR,
-  and the changelog gate on labelled PRs). All Python steps pin **3.14**, matching the boot the
-  verified Windows builds were made on.
+  `bump.yml` (label on the release PR → bump committed to that PR's branch), `tag.yml` (merge to
+  `main` → tag → call release), `ci.yml` (suite + version agreement on every PR, the changelog gate
+  on labelled PRs, and the source-branch gate that keeps `main` reachable only from `staging`). All
+  Python steps pin **3.14**, matching the boot the verified Windows builds were made on.
 - **`CHANGELOG.md`** — Keep-a-Changelog shape; `## Unreleased` is where entries accumulate.
 - **Tests:** `test/test_user_guide.py` (the fallback chain), `test/test_bump_version.py` (bump
   arithmetic, the changelog rewrite, and that the instruction comment never counts as release notes),
@@ -510,7 +528,7 @@ skipped — and each one fails the build with an error that names a font, not a 
 **`pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu`**, and `ci.yml` builds the
 PDF on every PR so a gap can never take a release down again.
 
-**If a release job does fail after the tag was pushed** (`bump.yml` tags before `release.yml` runs),
+**If a release job does fail after the tag was pushed** (`tag.yml` tags before `release.yml` runs),
 don't delete the tag and don't bump again: fix the workflow on `main` with an **unlabelled** PR, then
 **Actions → release → Run workflow** with **tag = the existing tag**. The dispatch uses the *fixed*
 workflow file from `main` but checks out the *tagged* source, so the artifact is still exactly the

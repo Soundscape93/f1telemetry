@@ -43,11 +43,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}      # the branch tip, not the merge commit
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - name: The Unreleased section is release-ready
-        run: python packaging/bump_version.py --check
+      - name: The unreleased section is release-ready
+        run: |
+          # Once bump.yml has run, those notes have moved into the new version's section and
+          # Unreleased is deliberately empty again - re-checking it here would fail the release PR.
+          if git log -1 --pretty=%s | grep -q '^chore(release):'; then
+            echo "Already prepared: $(git log -1 --pretty=%s)"
+            exit 0
+          fi
+          python packaging/bump_version.py --check
+  # GitHub can restrict who merges into main, but not which branch the PR comes from.
+  # Mark this check required on main to make "only staging merges to main" enforcaeable.
+  source-branch:
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only staging may merge to main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$HEAD_REF" != "staging" ]; then
+            echo "PRs into main must come from staging (this one is from '$HEAD_REF')."
+            exit 1
+          fi
   # The guide PDF used to build only during a release, so one missing TeX package took a release
   # down with the tag already pushed. Building it here costs ~2 min (nearly all apt) and fails on
   # the PR instead. Keep the two steps in sync with release.yml's guide-pdf job.

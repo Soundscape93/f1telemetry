@@ -174,9 +174,11 @@ weeks). Summary of the locked direction:
   adopted silently. Missing archives are surfaced (*"N of M updated"*) but don't block the stamp —
   they can never be rebuilt. `recorded_by` *is* preserved (fed back from the `captures` row).
   Windows re-verification pending on the next build.
-- **Phase 3 — DONE (2026-07-26).** **Label-driven release:** write the entry under `## Unreleased`,
-  label the PR `major`/`minor`/`patch`, merge — `bump.yml` bumps `src/version.py` + `pyproject.toml`
-  + the changelog on `main`, tags it, and calls `release.yml` (preflight gate + test suite →
+- **Phase 3 — DONE (2026-07-26; release flow moved off `main` 2026-08-01).** **Label-driven
+  release:** write the entry under `## Unreleased`, label the `staging` → `main` PR
+  `major`/`minor`/`patch`, merge — `bump.yml` bumps `src/version.py` + `pyproject.toml`
+  + the changelog **on the PR's branch**, and once the merge lands `tag.yml` tags `main` and calls
+  `release.yml` (preflight gate + test suite →
   `USER_GUIDE.pdf` on Linux via pandoc/xelatex + the PyInstaller Windows build → a **full** GitHub
   Release). CI **verifies** the version, never stamps it (`packaging/check_version.py`), so the
   artifact is exactly the tagged commit. The PDF and `roster_template.csv` ship **beside the exe**,

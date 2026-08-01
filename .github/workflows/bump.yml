@@ -1,20 +1,26 @@
 name: bump
 
-# Label-driven release: merging a PR labelled major / minor / patch bumps the version files and
-# the CHANGELOG on main, tags that commit, and calls the release workflow.
-# A merged PR with none of those labels releases nothing.
+# Release preparation, staging-flow edition. main is never pushed to by CI.
+#
+# Label the staging -> main PR major/minor/patch and the bump commit lands on `staging`, so the
+# version files + closed changelog section arrive in main through the PR itself. The tag and the
+# GitHub Release then happen on the merge - see tag.yml.
 on:
   pull_request:
-    types: [closed]
+    types: [labeled]
   workflow_dispatch:
     inputs:
       level:
-        description: "Bump level - use this when no PR label applies (e.g. the very first release)"
+        description: "Bump level - use when no PR label applies (e.g. the very first release)"
         required: true
         type: choice
         options: [major, minor, patch]
+      branch:
+        description: "Branch to bump (the release PR's head)"
+        required: false
+        default: staging
+        type: string
 
-# Two PRs merged seconds apart must not compute the same next version.
 concurrency:
   group: release-bump
   cancel-in-progress: false
@@ -24,12 +30,14 @@ permissions:
 
 jobs:
   bump:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    # Only the release PR prepares a release. A labelled PR into staging must do nothing -
+    # without this guard it would bump on the wrong merge entirely.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.base.ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
     permissions:
-      contents: write             # commits the bump to main and pushes the tag
-    outputs:
-      tag: ${{ steps.bump.outputs.tag }}
+      contents: write            # pushes the bump commit to the PR's head branch
     steps:
       - name: Resolve the bump level
         id: level
@@ -45,17 +53,17 @@ jobs:
           fi
           echo "level=$level" >> "$GITHUB_OUTPUT"
           if [ -n "$level" ]; then
-            echo "Bumping: $level"
+            echo "Preparing: $level"
           else
-            echo "No major/minor/patch label on this PR - nothing to release."
+            echo "No major/minor/patch label - nothing to prepare."
           fi
 
-      # No `path:` here: these scripts are plain files, nothing imports f1telemetry.src.*
-      - name: Check out main
+      # The branch itself, NOT the PR merge commit: the guard below reads the branch tip's subject.
+      - name: Check out the release branch
         if: steps.level.outputs.level != ''
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.head_ref || inputs.branch }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -63,32 +71,22 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Bump the version files and close the changelog section
-        id: bump
+      # Labels get removed and re-added; a second bump would double the version.
+      - name: Skip if this branch already carries its release commit
+        id: guard
         if: steps.level.outputs.level != ''
+        run: |
+          if git log -1 --pretty=%s | grep -q '^chore(release):'; then
+            echo "already prepared: $(git log -1 --pretty=%s)"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump the version files, close the changelog section, push to the PR branch
+        if: steps.level.outputs.level != '' && steps.guard.outputs.done != 'true'
         run: |
           version=$(python packaging/bump_version.py "${{ steps.level.outputs.level }}")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
-
-      - name: Commit and tag
-        if: steps.level.outputs.level != ''
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/version.py pyproject.toml CHANGELOG.md
-          git commit -m "chore(release): ${{ steps.bump.outputs.tag }}"
-          git tag -a "${{ steps.bump.outputs.tag }}" -m "${{ steps.bump.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.bump.outputs.tag }}"
-
-  # Called directly instead of relying on the tag push: a tag pushed with the default
-  # GITHUB_TOKEN does NOT trigger `on: push: tags` workflows (GitHub's recursion guard).
-  release:
-    needs: bump
-    if: needs.bump.outputs.tag != ''
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.bump.outputs.tag }}
+          git commit -m "chore(release): v$version"
+          git push origin HEAD:"${{ github.head_ref || inputs.branch }}"
