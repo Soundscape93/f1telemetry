@@ -340,6 +340,10 @@ Recording and ingest run on `QThread`s so the UI stays responsive. SQLite dislik
 shared across threads, so the **`IngestWorker` creates its own stores in-thread** (session, lap,
 capture — disposed in a `finally`), while the UI reads through stores owned by the main window on
 the GUI thread — both pointing at the same database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
+That cycle is also the recorder's own health check: `LiveUDPSource` asks for a large `SO_RCVBUF`
+(the OS default — 64 KB on Windows — holds only ~0.3 s of stream, so a descheduled process loses
+everything past it) and warns when one iteration runs far longer than the socket timeout, which
+distinguishes *we weren't running* from *the game wasn't sending*.
 
 **`ReingestWorker`** (packaging Phase 2) follows the same shape for the guided rebuild: its four
 stores (session, lap, capture, meta) are built on its own thread and disposed in one `finally`, it

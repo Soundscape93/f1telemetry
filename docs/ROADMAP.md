@@ -221,6 +221,37 @@ weeks). Summary of the locked direction:
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.
 
+### Open — Windows recorder stalls (found 2026-08-01, capture `20260729_182357`)
+On the packaged Windows build the recorder process stops being scheduled for minutes at a time.
+Windows' default 64 KB UDP receive buffer holds only ~0.3 s of telemetry at the ~0.2 MB/s stream
+rate, so everything past that is kernel-dropped; resumption shows a ~64 KB drain at 20–50 MB/s
+against the 0.18–0.21 MB/s normal rate. Cost in that capture: 143 s and 468 s blackouts, losing the
+Final Classification for Q1#2 and Q3 plus nearly all of Q3.
+
+**Leading cause: system idle/lock.** The two stalls were preceded by active periods of 320.8 s and
+307.2 s — a ~5-minute idle timer. The setup is a **PS5 sending telemetry to a laptop that only
+records**, so the laptop sees no keyboard/mouse input for the whole session; wheel and console input
+cannot reset its idle timer. This affects every console-based user with the same setup.
+
+Explicitly **not** a broadcast/firewall/bind issue: steady-state loss is only 0.25–0.41 %, the bind
+stays `0.0.0.0`, and broadcast stays the documented default — no user-facing IP setup change.
+Linux's larger default buffer (212992 B) does **not** explain why this is invisible there: ~1 s of
+cover wouldn't survive a multi-minute stall either. The difference is process suspension.
+
+**Done (v0.4.1).** `SO_RCVBUF` raised to 8 MB — at the ~0.2 MB/s stream rate that turns ~0.3 s of
+cover into ~40 s — and a per-iteration stall warning: a loop iteration far longer than the socket
+timeout means *we* weren't running, which separates a stall from the game simply not sending (the
+two look identical in a capture, but only one loses packets). Verified on Linux: buffer 212992 →
+8388608 B, no false positives on four game-silence gaps, and a screen lock mid-recording did **not**
+stall the recorder — which is why this never showed up in dev.
+
+**Still open.** Those make stalls visible and much cheaper, not gone: a long stall still loses data.
+The real fix is a `SetThreadExecutionState` keep-awake while recording, deliberately held until a
+Windows recording on this build confirms the idle-timer cause via the new `recorder stalled` log
+line — stall lines at ~5-minute intervals would nail it. EcoQoS opt-out held pending the same
+evidence. **The "missing middle laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost
+certainly the same root cause, not a separate bug.**
+
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:
   a missing Final Classification packet yields a reconstructed classification

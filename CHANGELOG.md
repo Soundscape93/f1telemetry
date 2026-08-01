@@ -18,6 +18,14 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
+stored moved, so existing captures, sessions and standings are unaffected.
+
+### Fixed
+- Recording: raised the UDP receive buffer well above the OS default (Windows' 64 KB held only
+  ~0.3 s of telemetry) and added a warning whenever the recorder is descheduled mid-capture, which
+  silently dropped packets — including Final Classification packets — on Windows.
+
 ## v0.4.0 — 2026-08-01
 
 **Re-ingest needed: no** — nothing about ingest changed; the nationality was already stored with
