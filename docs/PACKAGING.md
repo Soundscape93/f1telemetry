@@ -256,6 +256,15 @@ the self-updater is packaging Phase 4.)*
   then bumps `src/version.py` + `pyproject.toml`, renames the Unreleased section to
   `## vX.Y.Z — <date>`, commits that to `main`, tags it, and calls `release.yml`. **A merged PR with
   none of those labels releases nothing** — that is the "no release" path, not a failure.
+- **Grouping small changes: `staging` is the integration branch.** Small feature/fix branches are
+  PR'd into **`staging`**, not `main`, so several of them can ride one release when that makes more
+  sense than releasing each alone. When the group is ready, open **one PR from `staging` → `main`**
+  and put the `major`/`minor`/`patch` label **on that PR only**. Consequences worth remembering:
+  the small PRs into `staging` are unlabelled and therefore release nothing (the "no release" path
+  above), and `CHANGELOG.md` under `## Unreleased` must accumulate an entry from **every** grouped
+  change — the staging→main PR is what turns that whole section into one version, so anything
+  missing from it is missing from the release notes. The label reflects the *group*: one `minor`
+  feature among several `patch` fixes makes the release `minor`.
 - **CI verifies the version, it never stamps it** (`packaging/check_version.py`). The bump is a real
   commit on `main` *before* the tag, so the tag points at source that already carries the version:
   the published artifact is exactly the tagged commit, and an editable install in a checkout reports

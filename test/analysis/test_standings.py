@@ -22,10 +22,10 @@ def _reason():
     return getattr(ResultReason, "INVALID", None) or getattr(ResultReason, "NONE", 0)
 
 
-def _entry(name, number, position, points, is_ai=False):
+def _entry(name, number, position, points, is_ai=False, nationality=0):
     return ClassificationEntry(
         vehicle_index=position-1, position=position, driver_name=name, team_id=0,
-        race_number=number, nationality_id=0, is_player=False, grid_position=position, points=points,
+        race_number=number, nationality_id=nationality, is_player=False, grid_position=position, points=points,
         num_laps=5, num_pit_stops=1, best_lap_time_ms=70000, best_lap_num=3, total_race_time_s=300.0,
         penalties_time_s=0.0, num_penalties=0, result_status=ResultStatus.FINISHED,
         result_reason=_reason(), tyre_stints=(), is_ai=is_ai)
@@ -94,6 +94,20 @@ class ComputeStandingsTest(unittest.TestCase):
         self.assertEqual(by_number[0].points, 50, "Merged driver should have 50 points")
         self.assertEqual(by_number[0].race_number, 50, "Merged driver should have race number 50")
         self.assertEqual(by_number[0].driver_name, "Kev_50", "Merged driver should have the most recent name")
+
+    def test_carries_last_seen_nationality_for_the_flag(self):
+        """Nationality rides along for display only; it mus reach the row, and -  like name and 
+        number - the most recent round wins when a merged driver's captured value changes."""
+        race1 = make_session(1, SessionType.RACE, [("Kevin", 50, 1, 25, False, 39),
+                                                   ("Alice", 1, 2, 18, False, 0)])
+        race2 = make_session(2, SessionType.RACE, [("Kev_50", 50, 1, 25, False, 24)])
+
+        table = compute_standings([race1, race2], key=by_race_number)
+        rows = {r.race_number: r for r in table}
+        self.assertEqual(rows[50].nationality_id, 24, 
+                         "Merged driver should keep the most recently seen nationality")
+        self.assertEqual(rows[1].nationality_id, 0, 
+                         "Unmapped nationality should pass through untouched (flag_icon fails soft)")
 
     def test_standings_for_rounds_flattens(self):
         round1 = make_session(1, SessionType.RACE, [("Alice", 1, 1, 25)])

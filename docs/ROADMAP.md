@@ -3,6 +3,19 @@
 Planned work and deferred ideas. Not a commitment — a place to park intent so a future session
 (or the VS Code chat) has the context. Roughly ordered by when it's likely to matter.
 
+## Next release (grouping on `staging`)
+
+Two small features are expected to ship together in the next release, grouped on the `staging`
+branch (see PACKAGING → Versioning & dev release process for the mechanics):
+
+1. **Nationality flags in driver standings** — done, see Seasons UI below.
+2. **Missing-capture prune** — pruning `captures` rows whose file is gone; see Capture
+   compression below. Not implemented yet.
+
+Neither changes ingest output, so unless something else lands first this release is
+**re-ingest: no**. Both are user-visible, so `minor` is the likely label; `CHANGELOG.md` must
+list both under the same version.
+
 ## Seasons UI — remaining
 - **Done: 2b — per-season rosters + league standings.** `rosters/season_<id>.json` is the
   canonical per-season roster for LEAGUE seasons. Viewing a LEAGUE season is **read-only**: if
@@ -33,24 +46,21 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   same picker as an edit-calendar action on the detail page (the store already has
   `set_calendar()`).
 
-- **Next here: nationality flags in the driver standings table.** The season detail page's driver
-  standings should read like the session classification table, which already shows a flag in its
-  Driver cell. **Scope is deliberately narrow — the driver standings table only.** Constructor
-  standings get **no** flags: the packet's nationality is per *driver*, not per team, so there is
-  nothing truthful to render there. No new assets: reuse `ui/components/flags.py:flag_icon()` and
-  the bundled flag-icons SVGs (MIT, already attributed in `src/ui/assets/flags/ATTRIBUTION.md`),
-  and reuse the classification table's cell pattern — build the driver cell, then
-  `driver_item.setIcon(flag)` when `flag_icon()` returns one (see
-  `ui/components/classification_table.py`, the `flag_icon(entry.nationality_id)` block) — so icon
-  size and row height match between the two tables. **No storage change and no re-ingest:**
-  `nationality_id` is already stored on every classification entry.
-  *The actual work is aggregation plumbing:* `StandingRow` is `(position, driver_name,
-  race_number, points)` and carries no nationality, so `analysis/standings.py` must thread
-  `nationality_id` through `_Accumulator` onto `StandingRow` using the **same last-seen-wins
-  pattern already applied to `name`/`number`**. Fail soft: an unmapped or missing flag yields
-  `None` and the cell simply shows no icon (`flag_icon` already behaves this way). Nothing else
-  about standings behaviour changes.
-  **Explicitly out of scope:** team logos, platform logos, and any AI/PlayStation/EA branding row
+- **DONE — nationality flags in the driver standings table.** The season detail page's driver
+  standings now read like the session classification table: the Driver cell carries a flag icon,
+  built with the same "make the cell, then `setIcon()` when `flag_icon()` returns one" pattern, so
+  icon size and row height match between the two tables. **Scope stayed deliberately narrow — the
+  driver standings table only.** Constructor standings get **no** flags: the packet's nationality
+  is per *driver*, not per team, so there is nothing truthful to render there. No new assets (the
+  bundled flag-icons SVGs, MIT, attributed in `src/ui/assets/flags/ATTRIBUTION.md`) and **no
+  storage change / no re-ingest** — `nationality_id` was already stored on every classification
+  entry. The work was aggregation plumbing: `analysis/standings.py` threads `nationality_id`
+  through `_Accumulator` onto `StandingRow` with the **same last-seen-wins rule already applied to
+  `name`/`number`**, so a driver whose rows merge across rounds shows their most recent round's
+  flag. Nationality is display-only and never part of driver identity. Fail-soft throughout: an
+  unmapped id or a missing asset yields `None` and the cell simply shows no icon. Nothing else
+  about standings behaviour changed.
+  **Stayed out of scope:** team logos, platform logos, and any AI/PlayStation/EA branding row
   — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
@@ -248,11 +258,12 @@ weeks). Summary of the locked direction:
 - **Next — league capture import.** Build on the metadata table: an "import new captures from a
   shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
   `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
-- **Deferred — pruning `captures` rows whose file is gone.** Deleting a capture file leaves its
+- **Next — pruning `captures` rows whose file is gone** (queued for the next release; see "Next
+  release" at the top of this file). Deleting a capture file leaves its
   `captures` row behind, so every future re-ingest lists it under `ReingestSummary.missing` (and
   logs "no archive found"). Harmless and purely informational today — the pass continues and the
-  stored sessions are untouched — but the noise grows with every deleted recording. Not
-  implemented, because the design needs care: a **moved** file is indistinguishable from a
+  stored sessions are untouched — but the noise grows with every deleted recording. Still
+  unimplemented, because the design needs care: a **moved** file is indistinguishable from a
   **deleted** one at the row level (`path` is advisory by design — the content hash is the
   identity), so pruning on "file not at `path`" would silently forget a capture the user merely
   relocated, or one on a drive that happens to be offline. Any real fix needs a rescan/relocate

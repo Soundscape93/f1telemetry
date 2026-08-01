@@ -22,6 +22,11 @@ design depends on it.
   chat unless the author asks for it there.
 - **Do not run git commits.** When a change is ready, suggest appropriate commit message(s) for
   the author to run; never execute `git commit`.
+- **Releases group on `staging`.** Small feature/fix branches are PR'd into `staging`; when a
+  group is ready, one PR from `staging` → `main` carries the `major`/`minor`/`patch` label that
+  triggers the release. Every grouped change adds its own bullet under `## Unreleased` in
+  `CHANGELOG.md` — that section becomes the release notes for the whole group. See
+  `docs/PACKAGING.md` → Versioning & dev release process.
 - **Git root is nested.** The repository root is `f1telemetry/`, not the workspace root
   (`F1-TELEMETRY/`). Run git-oriented commands from `f1telemetry/`.
 - **Verify before "done".** Logic is proven in a throwaway sandbox and/or the `unittest` suite
@@ -150,7 +155,10 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   publicly. AI and human drivers sharing a race number no longer merge (invariant #7; needed
   `is_ai` on classification entries, `PIPELINE_VERSION` 2). AI drivers stay in the table as their
   own rows: driver standings are a full-grid championship view, not a members-only one.
-  *Next:* nationality flags in the driver standings table (ROADMAP → Seasons UI).
+  **Driver standings show nationality flags** (done): `StandingRow` carries a display-only
+  `nationality_id`, threaded through `_Accumulator` with the same last-seen-wins rule as
+  `name`/`number`, and the detail page sets the icon exactly as the classification table does.
+  Constructor standings get no flags — nationality is per driver, not per team.
 - **Missing Final Classification fallback:** if a session ends without the game's (once-sent)
   Final Classification packet, the assembler reconstructs a best-effort result from Lap Data +
   Session History (`Classification.is_reconstructed`), badged in the UI. Points can't be recovered
