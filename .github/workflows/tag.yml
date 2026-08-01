@@ -1,0 +1,71 @@
+name: tag
+
+# Tag and publish whatever version reached main. main is protected (PRs only), so CI never pushes
+# a commit here - the version arrives through the staging -> main PR, prepared by bump.yml.
+# Tags are NOT covered by branch protection, so this push is allowed.
+#
+# Every merge to main runs this; only a merge carrying an untagged version is a release, so
+# ordinary merges are a no-op. Keying on the version file rather than the commit subject keeps
+# this working whether the PR is merged or squashed.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write            # pushes the tag
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      # No `path:` here: these scripts are plain files, nothing imports f1telemetry.src.*
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0         # also fetches tags - the check below needs them
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Is main carrying a version that isn't tagged yet?
+        id: check
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'packaging'); \
+                               from check_version import source_version; print(source_version())")
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged - an ordinary merge, nothing to release."
+          else
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "Releasing v$version"
+          fi
+
+      - name: Version files agree
+        if: steps.check.outputs.tag != ''
+        run: python packaging/check_version.py "${{ steps.check.outputs.tag }}"
+
+      - name: Tag the merge
+        if: steps.check.outputs.tag != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.check.outputs.tag }}" -m "${{ steps.check.outputs.tag }}"
+          git push origin "${{ steps.check.outputs.tag }}"
+
+  # Called directly instead of relying on the tag push: a tag pushed with the default
+  # GITHUB_TOKEN does NOT trigger `on: push: tags` workflows (GitHub's recursion guard).
+  release:
+    needs: tag
+    if: needs.tag.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}

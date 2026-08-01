@@ -1,8 +1,13 @@
 # Changelog
 
 Notes here become the body of the GitHub Release. Write your entries under **Unreleased**;
-merging a PR labelled `major` / `minor` / `patch` renames that section to the new version, bumps
-`src/version.py` + `pyproject.toml`, tags the commit and publishes the build.
+labelling the `staging` → `main` pull request `major` / `minor` / `patch` renames that section to
+the new version and bumps `src/version.py` + `pyproject.toml` **on that PR's branch**, and merging
+it tags the commit and publishes the build.
+
+Small changes are grouped on `staging`, so several of them share one release: each adds its own
+bullet under **Unreleased**, and whatever is in that section when the release PR is labelled is
+exactly what ships.
 
 Every release must say whether a **re-ingest** is needed — that is "yes" whenever
 `PIPELINE_VERSION` in `src/version.py` moved since the previous release.
@@ -11,9 +16,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
-     Merging a PR labelled major/minor/patch turns this section into a release.
-     Small changes are grouped on `staging`: every one of them adds its bullet
-     here, and the staging->main PR carries the version label. -->
+     Labelling the staging->main PR major/minor/patch turns this section into
+     a release, so every grouped change must have added its bullet by then.
+     CI-only changes (workflows, gates) get no entry - nothing user-visible. -->
 
 **Re-ingest needed: no** — nothing about ingest changed; the nationality was already stored with
 every result.

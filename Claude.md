@@ -22,11 +22,12 @@ design depends on it.
   chat unless the author asks for it there.
 - **Do not run git commits.** When a change is ready, suggest appropriate commit message(s) for
   the author to run; never execute `git commit`.
-- **Releases group on `staging`.** Small feature/fix branches are PR'd into `staging`; when a
-  group is ready, one PR from `staging` → `main` carries the `major`/`minor`/`patch` label that
-  triggers the release. Every grouped change adds its own bullet under `## Unreleased` in
-  `CHANGELOG.md` — that section becomes the release notes for the whole group. See
-  `docs/PACKAGING.md` → Versioning & dev release process.
+- **Releases group on `staging`.** `main` is protected — it takes PRs from `staging` only, and CI
+  never pushes to it. Small feature/fix branches are PR'd into `staging`; when a group is ready,
+  one PR from `staging` → `main` carries the `major`/`minor`/`patch` label. **Labelling** starts
+  the version bump (committed to the PR's branch); **merging** is what tags and releases. Every
+  grouped change adds its own bullet under `## Unreleased` in `CHANGELOG.md` — that section becomes
+  the release notes for the whole group. See `docs/PACKAGING.md` → Versioning & dev release process.
 - **Git root is nested.** The repository root is `f1telemetry/`, not the workspace root
   (`F1-TELEMETRY/`). Run git-oriented commands from `f1telemetry/`.
 - **Verify before "done".** Logic is proven in a throwaway sandbox and/or the `unittest` suite
@@ -91,7 +92,8 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                                 #   the release scripts: check_version.py (verify tag ↔ version
                                 #   files), bump_version.py (label-driven bump + changelog),
                                 #   release_notes.py (a tag's CHANGELOG section → Release body)
-    .github/workflows/          # ci.yml (suite + gates), bump.yml (label → bump → tag),
+    .github/workflows/          # ci.yml (suite + gates), bump.yml (label → bump on the PR
+                                #   branch), tag.yml (merge to main → tag → call release),
                                 #   release.yml (build → full GitHub Release)
     CHANGELOG.md                # entries accumulate under "## Unreleased"; the bump closes it
     test/                       # unittest suites (test_*.py); run from the repo root:
@@ -232,11 +234,14 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   data moving), and the **DB is never protected, only rebuildable** from captures (same-user file
   permissions can't enforce anything and would break SQLite's `-wal`/`-journal` siblings) — so no
   "Open database" action anywhere. **Phase 3 (done 2026-07-26) = the release pipeline:** write the
-  entry under `## Unreleased`, label the PR `major`/`minor`/`patch`, merge — `bump.yml` bumps
-  `version.py` + `pyproject.toml` + the changelog on `main`, tags it, and calls `release.yml`
+  entry under `## Unreleased`, label the **`staging` → `main` PR** `major`/`minor`/`patch`, merge.
+  Labelling is what starts it — `bump.yml` bumps `version.py` + `pyproject.toml` + the changelog and
+  commits that **to the PR's branch**, so the version reaches `main` through the PR like any other
+  change; the merge then makes `tag.yml` tag it and call `release.yml`
   (gates + suite → `USER_GUIDE.pdf` via pandoc/xelatex on Linux → PyInstaller on Windows → a **full**
-  GitHub Release). CI **verifies** the version, never stamps it, so the artifact is exactly the
-  tagged commit. The guide PDF + `roster_template.csv` ship **beside the exe** (`paths.app_dir()` —
+  GitHub Release). **CI never pushes a commit to `main`** — that is the branch protection rule, and
+  the reason the bump moved off `main` (2026-08-01). CI **verifies** the version, never stamps it,
+  so the artifact is exactly the tagged commit. The guide PDF + `roster_template.csv` ship **beside the exe** (`paths.app_dir()` —
   a third path kind, distinct from `data_root()` and `_MEIPASS`), opened from the Help page along
   with the data / captures / logs folders. First published build still to be checked against the
   Phase-3 checklist. See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
