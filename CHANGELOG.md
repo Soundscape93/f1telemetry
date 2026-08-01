@@ -16,9 +16,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
-     Labelling the staging->main PR major/minor/patch turns this section into
-     a release, so every grouped change must have added its bullet by then.
-     CI-only changes (workflows, gates) get no entry - nothing user-visible. -->
+     Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.4.0 — 2026-08-01
 
 **Re-ingest needed: no** — nothing about ingest changed; the nationality was already stored with
 every result.
