@@ -22,6 +22,12 @@ design depends on it.
   chat unless the author asks for it there.
 - **Do not run git commits.** When a change is ready, suggest appropriate commit message(s) for
   the author to run; never execute `git commit`.
+- **Releases group on `staging`.** `main` is protected — it takes PRs from `staging` only, and CI
+  never pushes to it. Small feature/fix branches are PR'd into `staging`; when a group is ready,
+  one PR from `staging` → `main` carries the `major`/`minor`/`patch` label. **Labelling** starts
+  the version bump (committed to the PR's branch); **merging** is what tags and releases. Every
+  grouped change adds its own bullet under `## Unreleased` in `CHANGELOG.md` — that section becomes
+  the release notes for the whole group. See `docs/PACKAGING.md` → Versioning & dev release process.
 - **Git root is nested.** The repository root is `f1telemetry/`, not the workspace root
   (`F1-TELEMETRY/`). Run git-oriented commands from `f1telemetry/`.
 - **Verify before "done".** Logic is proven in a throwaway sandbox and/or the `unittest` suite
@@ -115,8 +121,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    order for legacy rows — the Grand Prix is the weekend's final race; earlier races are Sprints.
 6. **Traces are indexed by lap DISTANCE, not time.** The header is 29 bytes. The recorder binds
    `0.0.0.0:20777` (set the game's UDP to broadcast).
-7. **League humans often capture as name `"Player"`** (online-name sharing off), so league
-   identity resolves by **race number** first; online name only when public.
+7. **Race numbers are unique only among humans**, so league identity never keys on a number
+   alone: the AI field runs the real-world numbers, and an AI on 11 is not the member on 11.
+   Resolution is online-name alias first (humans often capture as `"Player"` with online-name
+   sharing off, hence the fallback), then race number **for human cars only** — `is_ai` is
+   captured on every classification entry for exactly this. Keys are tagged and resolved a whole
+   classification at a time (`LeagueRoster.session_keys`), so two cars in one session can never
+   share a standings row. See DECISIONS → Identity & rosters.
 8. **Format is detected per packet** from `header.packet_format` and dispatched on
    `(packet_format, packet_id)` via the registry — never a user-facing toggle.
 9. **Enums are stored as raw ints** and read back via `safe_enum` (returns the member, or the
@@ -141,7 +152,15 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (`CaptureStore`, keyed by a codec-independent content hash) makes captures queryable without
   decompressing them — the base for a future "import league captures from a folder" flow.
 - **Standings:** driver standings (by name or race number) and constructor standings; LEAGUE
-  standings resolve drivers through the per-season roster.
+  standings resolve drivers through the per-season roster — or, with no roster file, through the
+  in-memory capture seed, which is enough on its own when every member shares their online name
+  publicly. AI and human drivers sharing a race number no longer merge (invariant #7; needed
+  `is_ai` on classification entries, `PIPELINE_VERSION` 2). AI drivers stay in the table as their
+  own rows: driver standings are a full-grid championship view, not a members-only one.
+  **Driver standings show nationality flags** (done): `StandingRow` carries a display-only
+  `nationality_id`, threaded through `_Accumulator` with the same last-seen-wins rule as
+  `name`/`number`, and the detail page sets the icon exactly as the classification table does.
+  Constructor standings get no flags — nationality is per driver, not per team.
 - **Missing Final Classification fallback:** if a session ends without the game's (once-sent)
   Final Classification packet, the assembler reconstructs a best-effort result from Lap Data +
   Session History (`Classification.is_reconstructed`), badged in the UI. Points can't be recovered

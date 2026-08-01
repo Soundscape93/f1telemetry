@@ -202,6 +202,25 @@ what would trigger revisiting it.
   turn after start-up), the app is fully usable whichever button is pressed, and the rebuild itself
   is modeless and cancellable. Rationale: it can take minutes on a 1.5 GB weekend, and a blocking
   "please wait" on launch is exactly how a tester concludes the app has hung.
+- **The missing-capture prune is manual, confirmed, and re-verified — never a sweep.** `path` is
+  advisory by design, so at the row level a **moved** capture and a **deleted** one are the same
+  fact: "not where the app looked". Nothing cheap can tell them apart — the content hash could, but
+  proving it means decompressing and hashing every candidate archive. So the app never decides:
+  `find_missing_captures` (read) and `prune_missing_captures` (write) are deliberately split, the
+  user is shown every file name and last-known path, and only an explicit *Help → Clean up missing
+  captures* prunes anything. Three things make that safe enough to ship without the hash rescan.
+  **It re-resolves each hash at delete time** rather than trusting the list the dialog was built
+  from — a confirmation box stays open for minutes and an external drive can be reconnected inside
+  that window, so anything that turns up is kept and reported. **It is recoverable**: only a
+  `captures` row (+ its `capture_sessions` children, by cascade) is dropped, and re-importing the
+  file records it again — replace-by-hash, no duplicate. **It cannot reach the data that matters**:
+  sessions, laps, season assignments, rosters and tombstones are keyed on `session_uid` and not
+  FK'd to `captures` (core invariant #4), so no cascade can move a standing. The UI adds the one
+  judgement a filter can't: when *every* known capture is missing it warns first, because that is
+  the signature of a captures folder that moved, not of files that were deleted. *Deferred, and
+  kept possible on purpose:* a "locate moved capture by hash" step slots in **between** the scan
+  and the prune — it only needs a scanner, since `CaptureStore.relocate()` already exists and
+  `known_files()` gives it a name+size pre-filter so only real candidates get hashed.
 
 ## Identity & rosters
 - **League driver identity resolves by race number first.** Leagues enforce unique numbers, so
@@ -301,6 +320,25 @@ what would trigger revisiting it.
   sessions at one track, so matching a capture's track to the round makes assignment nearly
   one-click, and it keeps the weekend view and its assignment together. *A session-centric view
   in the Sessions surface is a fine complement later.*
+- **Bundled imagery is open-licensed only — no third-party logos.** The nationality flags are
+  flag-icons (MIT), vendored under `src/ui/assets/flags/` with the licence reproduced in
+  `ATTRIBUTION.md`; anything else we ship must clear the same bar. That rules out **team logos**
+  and **platform/publisher marks** (Steam / PlayStation / Xbox / EA, and the F1 marks themselves):
+  they are copyrighted artwork *and* registered trademarks, no open licence exists for them,
+  Wikipedia's non-free "fair use" rationale does not transfer to a redistributed app, and the
+  game's own licence conveys nothing to a third-party tool. Putting a build in a public release
+  zip is redistribution, and team branding in the UI would also imply an endorsement that doesn't
+  exist. **Team identity is text** (`team_display_name` — nominative use, fine); if it ever needs
+  to be more scannable the safe route is a hand-authored `team_id → colour` swatch (a colour value
+  isn't protectable), optionally plain-text initials in our own font, and — only if someone asks —
+  a *manual* user-supplied override folder the app never ships or fetches for them.
+- **A standings row's nationality is display-only, and only drivers get a flag.** Driver standings
+  show the same flag as the session result table, so `StandingRow` carries a `nationality_id` —
+  but it is a *label*, never part of driver identity: grouping stays on the tagged keys above, and
+  the field is updated last-seen-wins like `name`/`number`, so a merged driver shows their most
+  recent round's flag. Constructor standings get **no** flag: the packet reports nationality per
+  driver, not per team, so there is nothing truthful to render for a team row (and a team's flag
+  would be branding, which the rule above rules out anyway).
 - **Presentation helpers are Qt-free** (`ui/formatting.py`): the fiddly result-cell logic
   (winner time / gap / +laps / status) is a pure module so it's unit-testable without a display
   and reusable across views.

@@ -258,6 +258,18 @@ the self-updater is packaging Phase 4.)*
   (`staging`). Merging the PR carries that commit into `main`, where
   `.github/workflows/tag.yml` tags it and calls `release.yml`. **A PR with none of those labels
   releases nothing** — that is the "no release" path, not a failure.
+- **Grouping small changes: `staging` is the integration branch.** Small feature/fix branches are
+  PR'd into **`staging`**, not `main`, so several of them can ride one release when that makes more
+  sense than releasing each alone. When the group is ready, open **one PR from `staging` → `main`**
+  and put the version label **on that PR only**. Consequences worth remembering: the small PRs into
+  `staging` are unlabelled and therefore release nothing (the "no release" path above — and
+  `bump.yml` ignores them anyway, since it runs only when the PR's base is `main`), and
+  `CHANGELOG.md` under `## Unreleased` must accumulate an entry from **every** grouped change — the
+  staging→main PR is what turns that whole section into one version, so anything missing from it is
+  missing from the release notes. The label reflects the *group*: one `minor` feature among several
+  `patch` fixes makes the release `minor`. A required `source-branch` check enforces the "only
+  `staging` merges into `main`" half, because GitHub can restrict *who* merges but not *which
+  branch* a PR comes from. Emergency fixes route through `staging` too.
 - **CI never pushes a commit to `main`** — every change arrives through a PR, which is what the
   branch protection rule requires. This is why the bump lands on the PR branch rather than on
   `main`: the older workflow ran `git push origin HEAD:main`, which protection rejects

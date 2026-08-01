@@ -3,6 +3,18 @@
 Planned work and deferred ideas. Not a commitment — a place to park intent so a future session
 (or the VS Code chat) has the context. Roughly ordered by when it's likely to matter.
 
+## Next release (grouping on `staging`)
+
+Two small features are expected to ship together in the next release, grouped on the `staging`
+branch (see PACKAGING → Versioning & dev release process for the mechanics):
+
+1. **Nationality flags in driver standings** — done, see Seasons UI below.
+2. **Missing-capture prune** — done, see Capture compression below.
+
+Neither changes ingest output, so unless something else lands first this release is
+**re-ingest: no**. Both are user-visible, so `minor` is the likely label; `CHANGELOG.md` must
+list both under the same version.
+
 ## Seasons UI — remaining
 - **Done: 2b — per-season rosters + league standings.** `rosters/season_<id>.json` is the
   canonical per-season roster for LEAGUE seasons. Viewing a LEAGUE season is **read-only**: if
@@ -11,9 +23,10 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   created only by an explicit action — a "Create roster file" button materializes the seed so it
   can be hand-edited, or CSV import writes it. The user picks a CSV from their own storage, the
   app validates it, and writes the canonical JSON; the CSV remains outside the app and is never
-  the live roster path. League standings group drivers by their resolved member's **race number**
-  (`LeagueRoster.member_key`), so two roster-unknown humans both shown as `"Player"` never
-  collapse into one row. LEAGUE
+  the live roster path. League standings group drivers by **tagged keys resolved a whole
+  classification at a time** (`LeagueRoster.session_keys`): an online-name alias first, then race
+  number *for human cars only* — race numbers are unique only among humans, so an AI sharing a
+  member's number is never that member — and two cars in one session can never share a row. LEAGUE
   driver standings use `league_standings_for_rounds`; career/My-Team/Grand Prix stay on
   `standings_for_rounds`. LEAGUE detail/weekend displays prefer captured public online names;
   if the capture only says `"Player"` or blank, display falls back to the first roster
@@ -31,6 +44,23 @@ Planned work and deferred ideas. Not a commitment — a place to park intent so 
   (`calendar_rules`), the widget in `ui/components/calendar_picker.py`. *Next here:* surface the
   same picker as an edit-calendar action on the detail page (the store already has
   `set_calendar()`).
+
+- **DONE — nationality flags in the driver standings table.** The season detail page's driver
+  standings now read like the session classification table: the Driver cell carries a flag icon,
+  built with the same "make the cell, then `setIcon()` when `flag_icon()` returns one" pattern, so
+  icon size and row height match between the two tables. **Scope stayed deliberately narrow — the
+  driver standings table only.** Constructor standings get **no** flags: the packet's nationality
+  is per *driver*, not per team, so there is nothing truthful to render there. No new assets (the
+  bundled flag-icons SVGs, MIT, attributed in `src/ui/assets/flags/ATTRIBUTION.md`) and **no
+  storage change / no re-ingest** — `nationality_id` was already stored on every classification
+  entry. The work was aggregation plumbing: `analysis/standings.py` threads `nationality_id`
+  through `_Accumulator` onto `StandingRow` with the **same last-seen-wins rule already applied to
+  `name`/`number`**, so a driver whose rows merge across rounds shows their most recent round's
+  flag. Nationality is display-only and never part of driver identity. Fail-soft throughout: an
+  unmapped id or a missing asset yields `None` and the cell simply shows no icon. Nothing else
+  about standings behaviour changed.
+  **Stayed out of scope:** team logos, platform logos, and any AI/PlayStation/EA branding row
+  — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
 - **Sessions** — a list of every captured session; likely also a *session-centric* assignment
@@ -229,6 +259,25 @@ weeks). Summary of the locked direction:
 - **Next — league capture import.** Build on the metadata table: an "import new captures from a
   shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
   `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
+- **Done — pruning `captures` rows whose file is gone.** Deleting a capture file left its
+  `captures` row behind, so every future re-ingest listed it under `ReingestSummary.missing` (and
+  logged "no archive found") — harmless, but the noise grew with every deleted recording.
+  *Help → Clean up missing captures* now clears them: `pipeline.find_missing_captures` lists what
+  `resolve_capture_path` can't find, the user confirms a dialog showing every file name and
+  last-known path, and `pipeline.prune_missing_captures` drops those rows (children by cascade).
+  Metadata only — no file is deleted, and no session, assignment or roster can be reached.
+  The design problem the deferral was about is **not** solved, it is **handed to the user**: a
+  moved file and a deleted one are still indistinguishable at the row level, so the app never
+  decides on its own. Manual action, explicit confirmation, a re-resolve at delete time (so a
+  drive reconnected while the dialog waits keeps its capture), and a warning when *every* capture
+  is missing — the signature of a moved folder. No schema change, no `PIPELINE_VERSION` bump.
+  See DECISIONS → Storage.
+- **Next — locate a moved capture by content hash.** The other half of the above, and now the only
+  piece missing: scan the captures folder, match each file's hash against `captures`, and
+  `relocate()` the row instead of forgetting it. Cheaper than it sounds — `relocate()` already
+  exists, so this is purely a scanner, and `known_files()` pre-filters by name+size so only real
+  candidates get decompressed and hashed. It slots in **between** `find_missing_captures` and
+  `prune_missing_captures`, which were split for exactly this.
 - **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
   never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
   (it isn't in the file), so the column exists now; wiring waits for the import flow above.

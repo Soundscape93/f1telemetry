@@ -22,12 +22,16 @@ from ..protocol.enums import RACE_SESSION_TYPES
 
 @dataclass(frozen=True)
 class StandingRow:
-    """One row in a season's standings: a driver and their total points across the season."""
+    """One row in a season's standings: a driver and their total points across the season.
+    
+    ``nationality_id`` is carried only so the view can show a flag beside the name; it is the
+    last-seen value for the row, never part of the driver identity.
+    """
     position: int
     driver_name: str
     race_number: int
     points: int
-
+    nationality_id: int
 
 @dataclass(frozen=True)
 class ConstructorRow:
@@ -52,6 +56,7 @@ class _Accumulator:
     """Mutable accumulator for a driver's total points across a season."""
     name: str
     number: int
+    nationality_id: int
     points: int = 0
 
 
@@ -93,17 +98,20 @@ def compute_standings(
         for entry, k in zip(entries, keys, strict=True):
             acc = totals.get(k)
             if acc is None:
-                acc = _Accumulator(name=name_of(entry), number=entry.race_number, points=0)
+                acc = _Accumulator(name=name_of(entry), number=entry.race_number,
+                                   nationality_id=entry.nationality_id, points=0)
                 totals[k] = acc
             acc.points += entry.points
             # keep the most recently seen name/number as the display identity; for a league
             # member whose shown name drifts between lobbies, the latest round wins.
             acc.name = name_of(entry)
             acc.number = entry.race_number
+            acc.nationality_id = entry.nationality_id
 
     ranked = sorted(totals.values(), key=lambda a: (-a.points, a.name))
     return tuple(
-        StandingRow(position=i, driver_name=a.name, race_number=a.number, points=a.points)
+        StandingRow(position=i, driver_name=a.name, race_number=a.number, points=a.points,
+                    nationality_id=a.nationality_id)
         for i, a in enumerate(ranked, start=1)
     )
 
