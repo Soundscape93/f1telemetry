@@ -71,13 +71,14 @@ jobs:
         with:
           python-version: "3.14"
 
-      # Labels get removed and re-added; a second bump would double the version.
+      # Labels get removed and re-added; a second bump would double the version. Keyed on the
+      # changelog/version pair rather than the tip commit subject, so a merge landing after the
+      # bump can't hide the release commit (tag.yml keys on the version file for the same reason).
       - name: Skip if this branch already carries its release commit
         id: guard
         if: steps.level.outputs.level != ''
         run: |
-          if git log -1 --pretty=%s | grep -q '^chore(release):'; then
-            echo "already prepared: $(git log -1 --pretty=%s)"
+          if python packaging/bump_version.py --is-prepared; then
             echo "done=true" >> "$GITHUB_OUTPUT"
           fi
 

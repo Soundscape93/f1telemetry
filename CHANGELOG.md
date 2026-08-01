@@ -16,6 +16,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
+     Carry the **Known issues** list forward from the last release and prune whatever is fixed:
+     dropping it silently tells testers the issues went away. (It was lost after v0.3.0 this way.)
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
 ## v0.4.2 — 2026-08-01
@@ -30,6 +32,17 @@ stored moved, so existing captures, sessions and standings are unaffected.
   minutes of telemetry and, because it usually struck once the session ended, the final
   classification along with it. The screen now stays on for as long as you are recording and
   returns to your normal power settings as soon as you stop.
+
+**Known issues**
+
+- Recordings made **before this version on Windows** may be missing stretches of telemetry, and
+  with them the final classification, if the machine slept mid-session. Nothing can recover that —
+  the data never reached the app — so re-reading those captures won't bring it back. Sessions with
+  a missing classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 ## v0.4.1 — 2026-08-01
 
