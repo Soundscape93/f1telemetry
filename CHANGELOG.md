@@ -18,6 +18,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.4.1 — 2026-08-01
+
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
 stored moved, so existing captures, sessions and standings are unaffected.
 
