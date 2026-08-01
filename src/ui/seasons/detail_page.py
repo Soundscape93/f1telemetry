@@ -29,6 +29,7 @@ from ...domain.roster import LeagueRoster
 from ...domain.season import ROSTER_SEASON_MODES, grand_prix_session
 from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
+from ..components.flags import flag_icon
 from ..formatting import race_winner_summary
 from ..style import MUTED_TEXT_QSS
 from .labels import season_title
@@ -197,7 +198,11 @@ class DetailPage(QWidget):
         self._standings_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             self._standings_table.setItem(i, 0, cell(str(row.position)))
-            self._standings_table.setItem(i, 1, cell(row.driver_name))
+            driver_item = cell(row.driver_name)
+            flag = flag_icon(row.nationality_id)
+            if flag is not None:
+                driver_item.setIcon(flag)
+            self._standings_table.setItem(i, 1, driver_item)
             self._standings_table.setItem(i, 2, cell(str(row.race_number)))
             self._standings_table.setItem(i, 3, cell(str(row.points)))
         fit_table_height(self._standings_table)

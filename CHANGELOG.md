@@ -11,7 +11,16 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
-     Merging a PR labelled major/minor/patch turns this section into a release. -->
+     Merging a PR labelled major/minor/patch turns this section into a release.
+     Small changes are grouped on `staging`: every one of them adds its bullet
+     here, and the staging->main PR carries the version label. -->
+
+**Re-ingest needed: no** — nothing about ingest changed; the nationality was already stored with
+every result.
+
+- **New:** driver standings now show each driver's nationality flag, the same flag already shown
+  in the session result tables. Constructor standings are unchanged — the game reports nationality
+  per driver, not per team. A driver whose nationality isn't recognised simply shows no flag.
 
 ## v0.3.0 — 2026-07-31
 
