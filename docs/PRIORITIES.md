@@ -21,7 +21,11 @@ made in the docs, and none of them depend on anything unbuilt.
 
 - A1 track-map cache invalidation — **done 2026-08-02**
 - C2 WAL mode + C3 database backup (`VACUUM INTO`) — **done 2026-08-02**
-- E6 edit-calendar action
+- E6 edit-calendar action — **done 2026-08-02**
+
+**Cycle 1 is complete.** Everything above shipped to `staging`; the grouped `staging` → `main`
+release PR is what turns it into a version. **Cycle 2 is next** — do not start it without
+re-reading the cycle plan above.
 - The documentation-truth pass (A2, F1, F2, F4 + the stale-doc corrections) — **done 2026-08-02**
 
 *Order note:* C2/C3 moved ahead of E6 (the P1 table below lists E6 first). E6 is the largest of
@@ -55,13 +59,13 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 |---|---|---|---|
 | A1 | Canonical track-map cache is never invalidated on re-ingest | **done 2026-08-02** | ROADMAP → Laps 2b.1; DECISIONS → UI |
 | A2 | Final Classification is sent repeatedly, not once — docs corrected | **done 2026-08-02** | TELEMETRY_NOTES; DECISIONS |
-| E6 | Edit-calendar action on the season detail page | open | ROADMAP → Seasons UI 2c |
+| E6 | Edit-calendar action on the season detail page | **done 2026-08-02** | ROADMAP → Seasons UI 2c |
 | C2 | Enable WAL mode | **done 2026-08-02** | PACKAGING → Data layout & the database |
 | C3 | "Back up database…" via `VACUUM INTO` | **done 2026-08-02** | PACKAGING → Data layout & the database |
 
-E6 is all that is left of Cycle 1. See *Recently closed* for what C2/C3 settled — including the
-fact that the "open the app twice" checklist item passed *before* WAL existed, so it wants a
-re-test that actually exercises it.
+Nothing is left in P1. See *Recently closed* for what each item settled — including the fact that
+the "open the app twice" checklist item passed *before* WAL existed, so it wants a re-test that
+actually exercises it.
 
 ## P2 — after P1
 
@@ -129,6 +133,30 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **E6 — edit-calendar action.** Done 2026-08-02; the last item of Cycle 1. `EditCalendarPage` is a
+  fifth page in `SeasonsView`, reusing the create page's `CalendarPicker` unchanged — which is what
+  it was factored into `components/` for.
+  **The open design question is now answered: option (c), restrict the edit.** A round with an
+  assigned session keeps **both** its `round_number` and its `track_id`, which makes orphaning
+  impossible rather than merely manageable (options (a) warn-and-preserve and (b) warn-and-unassign
+  both accepted orphans and were rejected). The rule collapses to a **positional check** — for each
+  locked round *(n, t)*, the proposed calendar must still have round *n* at track *t*. One check
+  covers reorder, insert-before, delete-before and truncate, including the case a plain "no
+  reordering" rule misses: inserting a round at position 3 renumbers an assigned round 5 into
+  round 6 without anything being dragged. It also correctly *permits* an edit that leaves a locked
+  round where it was, which matters where a track may legitimately repeat.
+  **Enforced in `SeasonStore.set_calendar`, not only in the page** — the invariant is guaranteed at
+  the single write point rather than remembered at one call site, and it is testable without Qt.
+  `protect_assigned=False` is the documented escape hatch; nothing passes it.
+  **Deliberate limitation, chosen not discovered:** once round 1 has a session assigned, nothing can
+  be inserted before it — the calendar becomes freely editable from the last assigned round onward,
+  plus reordering among unassigned rounds that don't cross a locked one. Recorded in DECISIONS.
+  **Deliberately skipped:** greying out locked rows in the picker (fighting Qt's `InternalMove`
+  drag-drop to reject specific drops is fiddly and untestable here) — the page names the locked
+  rounds up front instead, and refuses at save. Also out of scope: editing mode / number / nickname
+  / game format. Changing the format would move the track pool out from under the calendar (Madrid
+  is 2026-only); a wrong-mode season is still deleted and recreated. Allowing that *before any
+  session is assigned* is a reasonable future P2/P3.
 - **C2 / C3 — WAL mode and a `VACUUM INTO` backup.** Done 2026-08-02, one branch, as PACKAGING
   required ("`VACUUM INTO` is what makes WAL safe to hand around"). The blocker was structural, not
   technical: all five stores are repositories over the *same* file and each builds its own engine

@@ -127,7 +127,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`sessions.py`** — `SessionStore`: persists classification + session metadata + `game_mode`;
   `session_uid` stored as TEXT (uint64 high-bit); tyre stints as a JSON column; enums as raw
   ints → `safe_enum` on load; `save()` is idempotent (replace-by-uid).
-- **`seasons.py`** — `SeasonStore`: create/get/list/delete seasons, `set_calendar`,
+- **`seasons.py`** — `SeasonStore`: create/get/list/delete seasons, `set_calendar` (which
+  **refuses** an edit that would move, re-point or drop a round holding an assigned session —
+  raises `CalendarConflictError`; the rule lives in `domain/calendars`, see DECISIONS),
   `assign_session` / `unassign_session`, `assignments_for_season`,
   `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
@@ -245,8 +247,9 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   The SVG-authored → QGraphicsScene path-item approach from DECISIONS; authoring template in
   `docs/car_template.svg`.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
-  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
-  → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
+  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the five pages (overview → create
+  → detail → weekend, plus the calendar editor) and does nothing but wire their **navigation
+  signals** to page switches —
   each page owns its own widgets, its own route state (e.g. the loaded season/round id), and its
   own data operations (create, delete, assign, roster create/import). Pages never reference
   siblings; they emit intent (`season_requested`, `weekend_requested`, `create_requested`,
@@ -260,7 +263,12 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   fallback signal re-navigates last and wins. Pages: `overview_page.py` (season cards / empty
   state + delete), `create_page.py` (the form + create), `detail_page.py` (calendar + standings +
   LEAGUE roster panel), `weekend_page.py` (round-centric session assignment: a capture picker
-  filtered to the round's track, plus each assigned session's foldable classification).
+  filtered to the round's track, plus each assigned session's foldable classification),
+  `edit_calendar_page.py` (re-author an existing calendar with the same `CalendarPicker` the create
+  page uses; names the locked rounds up front and lets `set_calendar` refuse the rest — validation
+  at save rather than affordances in the picker, so the rule is testable without a `QApplication`).
+  It is **not** in `refresh()`'s if-chain on purpose: an ingest completing mid-edit must not reload
+  the page and discard work in progress.
   `labels.py` holds the shared `mode_label` / `format_label` / `season_title` helpers.
   LEAGUE detail/weekend pages are roster-aware: they load-or-seed the season JSON read-only, offer
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
