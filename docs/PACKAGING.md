@@ -270,6 +270,20 @@ the self-updater is packaging Phase 4.)*
   `patch` fixes makes the release `minor`. A required `source-branch` check enforces the "only
   `staging` merges into `main`" half, because GitHub can restrict *who* merges but not *which
   branch* a PR comes from. Emergency fixes route through `staging` too.
+- **Branch off `staging`, never off `main`.** A feature/fix branch based on `main` misses whatever
+  is already on `staging` but unreleased, so it is developed against a stale base and its merge
+  base is some older common ancestor rather than current `staging` — which shows unrelated changes
+  in the PR diff and invites phantom conflicts. Branching off `staging` makes the merge base
+  `staging` itself, so the PR diff is exactly the change. Keep branches short-lived and merge
+  `staging` back in if it moves while you work.
+- **Merge strategy: squash into `staging`, merge commit into `main`.** Feature/fix → `staging` is
+  **squashed**, so `staging` carries one tidy commit per change. `staging` → `main` uses a **merge
+  commit** (settled from v0.4.2), because a squash there discards the ancestry link: `main` then
+  holds content identical to `staging` but with no shared history, the two branches diverge
+  permanently, and reconciling them needs a `Merge branch 'main' into staging` back-merge. That
+  back-merge is what pushed the `chore(release):` commit off the branch tip and broke the release
+  guards during v0.4.2 (see the guard note below). A merge commit keeps the histories connected and
+  makes the back-merges unnecessary.
 - **CI never pushes a commit to `main`** — every change arrives through a PR, which is what the
   branch protection rule requires. This is why the bump lands on the PR branch rather than on
   `main`: the older workflow ran `git push origin HEAD:main`, which protection rejects
