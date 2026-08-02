@@ -248,9 +248,12 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (gates + suite → `USER_GUIDE.pdf` via pandoc/xelatex on Linux → PyInstaller on Windows → a **full**
   GitHub Release). **CI never pushes a commit to `main`** — that is the branch protection rule, and
   the reason the bump moved off `main` (2026-08-01). CI **verifies** the version, never stamps it,
-  so the artifact is exactly the tagged commit. The guide PDF + `roster_template.csv` ship **beside the exe** (`paths.app_dir()` —
+  so the artifact is exactly the tagged commit. The guide PDF, `roster_template.csv`, `LICENSE` and
+  `NOTICE.md` ship **beside the exe** (`paths.app_dir()` —
   a third path kind, distinct from `data_root()` and `_MEIPASS`), opened from the Help page along
-  with the data / captures / logs folders. The published build has been checked against the Phase-3
+  with the data / captures / logs folders. Shipping the notices is an **LGPL v3 obligation** for the
+  bundled Qt/PySide6, not a courtesy — the repo is *source-available, not open source* (`LICENSE`),
+  and `NOTICE.md` also carries the unofficial-tool / trademark / telemetry-data disclaimer. The published build has been checked against the Phase-3
   checklist (2026-08-02) and passes; **Phase 4 is what's left** (macOS/Linux artifacts, Inno Setup
   installer, real auto-updater). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 

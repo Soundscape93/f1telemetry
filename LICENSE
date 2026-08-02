@@ -1,0 +1,56 @@
+F1 Telemetry
+Copyright (c) 2026 Kevin Fust (Soundscape93). All rights reserved.
+
+This software is SOURCE-AVAILABLE, NOT OPEN SOURCE. The source code is published so it
+can be read, studied and audited. Publishing it does not place it in the public domain
+and does not grant permission to reuse it.
+
+1. WHAT YOU MAY DO
+
+   a. Download and run official release builds published by the copyright holder.
+   b. Read the source code and keep a private copy for reading, study or evaluation.
+   c. Build the software from this source for your own private use.
+
+2. WHAT YOU MAY NOT DO WITHOUT PRIOR WRITTEN PERMISSION
+
+   a. Redistribute the software in source or binary form, modified or unmodified,
+      including publishing your own builds of it.
+   b. Publish or distribute a modified version, or a work derived from this source,
+      as your own project or product.
+   c. Incorporate any part of this source code into another project.
+   d. Sell, rent, sublicense, or offer the software as a service.
+   e. Remove or alter this licence, the copyright notices, or the notices in NOTICE.md.
+
+   Permission for any of these may be granted individually. Ask.
+
+3. THIRD-PARTY COMPONENTS
+
+   This software includes, and its release builds bundle, third-party components
+   licensed separately by their own authors. This licence does not apply to them and
+   does not restrict your rights under their licences. They are listed in NOTICE.md.
+
+4. CONTRIBUTIONS
+
+   This is a personal project and is not accepting unsolicited contributions. Pull
+   requests may be closed without review. If a contribution is invited and accepted,
+   you agree that the copyright holder may use, modify and relicense it as part of
+   this software.
+
+5. TRADEMARKS AND AFFILIATION
+
+   This is an unofficial tool. See NOTICE.md.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+7. GITHUB
+
+   While this repository is public on GitHub, GitHub's Terms of Service grant every
+   GitHub user the right to view and fork it within GitHub. This licence does not
+   change that. Section 2 still governs what may be done with such a fork.

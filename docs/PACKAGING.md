@@ -317,7 +317,10 @@ the self-updater is packaging Phase 4.)*
   version files agree). The tag forms of both only make sense *after* a bump has happened, or if you
   are tagging by hand.
 - **Release zip contents:** the one-folder build, plus **`USER_GUIDE.pdf`** (convert
-  `docs/USER_GUIDE.md`) and **`roster_template.csv`** at the top level. Publish a **full** GitHub
+  `docs/USER_GUIDE.md`), **`roster_template.csv`**, **`LICENSE`** and **`NOTICE.md`** at the top
+  level. The last two are **not optional**: the bundle links Qt/PySide6 under **LGPL v3**, which
+  requires the licence notice to reach whoever receives the binary, so the `windows-build` job
+  copies them in and the bundle sanity-check fails without them. Publish a **full** GitHub
   Release — not a draft/prerelease, or `/releases/latest` returns 404 and the in-app update check
   can't see it.
 - **Do not break dev:** the `sys.frozen`-aware `paths.py` keeps source runs on CWD-relative dirs.
@@ -518,8 +521,10 @@ re-confirmed rather than changed.
 - **`src/user_guide.py`** — Qt-free `resolve_guide()` returning a `GuideTarget` (a local path *or* a
   URL — the caller must know which, since only a path goes through `QUrl.fromLocalFile`). The three
   steps are injectable, so the chain is tested without a frozen build.
-- **`src/ui/help_page.py`** — "Open user guide" plus a row of **Open data / captures / logs folder**
-  buttons (`_FOLDER_ACTIONS` → `QDesktopServices.openUrl`). `QDesktopServices` reports failure only
+- **`src/ui/help_page.py`** — "Open user guide" and **"Licences & notices"**, plus a row of
+  **Open data / captures / logs folder** buttons (`_FOLDER_ACTIONS` → `QDesktopServices.openUrl`)
+  and an **About** block carrying the unofficial-tool / trademark / data-responsibility summary
+  (`_ABOUT_HTML`; the full text is `NOTICE.md`). `QDesktopServices` reports failure only
   by returning `False`, so `_open()` surfaces that in a dialog — a windowed build has no console.
   Still no "Open database" action, deliberately.
 - **`packaging/check_version.py`** — the verify-don't-stamp gate (tag ↔ `src/version.py` ↔
@@ -618,8 +623,11 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 Phase-3 items (first *published* build — these need the Release, not just a local build):
 
 - [ ] Installed from the **Release zip downloaded from GitHub**, not a local `dist/` folder.
-- [ ] `USER_GUIDE.pdf` and `roster_template.csv` are visible **beside the exe**, not in `_internal/`.
+- [ ] `USER_GUIDE.pdf`, `roster_template.csv`, `LICENSE` and `NOTICE.md` are visible **beside the
+      exe**, not in `_internal/`.
 - [ ] Help → **Open user guide** opens the bundled PDF (proves `app_dir()`, not `_MEIPASS`).
+- [ ] Help → **Licences & notices** opens the bundled `NOTICE.md` (the LGPL notice for the bundled
+      Qt has to reach the user — the GitHub fallback means a failure here is silent otherwise).
 - [ ] Help → **Open data folder** / **captures** / **logs** each open Explorer at the right folder.
 - [ ] Help → **Check for updates** against the real published Release says "up to date" (this path
       has never run against an existing Release — until now the API answered 404).

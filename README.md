@@ -3,6 +3,9 @@
 A desktop app that captures **F1 25 / F1 26** UDP telemetry, analyses your laps, and tracks
 league / multiplayer results and standings for a private racing league.
 
+> An unofficial fan-made tool — not affiliated with or endorsed by Formula 1, the FIA, EA or
+> Codemasters. See [`NOTICE.md`](NOTICE.md).
+
 It records the game's telemetry stream to a portable capture file, reads sessions, laps and
 results out of it, and presents them as season standings, weekend results and per-lap telemetry
 analysis (traces, track map, car status). Built for a small private league; league members run
@@ -20,6 +23,10 @@ are in the app under **Help**.
 
 The build is unsigned, so SmartScreen shows "Windows protected your PC" → **More info → Run
 anyway**.
+
+Results and telemetry are a best-effort reading of the game's UDP stream and can be incomplete —
+they are not official results. Captures can contain other players' online names, so share them only
+with people who expect it. Details in [`NOTICE.md`](NOTICE.md).
 
 ## For developers
 
@@ -58,3 +65,15 @@ is version-agnostic.
 labelled (`major`/`minor`/`patch`) `staging` → `main` PR cuts a release — labelling bumps the
 version, merging tags and publishes. Every change adds a bullet under `## Unreleased` in
 [`CHANGELOG.md`](CHANGELOG.md). Details in `docs/PACKAGING.md`.
+
+## Licence
+
+**Source-available, not open source.** The code is published to be read, studied and audited — not
+reused. You may download and run the official release builds, and build from source for your own
+private use; redistribution, modified builds, and reuse in other projects need permission first.
+Full terms in [`LICENSE`](LICENSE); permission can be granted individually, so just ask.
+
+Third-party components (Qt/PySide6 under **LGPL v3**, NumPy, Apache Arrow, SQLAlchemy, PyQtGraph,
+zstandard, and the MIT-licensed flag icons) keep their own licences — see [`NOTICE.md`](NOTICE.md).
+
+Not accepting unsolicited contributions — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).

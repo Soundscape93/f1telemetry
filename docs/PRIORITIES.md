@@ -128,6 +128,18 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **F7 — Licence, third-party notices and the F1 disclaimer.** Done 2026-08-02. The repo stays
+  **public** under a *source-available* `LICENSE` (read it, run the official builds, build it
+  privately — but no redistribution, modified builds or reuse elsewhere without permission).
+  Going private was considered and rejected: a private repo **cannot serve the update check**,
+  because `/releases/latest` and release assets both 404 for unauthenticated clients and
+  `src/update_check.py` ships no token by design. Forking on GitHub itself can't be forbidden
+  (GitHub's ToS grants every user that right), so the licence targets redistribution instead.
+  `NOTICE.md` carries the unofficial-tool/trademark disclaimer, the data-responsibility and
+  accuracy notes, and the third-party licences — shipping it beside the exe is an **LGPL v3
+  obligation** for the bundled Qt/PySide6, not a courtesy, so `release.yml`'s bundle
+  sanity-check now fails without it. A separate public `f1telemetry-releases` repo was discussed
+  and **deliberately deferred** until there are non-tester users; nothing depends on it.
 - **C1 — Phase-3 clean-machine checklist on a downloaded Release zip.** Done (confirmed
   2026-08-02); the author intends to re-run it for most future releases. PACKAGING build history
   updated.

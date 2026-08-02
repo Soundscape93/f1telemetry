@@ -149,3 +149,25 @@ what happened. Don't send a hand-edited database — see section 6.
 
 - **Switching the Windows light/dark theme while the app is open** leaves some text the wrong
   colour. Restart the app to refresh the theme.
+
+## Licence & notices
+
+**F1 Telemetry is an unofficial fan-made tool.** It is not affiliated with, authorised by, or
+endorsed by Formula 1, the FIA, EA or Codemasters. F1 and related marks, and all team, driver and
+circuit names, belong to their respective owners.
+
+**The app only listens to your own game.** It records the UDP stream your copy of the game
+broadcasts on your own network — it never connects to the publisher's servers and never modifies
+the game.
+
+**Your captures, your responsibility.** Recordings can contain other players' online names and
+results. Share them only with people who expect it, and follow the game's own terms of service.
+
+**Results are best-effort, not official.** Lap times, standings and telemetry are read from a UDP
+stream that can drop packets, especially over Wi-Fi. A session that ends without a final
+classification is reconstructed from what's available and clearly marked in the app.
+
+The app is source-available, not open source: you may download and run the official builds, but
+redistribution and reuse need permission. The full licence and the third-party notices — Qt/PySide6
+under LGPL v3, and the MIT-licensed nationality flags among others — are in `LICENSE` and
+`NOTICE.md`, shipped next to the app and available from **Help → Licences & notices**.
