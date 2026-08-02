@@ -16,9 +16,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
-     Carry the **Known issues** list forward from the last release and prune whatever is fixed:
-     dropping it silently tells testers the issues went away. (It was lost after v0.3.0 this way.)
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.5.0 — 2026-08-02
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
 stored moved, so existing captures, sessions and standings are unaffected.
