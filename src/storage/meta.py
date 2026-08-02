@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from .engine import create_db_engine
 from .migrations import ensure_schema
 from .schema import Base, MetaRow
 
@@ -35,7 +35,7 @@ class MetaStore:
     """A SQLite-backed key/value store for the app level state."""
 
     def __init__(self, url: str = _DEFAULT_URL, echo: bool = False) -> None:
-        self._engine = create_engine(url, echo=echo)
+        self._engine = create_db_engine(url, echo=echo)
         Base.metadata.create_all(self._engine)      # new tables (incl. meta)
         ensure_schema(self._engine)                 # additive columns on existing tables
         self._Session = sessionmaker(self._engine)

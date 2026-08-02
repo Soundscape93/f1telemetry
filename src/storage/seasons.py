@@ -11,10 +11,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from ..domain.season import RoundResults, Season, SeasonMode, SeasonRound
+from ..domain.calendars import CalendarConflictError, calendar_conflicts, locked_rounds
+from .engine import create_db_engine
 from .schema import Base, SeasonRoundRow, SeasonRow, SeasonAssignmentRow
 
 _DEFAULT_URL = "sqlite:///f1league.db"
@@ -24,7 +26,7 @@ class SeasonStore:
     """A SQLite-backed store for seasons, calendars, and session assignments."""
 
     def __init__(self, url: str = _DEFAULT_URL, echo: bool = False) -> None:
-        self._engine = create_engine(url, echo=echo)
+        self._engine = create_db_engine(url, echo=echo)
         Base.metadata.create_all(self._engine)
         self._Session = sessionmaker(self._engine)
 
@@ -82,12 +84,34 @@ class SeasonStore:
             if row is not None:
                 db.delete(row)
         
-    def set_calendar(self, season_id: int, rounds: tuple[SeasonRound, ...]) -> None:
-        """Replace the calendar of a season with the given rounds."""
+    def set_calendar(self, season_id: int, rounds: tuple[SeasonRound, ...], *,
+                     protect_assigned: bool = True) -> None:
+        """Replace the calendar of a season with the given rounds.
+
+        A round that already has a session assigned keeps **both** its ``round_number`` and its
+        ``track_id`` (see ``domain/calendars`` for why the check is positional). Raises
+        ``CalendarConflictError``, carrying every offending round, rather than writing a calendar
+        that would re-file or orphan a stored result.
+
+        The guard lives here rather than only in the editor UI so the invariant is *guaranteed*
+        rather than merely remembered at one call site. ``protect_assigned=False`` is the escape
+        hatch for a caller that has already dealt with the assignments itself; nothing in the app
+        passes it today.
+        """
         with self._Session.begin() as db:
             row = db.get(SeasonRow, season_id)
             if row is None:
                 raise KeyError(f"no season {season_id}")
+            if protect_assigned:
+                assigned = db.scalars(
+                    select(SeasonAssignmentRow.round_number)
+                    .where(SeasonAssignmentRow.season_id == season_id)
+                ).all()
+                current = [SeasonRound(round_number=r.round_number, track_id=r.track_id)
+                           for r in row.rounds]
+                conflicts = calendar_conflicts(rounds, locked_rounds(current, assigned))
+                if conflicts:
+                    raise CalendarConflictError(conflicts)
             row.rounds = [SeasonRoundRow(round_number=r.round_number, track_id=r.track_id)
                           for r in rounds]
             

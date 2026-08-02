@@ -12,7 +12,7 @@ import dataclasses
 
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from ..domain.models import (
@@ -32,6 +32,7 @@ from ..protocol.enums import (
     safe_enum
 )
 
+from .engine import create_db_engine
 from .migrations import ensure_schema
 from .schema import Base, ClassificationEntryRow, DeletedSessionRow, SessionRow
 
@@ -54,7 +55,7 @@ class SessionStore:
     """A SQLite-backed store for session classifications and metadata.
     This is a temporary solution until we have a proper database backend (Postgres, MySQL)."""
     def __init__(self, url: str = _DEFAULT_URL, echo: bool = False) -> None:
-        self._engine = create_engine(url, echo=echo)
+        self._engine = create_db_engine(url, echo=echo)
         Base.metadata.create_all(self._engine)      # new tables
         ensure_schema(self._engine)                 # additive columns on existing tables
         self._Session = sessionmaker(self._engine)

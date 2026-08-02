@@ -2,7 +2,7 @@
 
 Maps a lap's ``CarDamage`` + ``LapTyreContext`` onto per-part health status + fill colour, so the
 graphic widget (``car_status_graphic.py``, Phase C) stays a thin renderer over tested logic - the
-same split as ``damage_panel.damage_rows`` / ``setup_panel.setup_rows``.
+same split as ``damage_panel.damage_rows`` / ``setup_panel.setup_fields``.
 
 Three threshold families (see DECISIONS.md, 2c):
   * monotonic WEAR (tyre + engine components): green <60, orange 60-79, red >=80;

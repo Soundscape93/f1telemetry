@@ -132,3 +132,83 @@ def calendar_rules(mode: SeasonMode, game_format: int) -> CalendarRules:
         reorderable=True,
         allow_duplicates=True,
     )
+
+
+# --- editing an existing calendar ------------------------------------------------------------
+#
+# A calendar can be re-authored after the season exists, but a round that already has a session
+# assigned to it is frozen: it keeps BOTH its round_number and its track_id. Assignments are keyed
+# on (season_id, round_number) and deliberately carry no FK to the rounds table (invariant #4), so
+# moving such a round would silently re-file a stored result under a different track, and dropping
+# one would orphan it - invisible in the UI, but still in the database and ready to reappear if the
+# calendar ever grew back.
+#
+# The rule collapses to a positional check: for each locked round (n, t), the proposed calendar
+# must still have a round n whose track is t. That covers reordering, inserting before, deleting
+# before and truncating without treating them as separate cases - and it correctly permits an edit
+# that happens to leave a locked round exactly where it was.
+
+CONFLICT_REMOVED = "removed"        # the proposed calendar has no round with that number
+CONFLICT_RETRACKED = "retracked"    # that round number now points at a different track
+
+@dataclass(frozen=True)
+class CalendarConflict:
+    """One assigned round that a proposed calendar would invalidate."""
+
+    round_number: int
+    track_id: int
+    reason: str
+    proposed_track_id: int | None = None  # only set for CONFLICT_RETRACKED
+
+
+class CalendarConflictError(ValueError):
+    """A calendar edit was refused because it would invalidate assigned rounds.
+
+    Carries the conflicts themselves so a caller can render them however it likes; the message is
+    the plain-language version, for logs and for callers that just want a string.
+    """
+
+    def __init__(self, conflicts) -> None:
+        self.conflicts: tuple[CalendarConflict, ...] = tuple(conflicts)
+        super().__init__(describe_conflicts(self.conflicts))
+
+
+def locked_rounds(rounds, assigned_round_numbers) -> tuple[SeasonRound, ...]:
+    """The rounds of ``rounds`` that already hold an assigned session, in round order."""
+    assigned = set(assigned_round_numbers)
+    return tuple(
+        sorted((r for r in rounds if r.round_number in assigned), key=lambda r: r.round_number)
+    )
+
+
+def calendar_conflicts(proposed, locked) -> tuple[CalendarConflict, ...]:
+    """Which ``locked`` rounds the ``proposed`` calendar would break. Empty tuple means it's safe."""
+    by_number = {r.round_number: r.track_id for r in proposed}
+    conflicts = []
+    for round in locked:
+        proposed_track = by_number.get(round.round_number)
+        if proposed_track is None:
+            conflicts.append(
+                CalendarConflict(
+                    round.round_number, round.track_id,CONFLICT_REMOVED)
+            )
+        elif proposed_track != round.track_id:
+            conflicts.append(
+                CalendarConflict(
+                    round.round_number, round.track_id, CONFLICT_RETRACKED, proposed_track)
+            )
+    return tuple(conflicts)
+
+
+def describe_conflicts(conflicts) -> str:
+    """One line per conflict, naming the round and what the edit would have done to it."""
+    lines = []
+    for conflict in conflicts:
+        where = f"Round {conflict.round_number} ({track_name(conflict.track_id)})"
+        if conflict.reason == CONFLICT_REMOVED:
+            lines.append(f"{where} would be removed from the calendar.")
+        else:
+            lines.append(
+                f"{where} would become {track_name(conflict.proposed_track_id)}."
+            )
+    return "\n".join(lines)

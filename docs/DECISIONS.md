@@ -144,6 +144,57 @@ what would trigger revisiting it.
   that suffix via `is_compressed_capture`; the new codec is an addition to the reader, never a
   replacement, so every existing recording stays importable.
 
+- **A calendar stays editable, but assigned rounds are frozen** (E6, 2026-08-02). Editing a
+  calendar is a wholesale replace, and `session_assignments` carries **no FK** to the rounds table
+  on purpose (invariant #4) — so nothing in the database stops an edit from re-filing a stored
+  result under a different track, or orphaning it into a round number that no longer exists.
+  Three options were weighed: *warn and preserve* the orphans, *warn and unassign* them, or
+  *restrict the edit*. We took the third: **a round with an assigned session keeps both its
+  `round_number` and its `track_id`.** The first two manage orphans; this one makes them
+  impossible, which is worth more than the flexibility it costs.
+  - **The check is positional, not gestural.** For each locked round *(n, t)*, the proposed
+    calendar must still have a round *n* whose track is *t*. That single test covers reordering,
+    inserting before, deleting before and truncating — including the case a "no reordering" rule
+    would miss entirely, where inserting a round at position 3 silently renumbers an assigned round
+    5 into round 6 with nothing having been dragged. It also correctly *permits* an edit that
+    leaves a locked round where it was, which matters in the sandbox modes where a track may
+    legitimately appear twice.
+  - **Enforced in `SeasonStore.set_calendar`**, not only in the editor page: at the single write
+    point the invariant is guaranteed rather than remembered, and the rule stays testable without a
+    `QApplication`. `protect_assigned=False` exists for a caller that has already cleared the
+    assignments itself; nothing passes it today.
+  - **The cost, accepted knowingly:** once round 1 has a session assigned, nothing can be inserted
+    before it. In practice a season becomes freely editable from the last assigned round onward,
+    plus reordering among unassigned rounds that don't cross a locked one. That covers the real use
+    case — a wrong calendar is almost always noticed before results exist.
+  - **Calendar only.** Mode, number, nickname and game format are not editable: changing the format
+    moves the track pool out from under the calendar (Madrid is 2026-only). A wrong-mode season is
+    deleted and recreated. Allowing those edits *while a season has no assignments* is a sensible
+    later feature, not part of this one.
+- **Connection setup is a shared function, not a shared engine — and WAL is on** (C2, 2026-08-02).
+  Each store deliberately owns its `Engine`: SQLite dislikes a connection shared across threads and
+  the ingest / re-ingest workers run on their own. That rules out configuring the database once at
+  construction of some central object, because *any* of the five stores may be the one that creates
+  the file. Hence `storage/engine.py: create_db_engine` — every store calls it, so the database is
+  opened identically no matter who got there first.
+  - **`journal_mode=WAL`.** Readers stop being locked out by a writer, which is what the GUI needs
+    while a minutes-long re-ingest runs, and what makes a live backup possible at all.
+  - **`synchronous=NORMAL`.** Chosen from the standing position that this database is *disposable
+    and rebuildable from the captures*, not from a benchmark: a full fsync per commit would buy
+    durability for data we can recreate. Still crash-durable at the application level; the residual
+    risk is losing the last commits to a power cut.
+  - **`foreign_keys` deliberately left OFF.** SQLite defaults it off and the schema's cascades are
+    ORM-level, so turning it on is a real behaviour change — and it would interact with
+    `session_assignments`, which is FK-free *on purpose* (invariant #4). Revisit with Alembic
+    (below), not alongside a pragma change.
+- **Backups are `VACUUM INTO`, and are not an "open the database" action** (C3, 2026-08-02). Once
+  WAL is on, copying the file with the filesystem is wrong: committed pages live in a `-wal`
+  sibling, so the copy can be stale or torn. `VACUUM INTO` writes a checkpointed, defragmented
+  database from one read transaction, and can therefore run *while an ingest writes* — that is why
+  C3 shipped with C2 rather than after it. This does not reopen the settled "the database is never
+  surfaced to the user" decision (see PACKAGING → Data layout): the action hands over a **copy** at
+  a path the user chose. The live file stays unexposed and unserviceable.
+
 ## Migrations
 - **Ad-hoc / additive now; Alembic later.** All schema changes so far are additive (new
   columns/tables) and handled by `create_all` (plus a planned idempotent `ensure_schema` when
@@ -162,9 +213,13 @@ what would trigger revisiting it.
   writing `__version__` from the git tag inside the build job. Rejected: the artifact would then
   differ from the tagged commit, and `pip install -e .` in a checkout would report a different
   version than the exe's Help page. Instead the PR label (`major`/`minor`/`patch`) drives a real
-  bump commit on `main` *before* the tag, and `packaging/check_version.py` fails the build if the
-  tag, `src/version.py` and `pyproject.toml` ever disagree. Consequence worth remembering: the bump
-  is a bot commit pushed to `main`, so branch protection must grant GitHub Actions a bypass.
+  bump commit that reaches `main` *before* the tag, and `packaging/check_version.py` fails the build
+  if the tag, `src/version.py` and `pyproject.toml` ever disagree. **The bump is committed to the
+  release PR's own branch (`staging`), never pushed to `main`** — an earlier version of this note
+  said the opposite and required a branch-protection bypass for GitHub Actions. That was reversed
+  on 2026-08-01: protection rejects a CI push to `main` (`GITHUB_TOKEN` is not exempt), so the bump
+  now rides into `main` through the PR like any other change, and no bypass exists or is needed.
+  Tags are not covered by branch protection, so `tag.yml` pushing `vX.Y.Z` is still fine.
 - **An unstamped database that already holds sessions counts as version 0, not "current".** It was
   written before the stamp existed, so its rows were derived by an unknown older pipeline — and in
   practice they genuinely are stale (rows saved before iteration 2c hold no tyre/brake/engine
@@ -189,8 +244,9 @@ what would trigger revisiting it.
   defended, it's made **disposable** — captures are the source of truth and a wrecked database is one
   *Help → Re-read captures…* away from a good one. Practically: keep it in the data root, never
   surface it (no "Open database" action), expose captures/logs instead, and document "don't
-  hand-edit it". Tamper *detection* was considered and dropped as cost without benefit. Queued:
-  WAL mode, and a backup action via `VACUUM INTO` (the only safe way to copy a live WAL database).
+  hand-edit it". Tamper *detection* was considered and dropped as cost without benefit. Queued and
+  now scheduled (PRIORITIES → C2/C3, Cycle 1): WAL mode — **not enabled today** — and a backup
+  action via `VACUUM INTO` (the only safe way to copy a live WAL database).
 - **One data root; discoverability is solved by opening it, not by moving data.** `captures/` and
   `lap_traces/` stay under `data_root()` even though `%LOCALAPPDATA%` is hidden in Explorer. Splitting
   them out (to `Documents`, say) would end `paths.py`'s single-authority invariant, make "back up this
@@ -286,9 +342,8 @@ what would trigger revisiting it.
   complete identity), not from a single packet. A late post-race/podium Participants packet can
   report a reduced `num_active_cars`; last-write-wins left high-index cars unmatched in the
   classification join (blank name / number 0 / team −1). See TELEMETRY_NOTES.
-- **Missing Final Classification → reconstructed classification (Option 2).** The game sends the
-  Final Classification packet *once*; a recording stopped a beat early or a single dropped datagram
-  loses it, and the results table then showed 0 drivers. When the packet is absent the assembler
+- **Missing Final Classification → reconstructed classification (Option 2).** A session whose
+  Final Classification never arrived used to show 0 drivers. When the packet is absent the assembler
   now synthesizes a best-effort result (`reconstruct_classification`) from the last Lap Data frame +
   per-car Session History. **What's recovered exactly:** finishing order, laps, best lap, tyre
   stints, total race time (sum of Session History lap times = the game's "race time without
@@ -303,6 +358,13 @@ what would trigger revisiting it.
   reconstructed sessions entirely. *Deferred (Option 3):* an accept/edit/store workflow that lets
   the user confirm or hand-correct reconstructed race points, a manual editor, and re-including the
   confirmed values in standings — to land with league-management (see ROADMAP).
+  *Correction (2026-08-02) — this entry used to open "the game sends the packet once".* It does
+  not: measurement shows **5–6 copies per session** (TELEMETRY_NOTES → Authoritative sources).
+  Option 2's design is unaffected — a fallback for an absent classification is still right — but
+  its *trigger* is much rarer than assumed. A single dropped datagram cannot cause it; only losing
+  the entire results-screen window can, which is why the v0.4.2 sleep fix mattered more than
+  another reconstruction feature. This is also why Option 3 sits at P3 rather than next up
+  (PRIORITIES → B5).
 
 ## UI
 - **PySide6 + PyQtGraph.** Chosen over a web stack / NiceGUI / DearPyGui for the analytics-heavy
@@ -409,7 +471,7 @@ what would trigger revisiting it.
   **No Motion Ex needed:** this is a *median racing line*, the honest achievable version; a *true
   geometric centerline* would need track-edge / track-width data (Motion Ex) and stays deferred.
   **Scope is the race weekend, not one session:** a single qualifying session rarely has ≥3 valid
-  timed laps, so `ui/laps/track_layouts.TrackLayoutProvider` gathers every valid Motion lap across
+  timed laps, so `ui/laps/track_layout.TrackLayoutProvider` gathers every valid Motion lap across
   the sessions sharing a `weekend_link_id` at the same `track_id`, builds the layout, and caches it
   keyed `(weekend_link_id, track_id)`. Below `_MIN_LAPS` (3) usable laps → `build_layout` returns
   `None` and `TrackMap` falls back to `set_trace` (the driven line); the handedness/loop-close
@@ -434,13 +496,15 @@ what would trigger revisiting it.
   and scaled by `track_length_m`. **Licensing reminder:** that corner data is community/unofficial
   (MultiViewer; FastF1 is non-commercial/personal-use) — fine for private, friends-only use, but must
   be revisited/replaced before any broad public distribution of the app.
-- **Canonical-map cache refresh stays deferred.** The provider's in-memory cache is not
-  invalidated on a mid-run re-ingest (a stale weekend layout persists until app restart) — fine for
-  personal/testing use, to be made automatic before any release (likely after 2c; see ROADMAP);
-  a persisted `track_layouts/*.parquet` cache also stays deferred.
+- **Canonical-map cache refresh — now P1, no longer deferred.** The provider's in-memory cache is
+  not invalidated on a mid-run re-ingest (a stale weekend layout persists until app restart). This
+  was filed as "fine for personal use, make it automatic before any release" — but releases have
+  since shipped (v0.3.0 onward) with it outstanding, so it is now **PRIORITIES → A1, Cycle 1**.
+  A persisted `track_layouts/*.parquet` cache stays deferred (P3, D3).
 - **Lap detail composes reusable components over the 1a data split; visuals follow the game HUD.**
   The lap detail page (`ui/laps/detail_page.py`) is assembly only — it maps the 1a model straight to
-  widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order), full `CarDamage`
+  widgets: `LapTyreContext` → `TyreBox` (4 corners in on-car FL FR / RL RR order — **since removed,
+  see the post-2c note at the end of this entry**), full `CarDamage`
   → `build_damage_table`, `SessionResult.setup_for_lap(n)` → `build_setup_table`, `LapTrace` →
   `TracePlot`. Damage/setup use a shared key/value table (`build_kv_table`) so no view rebuilds one.
   Tyre `_wear_color` thresholds mirror the F1 HUD: **<60 % green, 60–79 % orange, ≥80 % red**. Setup
@@ -449,6 +513,12 @@ what would trigger revisiting it.
   deferred to **iteration 2c** (a car silhouette with colour-coded tyre + damage zones); ~90 % of
   its data is already stored (`LapTyreContext` + `CarDamage`), so its only new ingest is tyre
   carcass/surface + brake temperatures — until then, 1b's simple 4-box + table form stands.
+  *Post-2c (2026-07-16): `TyreBox` was retired* — the car graphic's corner gauges cover tyres well
+  enough, so `components/tyre_box.py` is gone. Tyre age moved to the "Car Status" title line
+  (compound icon + "N laps old") and per-wheel blisters / tyre damage into the corner-gauge
+  tooltips. The damage table gained a **Diffuser** row and de-duplicated **Sidepod**, and the setup
+  panel became slider rows (`setup_fields` + the reusable `components/slider_row.py`), so
+  `setup_rows` no longer exists.
 - **pyqtgraph is a hand-managed runtime dep, like pyarrow.** There's no requirements file; both are
   installed by hand. `TracePlot` lazy-imports pyqtgraph and shows an install hint if it's missing, so
   the app and the test suite stay importable without it. (pyqtgraph is now installed in the dev env.)
@@ -465,7 +535,8 @@ what would trigger revisiting it.
   unit-tested `car_status.py`** mapping `CarDamage` + `LapTyreContext` → per-part `(status, colour)`, so the
   render backend stays swappable. Placement: keep 1b's `TyreBox`, add the graphic **below it on the left**;
   the exact-number Damage/Setup tables stay on the right (visual overview left, precise values right). The
-  `TyreBox` can be retired later if the graphic covers tyres well enough — not in 2c.
+  `TyreBox` can be retired later if the graphic covers tyres well enough — not in 2c. *(It was, in the
+  post-2c polish pass; the left column is now the graphic alone.)*
   *Realization (Phase C + visual polish, DONE):* shapes are authored as SVG path `d` strings parsed to
   `QPainterPath` by a small in-widget parser (`_svg_path`) and rendered as path items. The parser handles
   the full command set Inkscape/Figma emit — M/L/H/V/C/**S/T** smooth curves and **A** elliptical arcs

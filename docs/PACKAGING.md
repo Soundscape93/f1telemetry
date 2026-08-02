@@ -13,9 +13,10 @@ built on the author's Windows 11 boot and verified against the clean-machine che
 guided, cancellable re-ingest of the archived captures (see "Phase 2 — done") — verified on dev/Linux
 2026-07-25 and re-verified on the 2nd Windows build 2026-07-26. Phase 3 = the label-driven release
 pipeline (GitHub Actions → a full GitHub Release), the CI-generated `USER_GUIDE.pdf`, and the Help
-page's guide + folder actions (see "Phase 3 — done"); its clean-machine items are **still to be
-checked on the first published build**. Dev runs are unchanged: source runs still resolve every data
-path against the CWD.
+page's guide + folder actions (see "Phase 3 — done"); its clean-machine items were **checked on the
+published build and pass** (confirmed 2026-08-02). Dev runs are unchanged: source runs still resolve
+every data path against the CWD. What remains of packaging is **Phase 4** — see
+[`docs/PRIORITIES.md`](PRIORITIES.md), where it is Cycle 3.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -136,10 +137,27 @@ The practical measures are therefore:
 - keep it in `data_root()` and **don't surface it** — no "Open database" action anywhere in the UI;
 - expose **captures** and **logs** instead, which is what a tester actually needs;
 - **document** "don't hand-edit the database" in the user guide, together with the rebuild route;
-- queued, not now: **WAL mode** (already a checklist concern for double-launch, and it eases
-  reader/writer contention while a minutes-long re-ingest runs) and a **"Back up database…"** action
-  implemented as SQLite's `VACUUM INTO` — the only safe way to copy a *live* WAL database, and the
-  right primitive for "send me your DB" bug reports.
+- **DONE 2026-08-02 (PRIORITIES → C2/C3): WAL mode + a "Back up database…" action.** Shipped
+  together, because `VACUUM INTO` is what makes WAL safe to hand around.
+  **WAL** lives in `storage/engine.py`. The five stores are repositories over the same file and
+  each builds its own engine (SQLite dislikes a connection shared across threads; the ingest
+  workers have their own), so connection setup had to be a shared *function* — `create_db_engine`
+  — rather than a shared engine: whichever store opens the database first must leave it configured
+  as any other would. It sets `journal_mode=WAL` (a reader is no longer locked out by a running
+  ingest — the double-launch concern, and what a minutes-long re-ingest needs),
+  `synchronous=NORMAL` (WAL's usual companion; still crash-durable at the application level, and
+  the residual power-cut risk is acceptable precisely because this database is disposable — see
+  above) and `busy_timeout=10s`. `foreign_keys` is deliberately **not** set: SQLite defaults it
+  off, the cascades here are ORM-level, and enabling it would interact with the intentionally
+  FK-free `session_assignments`. That is an Alembic-era decision, not a WAL one.
+  **The backup** is `storage/backup.py` → `backup_database()`, surfaced as Help → *Back up
+  database…*. It is allowed to run *during* an ingest — a single read transaction that neither
+  blocks the writer nor tears — which is the whole point of pairing it with WAL. Note it does not
+  contradict the "no Open database action" rule above: it writes a **copy** to a path the user
+  picked, and never exposes the live file. Implementation notes for anyone touching it: `VACUUM`
+  cannot run inside a transaction (needs `AUTOCOMMIT`), `VACUUM INTO` refuses an existing
+  destination (the caller unlinks, after the save dialog has asked), and the destination is a
+  **bound parameter** so Windows backslashes and quoted filenames can't break the statement.
 
 Tamper *detection* was considered and dropped: cost without benefit for a private league app.
 
@@ -270,6 +288,20 @@ the self-updater is packaging Phase 4.)*
   `patch` fixes makes the release `minor`. A required `source-branch` check enforces the "only
   `staging` merges into `main`" half, because GitHub can restrict *who* merges but not *which
   branch* a PR comes from. Emergency fixes route through `staging` too.
+- **Branch off `staging`, never off `main`.** A feature/fix branch based on `main` misses whatever
+  is already on `staging` but unreleased, so it is developed against a stale base and its merge
+  base is some older common ancestor rather than current `staging` — which shows unrelated changes
+  in the PR diff and invites phantom conflicts. Branching off `staging` makes the merge base
+  `staging` itself, so the PR diff is exactly the change. Keep branches short-lived and merge
+  `staging` back in if it moves while you work.
+- **Merge strategy: squash into `staging`, merge commit into `main`.** Feature/fix → `staging` is
+  **squashed**, so `staging` carries one tidy commit per change. `staging` → `main` uses a **merge
+  commit** (settled from v0.4.2), because a squash there discards the ancestry link: `main` then
+  holds content identical to `staging` but with no shared history, the two branches diverge
+  permanently, and reconciling them needs a `Merge branch 'main' into staging` back-merge. That
+  back-merge is what pushed the `chore(release):` commit off the branch tip and broke the release
+  guards during v0.4.2 (see the guard note below). A merge commit keeps the histories connected and
+  makes the back-merges unnecessary.
 - **CI never pushes a commit to `main`** — every change arrives through a PR, which is what the
   branch protection rule requires. This is why the bump lands on the PR branch rather than on
   `main`: the older workflow ran `git push origin HEAD:main`, which protection rejects
@@ -301,7 +333,10 @@ the self-updater is packaging Phase 4.)*
   version files agree). The tag forms of both only make sense *after* a bump has happened, or if you
   are tagging by hand.
 - **Release zip contents:** the one-folder build, plus **`USER_GUIDE.pdf`** (convert
-  `docs/USER_GUIDE.md`) and **`roster_template.csv`** at the top level. Publish a **full** GitHub
+  `docs/USER_GUIDE.md`), **`roster_template.csv`**, **`LICENSE`** and **`NOTICE.md`** at the top
+  level. The last two are **not optional**: the bundle links Qt/PySide6 under **LGPL v3**, which
+  requires the licence notice to reach whoever receives the binary, so the `windows-build` job
+  copies them in and the bundle sanity-check fails without them. Publish a **full** GitHub
   Release — not a draft/prerelease, or `/releases/latest` returns 404 and the in-app update check
   can't see it.
 - **Do not break dev:** the `sys.frozen`-aware `paths.py` keeps source runs on CWD-relative dirs.
@@ -502,8 +537,10 @@ re-confirmed rather than changed.
 - **`src/user_guide.py`** — Qt-free `resolve_guide()` returning a `GuideTarget` (a local path *or* a
   URL — the caller must know which, since only a path goes through `QUrl.fromLocalFile`). The three
   steps are injectable, so the chain is tested without a frozen build.
-- **`src/ui/help_page.py`** — "Open user guide" plus a row of **Open data / captures / logs folder**
-  buttons (`_FOLDER_ACTIONS` → `QDesktopServices.openUrl`). `QDesktopServices` reports failure only
+- **`src/ui/help_page.py`** — "Open user guide" and **"Licences & notices"**, plus a row of
+  **Open data / captures / logs folder** buttons (`_FOLDER_ACTIONS` → `QDesktopServices.openUrl`)
+  and an **About** block carrying the unofficial-tool / trademark / data-responsibility summary
+  (`_ABOUT_HTML`; the full text is `NOTICE.md`). `QDesktopServices` reports failure only
   by returning `False`, so `_open()` surfaces that in a dialog — a windowed build has no console.
   Still no "Open database" action, deliberately.
 - **`packaging/check_version.py`** — the verify-don't-stamp gate (tag ↔ `src/version.py` ↔
@@ -591,15 +628,25 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
       still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
-- [ ] Open the app **twice** → SQLite doesn't wedge (WAL mode; handle "database is locked").
+- [ ] Open the app **twice** → SQLite doesn't wedge. *Re-test wanted.* It passed on both Windows
+      instances (2026-08-02, Record pressed, no game running), but that run predates WAL, so the
+      result meant "the contention never happened", not "WAL handled it". C2 has since enabled WAL
+      (`storage/engine.py`), so this is worth running again — this time it actually exercises the
+      mechanism, ideally with one instance mid-re-ingest while the other browses.
+- [ ] Help → **Back up database…** writes a `.db` beside where the user chose, the status line
+      reports its size, and the copy opens as a working database. Worth doing **while a re-ingest
+      runs** — that is the case C2/C3 exist for.
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
 - [ ] Note SmartScreen behavior and the exact click-through for the tester doc.
 
 Phase-3 items (first *published* build — these need the Release, not just a local build):
 
 - [ ] Installed from the **Release zip downloaded from GitHub**, not a local `dist/` folder.
-- [ ] `USER_GUIDE.pdf` and `roster_template.csv` are visible **beside the exe**, not in `_internal/`.
+- [ ] `USER_GUIDE.pdf`, `roster_template.csv`, `LICENSE` and `NOTICE.md` are visible **beside the
+      exe**, not in `_internal/`.
 - [ ] Help → **Open user guide** opens the bundled PDF (proves `app_dir()`, not `_MEIPASS`).
+- [ ] Help → **Licences & notices** opens the bundled `NOTICE.md` (the LGPL notice for the bundled
+      Qt has to reach the user — the GitHub fallback means a failure here is silent otherwise).
 - [ ] Help → **Open data folder** / **captures** / **logs** each open Explorer at the right folder.
 - [ ] Help → **Check for updates** against the real published Release says "up to date" (this path
       has never run against an existing Release — until now the API answered 404).
@@ -635,9 +682,15 @@ first:
     no new columns on existing tables, so there was nothing for `ensure_schema` to ALTER;
   - *SmartScreen behaviour / user-doc click-through* — belongs with the published artifact in
     Phase 3's release workflow.
-- **3rd build (pending, Phase 3).** The first build produced *by CI* and published as a Release.
-  Run the Phase-3 checklist items above against the downloaded zip; the earlier items only need a
-  spot-check, since the bundle is built from the same spec.
+- **3rd build (Phase 3) — done, confirmed 2026-08-02.** The first build produced *by CI* and
+  published as a Release (v0.3.0, then v0.4.x). The Phase-3 checklist items above were run against
+  the downloaded zip and pass, including the two that had never executed before: *Check for updates*
+  against a real published Release (the API used to answer 404) and *Open user guide* resolving
+  through `app_dir()` rather than `_MEIPASS`. The author intends to re-run this checklist for most
+  future releases.
+- **Still not covered by any build so far:** the **clean-instance** run (Windows Sandbox or a second
+  user account — see below) and the **SmartScreen click-through wording** for a first-time external
+  tester. Both are PRIORITIES → C4.
 
 ---
 

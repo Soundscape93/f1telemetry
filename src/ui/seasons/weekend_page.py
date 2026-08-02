@@ -62,6 +62,7 @@ class WeekendPage(QWidget):
 
     detail_requested = Signal(int)
     overview_requested = Signal()
+    sessions_changed = Signal()      # Stored sessions data was deleted - other surfaces must re-read
 
     def __init__(self, season_store, session_store, season_rosters, parent=None) -> None:
         """Initialize the weekend page."""
@@ -327,4 +328,5 @@ class WeekendPage(QWidget):
         if confirm != QMessageBox.StandardButton.Yes:
             return
         self._sessions.delete(int(session_uid))
+        self.sessions_changed.emit()  # laps surface caches a layout built from these laps
         self.reload()

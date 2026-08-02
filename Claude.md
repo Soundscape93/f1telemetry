@@ -43,7 +43,10 @@ design depends on it.
   (`pyproject.toml` pins `requires-python >=3.11`; the Windows build machine uses 3.14.)
 - **UI:** PySide6 (+ PyQtGraph for charts).
 - **Storage:** SQLite via SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`/`mapped_column`), kept
-  engine-agnostic so it *could* move to Postgres if a hosted server is ever built.
+  engine-agnostic so it *could* move to Postgres if a hosted server is ever built. Every store
+  opens the database through `storage/engine.py: create_db_engine` (WAL + `synchronous=NORMAL` +
+  `busy_timeout`) — each store owns its own `Engine`, so the *setup* is what's shared, not the
+  engine. Add a pragma there and nowhere else.
 - **Dependency manifest:** `pyproject.toml` (deps pinned `==`; `pyinstaller` under a `[package]`
   extra) — added in packaging Phase 0. Runtime third-party: PySide6, numpy, pyarrow, SQLAlchemy,
   plus lazy `pyqtgraph` (charts) + `zstandard` (new capture archives). `zstandard`'s wheel
@@ -70,7 +73,8 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
   f1telemetry/                  # ← the git repository root (code + docs + tests)
     Claude.md                   # this file
     README.md
-    docs/                       # ARCHITECTURE, DECISIONS, TELEMETRY_NOTES, ROADMAP
+    docs/                       # PRIORITIES (what to work on next), ROADMAP, ARCHITECTURE,
+                                #   DECISIONS, TELEMETRY_NOTES, PACKAGING, USER_GUIDE
     src/
       version.py, paths.py, logging_setup.py, crash.py, update_check.py  # packaging + update check
       ingest/    recording.py (.f1cap read/write), recorder.py, sources.py,
@@ -79,13 +83,16 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                  v2025/structs.py, v2026/structs.py
       domain/    models.py, captures.py, normalizer.py, season.py, calendars.py, roster.py
       session/   assembler.py
-      storage/   schema.py, sessions.py, seasons.py, laps.py, captures.py,
+      storage/   engine.py (create_db_engine — the ONE place the DB is opened: WAL +
+                 synchronous=NORMAL + busy_timeout), backup.py (VACUUM INTO),
+                 schema.py, sessions.py, seasons.py, laps.py, captures.py,
                  meta.py (key/value app state — the PIPELINE_VERSION stamp)
       analysis/  standings.py
       ui/        app.py, main_window.py, help_page.py, season_roster.py, workers.py, formatting.py,
                  seasons/ (view.py=SeasonsView container + overview/create/detail/weekend
                    _page.py, labels.py) — pages coordinated by navigation signals
-                 components/ (tables.py, classification_table.py) — shared widgets
+                 components/ (tables.py, classification_table.py, slider_row.py,
+                   car_status*.py, track_map.py, trace_plot.py, …) — shared widgets
       pipeline.py               # Qt-free ingest orchestration (ingest_capture, archive_and_ingest,
                                 #   check_pipeline_version + reingest_all — the Phase-2 rebuild)
     packaging/                  # PyInstaller one-folder spec (f1telemetry.spec) + entry.py, plus
@@ -96,8 +103,10 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                                 #   branch), tag.yml (merge to main → tag → call release),
                                 #   release.yml (build → full GitHub Release)
     CHANGELOG.md                # entries accumulate under "## Unreleased"; the bump closes it
-    test/                       # unittest suites (test_*.py); run from the repo root:
-                                #   python3 -m f1telemetry.test.<name>
+    test/                       # unittest suites (test_*.py); run from the WORKSPACE root (the
+                                #   parent of this repo — absolute f1telemetry.* imports):
+                                #   python3 -m f1telemetry.test.<name>            (one suite)
+                                #   python3 -m unittest discover -s f1telemetry/test -t .  (all)
 ```
 
 ## Core invariants (the ones that bite)
@@ -161,11 +170,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   `nationality_id`, threaded through `_Accumulator` with the same last-seen-wins rule as
   `name`/`number`, and the detail page sets the icon exactly as the classification table does.
   Constructor standings get no flags — nationality is per driver, not per team.
-- **Missing Final Classification fallback:** if a session ends without the game's (once-sent)
-  Final Classification packet, the assembler reconstructs a best-effort result from Lap Data +
-  Session History (`Classification.is_reconstructed`), badged in the UI. Points can't be recovered
-  (FC-only), so they show as a muted estimate and reconstructed sessions are excluded from
-  standings. See DECISIONS / TELEMETRY_NOTES; an accept/edit flow is deferred (ROADMAP, Option 3).
+- **Missing Final Classification fallback:** if a session ends without a Final Classification
+  packet, the assembler reconstructs a best-effort result from Lap Data + Session History
+  (`Classification.is_reconstructed`), badged in the UI. Points can't be recovered (FC-only), so
+  they show as a muted estimate and reconstructed sessions are excluded from standings. **The game
+  sends FC 5–6× per session, not once** (measured 2026-08-01), so this fallback is rare — losing it
+  takes a multi-minute recorder blackout, not a dropped datagram. See DECISIONS / TELEMETRY_NOTES;
+  an accept/edit flow is deferred (ROADMAP Option 3, PRIORITIES → B5).
 - **UI:** single-window shell (sidebar + persistent record/stop header + stacked pages). The
   Seasons surface is real — overview, create, per-season detail (calendar + driver & constructor
   standings), per-season LEAGUE roster CSV import, and a weekend view with round-centric session
@@ -178,9 +189,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   container coordinating one widget per page via navigation signals. The custom-calendar picker
   is live: `create_page.py` embeds the reusable `ui/components/calendar_picker.py`, driven by
   `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
-  Grand Prix/League = reorderable sandbox with duplicates).
+  Grand Prix/League = reorderable sandbox with duplicates). **An existing calendar is editable**
+  (`ui/seasons/edit_calendar_page.py`, the fifth seasons page): a round holding an assigned session
+  keeps both its `round_number` and its `track_id`, checked positionally and enforced inside
+  `SeasonStore.set_calendar` (raises `CalendarConflictError`) so the rule can't be bypassed.
+  Calendar only — mode/number/nickname/format stay fixed.
   The **Laps** surface is now real: `ui/laps/` (foldable per-session lap cards + track/session
-  filter → a lap detail page with tyre box, damage/setup tables and stacked telemetry graphs),
+  filter → a lap detail page with the car-status graphic, damage/setup tables and stacked telemetry graphs),
   built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable lap
   widgets in `ui/components/`. **Lap-view iterations 2 (overlay) and 2b (Motion) are done:** the
   detail page's "Compare ▾" menu overlays the weekend's fastest / same-session / same-weekend laps on
@@ -191,7 +206,7 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   so a race lap 1 draws whole; absolute rotation follows the game frame, not F1.com map art (no
   per-track assets). **2b.1 made the map canonical:** it now draws a **distance-resampled median
   racing line** over the race weekend's valid Motion laps (`analysis/track_layout` +
-  `ui/laps/track_layouts`), so the shape is clean and identical per track regardless of the viewed
+  `ui/laps/track_layout`), so the shape is clean and identical per track regardless of the viewed
   lap; too few laps → it falls back to the driven line. Dashboard / Sessions / Analytics remain
   placeholders.
 - **Done:** lap-view **2c — a car-status graphic** (an in-game-style car silhouette with
@@ -199,7 +214,8 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   `QGraphicsScene` path items (`car_status_graphic.py`) over a Qt-free, tested `car_status.py`
   model. Temperatures ingested (tyre surface/carcass on `LapTyreContext`, brake/engine on
   `CarDamage`, from the carried-forward Car Telemetry entry; re-ingest needed), threshold model +
-  tests, and the widget wired below the tyre box on the detail page with per-part tooltips. Body
+  tests, and the widget wired into the detail page's left column with per-part tooltips (it replaced
+  the `TyreBox`, removed in the post-2c polish). Body
   shapes are **Inkscape-traced** (`docs/car_template.svg` template) and parsed by `_svg_path` — now
   the full SVG command set incl. S/T smooth curves + A arcs (`test_svg_path.py`); tyres, inboard
   **brake blocks** and corner gauges are procedural (from `_CORNERS` / `_TYRE_*` / `_BRAKE_*`). The
@@ -215,11 +231,17 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   layouts, so the map conveys sectors by colour alone (labels could return later as hover/tooltips).
   This used the per-session boundary **distances**, not the per-frame `sector` channel the earlier
   note assumed.
-  Still deferred: **automatic canonical-map cache refresh**, and **corner numbers** (future work — no
+  **Canonical-map cache refresh is done** (2026-08-02): `TrackLayoutProvider.invalidate()`, reached
+  unconditionally from `MainWindow._refresh_current_view()` through `LapsView.invalidate_caches()`,
+  so an ingest or re-ingest can no longer leave a stale weekend layout (or a stale "too few laps →
+  driven line" answer) on screen until restart. Deleting a session's stored results invalidates it
+  too, via the weekend page's `sessions_changed` signal — the one non-navigation signal leaving the
+  seasons surface.
+  Still deferred: **corner numbers** (future work — no
   telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
   `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics
   surface and an edit-calendar action. See `docs/ROADMAP.md`.
-- **Packaging (Phases 0–2 done):** a per-user data root + `resource_path` (`paths.py`), file logging
+- **Packaging (Phases 0–3 done; Phase 4 outstanding):** a per-user data root + `resource_path` (`paths.py`), file logging
   + crash dialog, `__version__`/`PIPELINE_VERSION` (`version.py`), a PyInstaller one-folder Windows
   build (`packaging/`), and a notify-only GitHub-Releases update check (`update_check.py` + Help
   page). Verified on Windows 11 (2026-07-25). **Phase 2 = the pipeline-version stamp + guided
@@ -241,10 +263,14 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (gates + suite → `USER_GUIDE.pdf` via pandoc/xelatex on Linux → PyInstaller on Windows → a **full**
   GitHub Release). **CI never pushes a commit to `main`** — that is the branch protection rule, and
   the reason the bump moved off `main` (2026-08-01). CI **verifies** the version, never stamps it,
-  so the artifact is exactly the tagged commit. The guide PDF + `roster_template.csv` ship **beside the exe** (`paths.app_dir()` —
+  so the artifact is exactly the tagged commit. The guide PDF, `roster_template.csv`, `LICENSE` and
+  `NOTICE.md` ship **beside the exe** (`paths.app_dir()` —
   a third path kind, distinct from `data_root()` and `_MEIPASS`), opened from the Help page along
-  with the data / captures / logs folders. First published build still to be checked against the
-  Phase-3 checklist. See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+  with the data / captures / logs folders. Shipping the notices is an **LGPL v3 obligation** for the
+  bundled Qt/PySide6, not a courtesy — the repo is *source-available, not open source* (`LICENSE`),
+  and `NOTICE.md` also carries the unofficial-tool / trademark / telemetry-data disclaimer. The published build has been checked against the Phase-3
+  checklist (2026-08-02) and passes; **Phase 4 is what's left** (macOS/Linux artifacts, Inno Setup
+  installer, real auto-updater). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 
 ## Where to look
 
@@ -252,6 +278,9 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
 - **`docs/DECISIONS.md`** — why the design is the way it is (read before changing a big call).
 - **`docs/TELEMETRY_NOTES.md`** — F1-UDP spec facts and quirks, and the diagnostic tools; read
   before touching the parser, normalizer, or assembler.
+- **`docs/PRIORITIES.md`** — **read this first when deciding what to work on.** The confirmed
+  P1/P2/P3, the Cycle 1/2/3 plan, what is done, and what is built-but-unverified. ROADMAP explains
+  *what* an item is; PRIORITIES says *when* we do it, and wins on ordering.
 - **`docs/ROADMAP.md`** — planned work and deferred ideas.
 - **`docs/PACKAGING.md`** — the packaging/release plan: PyInstaller one-folder (Windows first),
   the `paths.py` data-root refactor, DB migration vs pipeline-version auto-reingest, GitHub

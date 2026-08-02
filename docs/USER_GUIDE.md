@@ -73,6 +73,23 @@ Charles,16,xxCL16xx
 A blank template (`roster_template.csv`) is included in the release zip, and can also be saved from
 **Help → Setup / Configuration → Save a blank template CSV…**.
 
+### Changing a season's calendar
+
+Picked the wrong tracks, or the wrong order? Open the season and click **Edit calendar**. You can
+add, remove and reorder rounds with the same picker used when the season was created.
+
+**Rounds that already have sessions assigned are locked** — they keep both their position and their
+track, and the editor lists them before you start. This protects your results: round 5's stored race
+belongs to round 5 *at that track*, so letting it drift would file it under the wrong Grand Prix.
+If an edit would move or remove a locked round, the save is refused and names the rounds involved.
+
+To change a locked round anyway, open that round's weekend and unassign its sessions first — the
+round then unlocks. In practice this is rarely needed: a wrong calendar is usually spotted before
+any results have been assigned, and at that point the whole thing is freely editable.
+
+The season's mode, number, nickname and game format can't be changed here. If one of those is
+wrong, delete the season and create it again.
+
 ## 6. Where your data lives
 
 Your database, captures, lap traces, rosters and logs are stored under:
@@ -91,6 +108,21 @@ Explorer there for you.
 break the app's data that way, and it makes bug reports much harder to diagnose. You don't need to:
 your captures are the real source of truth, so if the database ever misbehaves, **Help → Re-read
 captures…** rebuilds it from them.
+
+### Backing up your database
+
+**Help → Back up database…** saves a copy wherever you choose. It is safe to use at any time, even
+while the app is recording or part-way through re-reading your captures — the copy is always a
+complete, working database, never a half-written one.
+
+Two things to know about what a backup is *for*:
+
+- **Your captures matter more.** A lost database can be rebuilt from your captures; a lost capture
+  is gone for good. Back up the `captures` folder first, and treat the database copy as a
+  convenience.
+- **It is what to attach to a bug report.** If something looks wrong in your standings or laps, a
+  backup lets the problem be reproduced exactly. Remember it contains other players' online names,
+  so send it only to someone you'd share your captures with (see *Reporting a bug*).
 
 ## 7. Checking for updates
 
@@ -149,3 +181,25 @@ what happened. Don't send a hand-edited database — see section 6.
 
 - **Switching the Windows light/dark theme while the app is open** leaves some text the wrong
   colour. Restart the app to refresh the theme.
+
+## Licence & notices
+
+**F1 Telemetry is an unofficial fan-made tool.** It is not affiliated with, authorised by, or
+endorsed by Formula 1, the FIA, EA or Codemasters. F1 and related marks, and all team, driver and
+circuit names, belong to their respective owners.
+
+**The app only listens to your own game.** It records the UDP stream your copy of the game
+broadcasts on your own network — it never connects to the publisher's servers and never modifies
+the game.
+
+**Your captures, your responsibility.** Recordings can contain other players' online names and
+results. Share them only with people who expect it, and follow the game's own terms of service.
+
+**Results are best-effort, not official.** Lap times, standings and telemetry are read from a UDP
+stream that can drop packets, especially over Wi-Fi. A session that ends without a final
+classification is reconstructed from what's available and clearly marked in the app.
+
+The app is source-available, not open source: you may download and run the official builds, but
+redistribution and reuse need permission. The full licence and the third-party notices — Qt/PySide6
+under LGPL v3, and the MIT-licensed nationality flags among others — are in `LICENSE` and
+`NOTICE.md`, shipped next to the app and available from **Help → Licences & notices**.

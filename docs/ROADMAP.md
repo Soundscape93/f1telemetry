@@ -3,17 +3,16 @@
 Planned work and deferred ideas. Not a commitment — a place to park intent so a future session
 (or the VS Code chat) has the context. Roughly ordered by when it's likely to matter.
 
-## Next release (grouping on `staging`)
+> **Ordering lives in [`docs/PRIORITIES.md`](PRIORITIES.md), not here.** This file is the
+> catalogue of ideas and their reasoning; PRIORITIES holds the confirmed P1/P2/P3, the cycle plan,
+> what is done, and what still needs verifying. Read PRIORITIES first to decide *what to work on*;
+> read this file to understand *what a thing is*. If they disagree, PRIORITIES wins on ordering.
 
-Two small features are expected to ship together in the next release, grouped on the `staging`
-branch (see PACKAGING → Versioning & dev release process for the mechanics):
+## Released
 
-1. **Nationality flags in driver standings** — done, see Seasons UI below.
-2. **Missing-capture prune** — done, see Capture compression below.
-
-Neither changes ingest output, so unless something else lands first this release is
-**re-ingest: no**. Both are user-visible, so `minor` is the likely label; `CHANGELOG.md` must
-list both under the same version.
+Both features that this section used to track as "next" have shipped, in **v0.4.0** (2026-08-01):
+nationality flags in the driver standings, and the missing-capture prune. The `staging` grouping
+mechanics they demonstrated are documented in PACKAGING → Versioning & dev release process.
 
 ## Seasons UI — remaining
 - **Done: 2b — per-season rosters + league standings.** `rosters/season_<id>.json` is the
@@ -41,9 +40,16 @@ list both under the same version.
   constraints the game actually enforces per mode: Career/My-Team pick a fixed-length subset
   (10/16/24) of the official order; Grand Prix/League are a reorderable sandbox with duplicates
   allowed (League open-ended, Grand Prix capped at 28). Rules live in `domain/calendars.py`
-  (`calendar_rules`), the widget in `ui/components/calendar_picker.py`. *Next here:* surface the
-  same picker as an edit-calendar action on the detail page (the store already has
-  `set_calendar()`).
+  (`calendar_rules`), the widget in `ui/components/calendar_picker.py`.
+  *Edit-calendar action — **DONE** 2026-08-02 (was PRIORITIES → E6).* The detail page's **Edit
+  calendar** button opens `ui/seasons/edit_calendar_page.py`, a fifth page reusing the same picker
+  unchanged. A round that already has an assigned session is **locked**: it keeps both its
+  `round_number` and its `track_id`, checked positionally (for each locked round *(n, t)* the
+  proposed calendar must still have round *n* at track *t*), which covers reorder, insert-before,
+  delete-before and truncate in one rule. Enforced in `SeasonStore.set_calendar`, which raises
+  `CalendarConflictError`; the page catches it and names the offending rounds. Calendar only —
+  mode / number / nickname / game format are not editable, since changing the format would move
+  the track pool underneath the calendar (Madrid is 2026-only).
 
 - **DONE — nationality flags in the driver standings table.** The season detail page's driver
   standings now read like the session classification table: the Driver cell carries a flag icon,
@@ -112,6 +118,9 @@ list both under the same version.
     a race lap 1 (grid past the S/F line) still draws whole. **Absolute rotation follows the game's
     world frame, not the F1.com map art** — matching broadcast orientation would need a per-track
     rotation constant, deliberately not shipped (kept asset-free); a possible later opt-in.
+    *Needs verification (PRIORITIES → E11):* the rendered orientation may already match the in-game
+    map; to be checked against it while recording the next sessions. "Doesn't match the F1.com
+    broadcast art" is expected and is not what that check is about.
   - **2b.1 — canonical track-map refinement (DONE).** The map now draws the **same clean shape every
     time** for a track, decoupled from the driven line, hover intact. A **canonical centerline =
     distance-resampled median racing line** (`analysis/track_layout.build_layout`): resample each
@@ -122,7 +131,7 @@ list both under the same version.
     which would shrink to the overlap and re-open that gap). **No Motion Ex needed** for this
     median-line version; a *true geometric* centerline would need Motion Ex / track-edge / track-width
     data and stays deferred. **Scope is the whole race weekend** (a lone quali session rarely has ≥3
-    valid timed laps): `ui/laps/track_layouts.TrackLayoutProvider` gathers valid Motion laps across
+    valid timed laps): `ui/laps/track_layout.TrackLayoutProvider` gathers valid Motion laps across
     the sessions sharing a `weekend_link_id` at the same `track_id`, builds the layout, and caches it
     keyed `(weekend_link_id, track_id)`. `TrackMap.set_layout` draws it; below `_MIN_LAPS` (3) usable
     laps it falls back to `set_trace` (the driven line). **Hover unchanged:** `cursor_moved` still
@@ -143,12 +152,19 @@ list both under the same version.
     `get_circuit_info`, keyed by our `track_id` and scaled by `track_length_m`. **Licensing:** that
     data is community/unofficial (MultiViewer; FastF1 is non-commercial/personal-use) — fine for
     private, friends-only use, but revisit/replace before any broad public distribution.
-    **Priority:** deferred behind league-readiness work (packaging, GP roster import, cache
-    refresh) — a visual enhancement only, not needed before the next league season.
-    *Still deferred:* **Automatic cache refresh** — the provider's in-memory cache isn't
-    invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
-    for personal/testing use, to be made automatic before any release to friends/users (likely after
-    2c, unless it bites earlier). A persisted `track_layouts/*.parquet` cache also stays deferred.
+    **Priority:** deferred behind league-readiness work (packaging, GP roster import) — a visual
+    enhancement only, not needed before the next league season.
+    *Automatic cache refresh — **DONE** 2026-08-02 (was PRIORITIES → A1).* The provider's in-memory
+    cache was never invalidated, so a stale weekend layout survived a mid-run ingest/re-ingest
+    until app restart. `TrackLayoutProvider.invalidate()` now clears it whole (an ingest can touch
+    any weekend; a re-ingest touches all of them), driven unconditionally from
+    `MainWindow._refresh_current_view()` via `LapsView.invalidate_caches()` — *not* through the
+    visible-page refresh, which would have kept the bug alive whenever the ingest finished while
+    another surface was showing. Deleting a session's stored results goes the same way, via the
+    weekend page's new `sessions_changed` signal. Note the cache held `None` as a real value ("fewer than
+    `_MIN_LAPS` usable laps → draw the driven line"), so a weekend that later became buildable was
+    stuck on the driven line; that entry is dropped too. A persisted `track_layouts/*.parquet`
+    cache stays deferred (PRIORITIES → D3).
   - *2c — car-status graphic.* A car silhouette (in-game neon style, tyres as corner gauges) with
     colour-coded tyre / engine / body-damage zones. Rendered as SVG-authored `QGraphicsScene` path
     items over a Qt-free, tested `car_status.py` model; three threshold rules (tyre + engine wear
@@ -163,10 +179,11 @@ list both under the same version.
     — DONE.** `CarStatusGraphic` renders the car — Inkscape-traced body regions, chassis/nose outline,
     floor-edge wings and front suspension — coloured by the model with per-part tooltips, plus four
     procedural corners (on-car tyre + inboard brake block + dashed connector to a wear/temp corner gauge),
-    wired below the tyre box on the detail page. The `_svg_path` parser was extended to the full Inkscape
+    wired into the detail page's left column. The `_svg_path` parser was extended to the full Inkscape
     command set (S/T smooth curves, A arcs; `test_svg_path.py`) so parts are authored visually — see the
-    Inkscape workflow + `docs/car_template.svg` in DECISIONS. *Optional later:* fold
-    `tyre_box._wear_color` into `car_status` (shared 60/80 rule).
+    Inkscape workflow + `docs/car_template.svg` in DECISIONS. *The "optional later: fold
+    `tyre_box._wear_color` into `car_status`" item is moot* — the post-2c polish removed `TyreBox`
+    entirely, so the 60/80 rule now lives only in `car_status`.
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
@@ -211,9 +228,12 @@ weeks). Summary of the locked direction:
   `release.yml` (preflight gate + test suite →
   `USER_GUIDE.pdf` on Linux via pandoc/xelatex + the PyInstaller Windows build → a **full** GitHub
   Release). CI **verifies** the version, never stamps it (`packaging/check_version.py`), so the
-  artifact is exactly the tagged commit. The PDF and `roster_template.csv` ship **beside the exe**,
-  reachable from the Help page's **Open user guide** via the new `paths.app_dir()` (third path kind)
-  with a PDF → source-`.md` → GitHub fallback chain; **Open data / captures / logs folder** actions
+  artifact is exactly the tagged commit. The PDF, `roster_template.csv`, `LICENSE` and `NOTICE.md`
+  ship **beside the exe**,
+  reachable from the Help page's **Open user guide** and **Licences & notices** via the new
+  `paths.app_dir()` (third path kind)
+  with a PDF → source-`.md` → GitHub fallback chain (the notices need only two steps — `app_dir()`
+  is the repo root in a source run); **Open data / captures / logs folder** actions
   landed alongside (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer rather than the
   data moving). Real self-updater — velopack/Sparkle/`tufup` — still deferred. Details + rationale in
   `docs/PACKAGING.md`.
@@ -221,7 +241,10 @@ weeks). Summary of the locked direction:
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.
 
-### Open — Windows recorder stalls (found 2026-08-01, capture `20260729_182357`)
+### RESOLVED (v0.4.2, verified 2026-08-02) — Windows recorder stalls
+*Kept in full: the reasoning took several wrong turns and the evidence is worth not re-deriving.*
+
+Found 2026-08-01, capture `20260729_182357`.
 On the packaged Windows build the recorder process stops being scheduled for minutes at a time.
 Windows' default 64 KB UDP receive buffer holds only ~0.3 s of telemetry at the ~0.2 MB/s stream
 rate, so everything past that is kernel-dropped; resumption shows a ~64 KB drain at 20–50 MB/s
@@ -269,10 +292,29 @@ suffices.
 suspends for 22 s nor takes the network stack down. The evidence points at sleep, so this would be
 cargo-culting. Not implemented.
 
-**Still open.** Confirm on Windows that a long untouched recording now logs `stay-awake active` and
-**no** `recorder stalled` lines, and that the Final Classification survives. **The "missing middle
-laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly the same root cause,
-not a separate bug.**
+**Verified on Windows v0.4.2** (capture `20260802_101555`, 2026-08-02) — a 27-minute untouched
+recording of Q1/Q2/Q3, against a stall that previously hit at 7.5 minutes:
+
+| | v0.4.1 | v0.4.2 |
+|---|---|---|
+| stall warnings | `recorder stalled 22.3s` at 7.5 min | **none in 27 min** |
+| buffer drains | 64 KB @ 20–50 MB/s | **none** — every gap resumes at 0.13–0.82 MB/s |
+| session clocks | — | Q1 1080→0, Q2 900→0, Q3 720→0, all complete |
+| Final Classification | missing | **Q1=2, Q2=2, Q3=5 (9 total)**, no reconstructed tables |
+
+Log shows `stay-awake active for this recording` at start and `stay-awake released` on stop, so the
+request doesn't outlive the recording. Residual loss 0.64–1.04 % is the accepted Wi-Fi baseline
+(PS5 → laptop), not a recorder problem. `ES_DISPLAY_REQUIRED` was kept — it was never isolated
+from `ES_SYSTEM_REQUIRED`, so dropping it remains an untested one-line experiment.
+
+**Caveat for managed machines.** `SetThreadExecutionState` prevents *sleep*; it cannot override a
+group-policy or password-protected **lock**. That should still be fine — a locked-but-awake machine
+keeps its NIC up and keeps scheduling the recorder, and sleep was the failure mode — but it hasn't
+been tested on a policy-managed device.
+
+**The "missing middle laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly
+the same root cause and should be considered resolved with it** — worth a spot-check on the next
+long Windows race rather than a dedicated investigation.
 
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:
@@ -296,9 +338,10 @@ not a separate bug.**
   Packaging → data backfill).
 - **Alembic.** Adopt at the first *non-additive* migration (rename / type change / drop /
   backfill). Until then, additive-only + `ensure_schema`.
-- **Complete `DRIVER_NAMES`.** The AI driver-id table is partial (~11 entries); fill it from the
-  spec appendix so AI driver-id lookups resolve. `diagnose_participants.py` surfaces which ids
-  are still unresolved.
+- **Complete `DRIVER_NAMES`. DONE (2026-08-02).** The AI driver-id table now holds every entry
+  from both UDP spec PDFs (F1 25 v3 + the 2026 season pack). An id that still fails to resolve is
+  newer than the specs we have, not a gap to fill — `diagnose_participants.py` surfaces which, and
+  unknown ids degrade to a readable placeholder rather than an error.
 
 ## Capture compression
 - **Done — the hybrid landed.** Ingest is archive-first (`pipeline.archive_and_ingest`): compress

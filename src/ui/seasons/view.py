@@ -8,17 +8,24 @@ this widget, and inside the one application window - nothing opens a new window.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from ..season_roster import SeasonRosterFiles
 from .create_page import CreatePage
 from .detail_page import DetailPage
+from .edit_calendar_page import EditCalendarPage
 from .overview_page import OverviewPage
 from .weekend_page import WeekendPage
 
 
 class SeasonsView(QWidget):
     """Browse / create / inspect seasons and drill into weekends, all in one widget."""
+
+    # Not a navigation signal: it says "stored session data changed", so the window can tell the
+    # other surfaces to drop what they derived from it. Re-emitted from the weekend page, which
+    # owns the only delete action that removes stored sessions.
+    sessions_changed = Signal()
 
     def __init__(self, season_store, session_store, parent=None) -> None:
         """Initialize the seasons view and wire page navigation signals."""
@@ -29,6 +36,7 @@ class SeasonsView(QWidget):
         self._create = CreatePage(season_store)
         self._detail = DetailPage(season_store, session_store, self._season_rosters)
         self._weekend = WeekendPage(season_store, session_store, self._season_rosters)
+        self._edit_calendar = EditCalendarPage(season_store)
 
         self._overview.create_requested.connect(self._show_create)
         self._overview.season_requested.connect(self._show_detail)
@@ -38,9 +46,14 @@ class SeasonsView(QWidget):
         self._detail.weekend_requested.connect(self._show_weekend)
         self._weekend.detail_requested.connect(self._show_detail)
         self._weekend.overview_requested.connect(self._show_overview)
+        self._weekend.sessions_changed.connect(self.sessions_changed)
+        self._detail.edit_calendar_requested.connect(self._show_edit_calendar)
+        self._edit_calendar.saved.connect(self._show_detail)
+        self._edit_calendar.cancelled.connect(self._show_detail)
 
         self._stack = QStackedWidget()
-        for page in (self._overview, self._create, self._detail, self._weekend):
+        for page in (self._overview, self._create, self._detail, self._weekend,
+                     self._edit_calendar):
             self._stack.addWidget(page)
 
         layout = QVBoxLayout(self)
@@ -89,3 +102,8 @@ class SeasonsView(QWidget):
         """Switch to the weekend page for a given season/round."""
         self._stack.setCurrentWidget(self._weekend)
         self._weekend.load(season_id, round_number)
+
+    def _show_edit_calendar(self, season_id: int) -> None:
+        """Switch to the calendar editor for a season."""
+        self._stack.setCurrentWidget(self._edit_calendar)
+        self._edit_calendar.load(season_id)

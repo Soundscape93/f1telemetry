@@ -15,10 +15,11 @@ import dataclasses
 import shutil
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from ..domain.models import CarDamage, Lap, LapTyreContext
+from .engine import create_db_engine
 from .migrations import ensure_schema
 from .schema import Base, LapRow
 from .trace_files import read_trace, write_trace
@@ -31,7 +32,7 @@ class LapStore:
 
     def __init__(self, url: str = _DEFAULT_URL, trace_dir: str = "lap_traces",
                  echo: bool = False) -> None:
-        self._engine = create_engine(url, echo=echo)
+        self._engine = create_db_engine(url, echo=echo)
         Base.metadata.create_all(self._engine)  # new tables (incl. laps)
         ensure_schema(self._engine)             # additive columns on existing tables
         self._Session = sessionmaker(bind=self._engine)

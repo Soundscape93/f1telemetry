@@ -38,6 +38,19 @@ class TrackLayoutProvider:
         if key not in self._cache:
             self._cache[key] = build_layout(self._weekend_traces(base))
         return self._cache[key]
+
+    def invalidate(self) -> None:
+        """Drop every memoised layout, so the next request rebuilds from the stored laps.
+        
+        Called when an ingest or re-ingest changes what laps exist (PRIORITIES -> ALL). Clearing
+        the whole cache rather than one key is deliberate: an ingest can add laps to any weekend,
+        and re-ingest rewrites all of them, so there is no cheaper correct answer.
+
+        Note the cached value may be ``None`` - this weekend had to few usable Motion laps, fall
+        back to the driven line". That entry has to go too: it is precisely the answer a fresh
+        ingest is most likely to have just made wrong.
+        """
+        self._cache.clear()
     
     def _weekend_traces(self, base) -> list:
         """Every valid, Motion-carrying lap trace across the base session's race weekend."""

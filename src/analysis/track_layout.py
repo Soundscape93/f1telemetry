@@ -12,7 +12,7 @@ any single lap covers, and the median self-heals a lap's gap because the others 
 alignment step is needed because F1 track world coordinates are fixed geometry - the same point on
 track is the same pos_x/pos_z across laps and sessions.
 
-Pure numpy, Qt-free and store-free (the weekend lap gathering lives in ui/laps/track_layouts.py),
+Pure numpy, Qt-free and store-free (the weekend lap gathering lives in ui/laps/track_layout.py),
 so it is unit-testable in isolation.
 """
 from __future__ import annotations

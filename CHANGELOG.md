@@ -16,9 +16,61 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
-     Carry the **Known issues** list forward from the last release and prune whatever is fixed:
-     dropping it silently tells testers the issues went away. (It was lost after v0.3.0 this way.)
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.5.0 — 2026-08-02
+
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
+stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- **A season's calendar can now be edited after it's created** — Seasons → open a season →
+  **Edit calendar**. Add, remove and reorder rounds with the same picker used when creating a
+  season. Rounds that already have sessions assigned are **locked**: they keep both their position
+  and their track, and the editor names them before you start. If an edit would move or drop one,
+  it's refused and tells you exactly which rounds are affected — so a stored result can never end
+  up filed under the wrong track. To change a locked round, unassign its sessions first from that
+  round's weekend. The season's mode, number, nickname and game format are not editable here.
+- **Help → Back up database…** saves a copy of your database wherever you choose. It is safe to do
+  while the app is busy — including in the middle of a long re-read — and the copy is always a
+  complete, consistent database rather than a half-written file. Use it when you report a bug, or
+  before doing anything you're unsure about. Your captures remain the real source of truth: a lost
+  database can always be rebuilt from them, which a lost capture cannot.
+- The app now ships its licence and its third-party notices next to the executable, and the Help
+  page has a **Licences & notices** button that opens them. They cover the components the build
+  bundles (Qt/PySide6, NumPy, Apache Arrow, SQLAlchemy, PyQtGraph, zstandard and the nationality
+  flag icons), state that this is an **unofficial tool** with no affiliation to Formula 1, the FIA,
+  EA or Codemasters, and note that captures can contain other players' online names — so share them
+  only with people who expect it. The Help page carries a short version of the same notice, and the
+  user guide has it as a closing section.
+
+### Changed
+- The database now uses SQLite's write-ahead logging. In practice: the app stays readable while it
+  is writing, so browsing your seasons and laps during a long "re-read captures" pass no longer
+  competes with it, and opening the app twice by accident is far less likely to leave one of them
+  stuck. Nothing about your stored data changes and no re-read is needed — existing databases
+  switch over the first time this version opens them.
+
+### Fixed
+- The track map on the lap detail page no longer keeps showing an outdated shape after new laps
+  are read. The map draws one clean outline per race weekend, built from that weekend's laps, and
+  the result was worked out once and then kept for the rest of the session — so recording or
+  re-reading more laps from a weekend changed nothing on screen until the app was restarted. That
+  included the case where a weekend had too few laps to build the clean outline: it stayed on the
+  single driven line even once enough laps existed. The map is now rebuilt whenever stored laps
+  change — after recording, after re-reading your captures, and after deleting a session's stored
+  results — and a lap that is already open is redrawn straight away.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 ## v0.4.2 — 2026-08-01
 

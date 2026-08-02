@@ -48,5 +48,32 @@ class ResolveGuideTest(unittest.TestCase):
         self.assertEqual(target.path.name, user_guide.MD_NAME)
 
 
+class ResolveNoticesTest(unittest.TestCase):
+    def test_notices_beside_the_exe_are_used(self):
+        with TemporaryDirectory() as tmp:
+            app_dir, _ = _make_dirs(tmp)
+            (app_dir / user_guide.NOTICES_NAME).write_text("# Notices", encoding="utf-8")
+
+            target = user_guide.resolve_notices(app_dir=app_dir)
+            self.assertTrue(target.is_local)
+            self.assertEqual(target.path, app_dir / user_guide.NOTICES_NAME)
+
+    def test_github_fallback_when_the_notices_were_not_unzipped(self):
+        """Never dead-ends: the LGPL notice for the bundled Qt must reach the user either way."""
+        with TemporaryDirectory() as tmp:
+            app_dir, _ = _make_dirs(tmp)
+
+            target = user_guide.resolve_notices(app_dir=app_dir)
+            self.assertFalse(target.is_local)
+            self.assertEqual(target.url, user_guide.notices_url())
+            self.assertIn("/blob/main/NOTICE.md", target.url)
+
+    def test_defaults_resolve_the_notices_in_this_checkout(self):
+        """app_dir() is the repo root in a source run - which is where NOTICE.md lives."""
+        target = user_guide.resolve_notices()
+        self.assertTrue(target.is_local)
+        self.assertEqual(target.path.name, user_guide.NOTICES_NAME)
+
+
 if __name__ == "__main__":
     unittest.main()

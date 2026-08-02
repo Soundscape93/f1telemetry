@@ -114,13 +114,21 @@ def main() -> int:
     args = parser.parse_args()
 
     changelog = CHANGELOG.read_text(encoding="utf-8")
-     # Asked before --check, and keyed on the changelog/version pair rather than the tip commit
+    # Asked before --check, and keyed on the changelog/version pair rather than the tip commit
     # subject: a merge landing after the bump would hide a subject test, but cannot hide this.
     # Same reasoning as tag.yml, which keys on the version file for exactly this robustness.
     if args.is_prepared:
         version = source_version()
-        prepared = re.search(rf"^##\s+v{re.escape(version)}\b", changelog, re.MULTILINE) is not None
-        print(f"v{version} is {'already' if prepared else 'not yet'} in CHANGELOG.md")
+        has_section = re.search(rf"^##\s+v{re.escape(version)}\b", changelog, re.MULTILINE) is not None
+        notes_pending = bool(_strip_comments(unreleased_body(changelog)).strip())
+        # Prepared means the bump already moved *this cycle's* notes out of Unreleased, so both
+        # halves are needed. The version's own section survices every later release, so on its own
+        # it would skip every future bump; an empty Unreleased section alone can't tell "just bumped" from
+        # "nothing written yet".
+        prepared = has_section and not notes_pending
+        print(f"v{version}: section {'present' if has_section else 'absent'}, "
+              f"Unreleased {'has notes' if notes_pending else 'empty'} -> "
+              f"{'already prepared' if prepared else 'not prepared'}")
         return 0 if prepared else 1
     
     problems = check(changelog)

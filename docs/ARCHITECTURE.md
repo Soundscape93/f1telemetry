@@ -43,8 +43,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`enums.py`** — `PacketId`, `SessionType`, `ResultStatus`, `ResultReason`, `Formula`,
   `Weather`, tyre/ERS enums, and `safe_enum(EnumCls, value)` → member or raw int (enums grow).
 - **`reference.py`** — id→name lookups: `track_name`, `team_name`, `driver_name`,
-  `nationality_name`, backed by `TEAM_NAMES` / `DRIVER_NAMES` (the driver table is partial —
-  see ROADMAP). Unknown ids return `"Unknown … (n)"`.
+  `nationality_name`, backed by `TEAM_NAMES` / `DRIVER_NAMES` (both complete against the F1 25 v3
+  and 2026 season-pack specs as of 2026-08-02). Unknown ids return `"Unknown … (n)"`.
 - **`registry.py`** — `build_registry()` maps `(format, packet_id)` → struct class.
 - **`parser.py`** — `PacketParser.parse(payload)`: reads the header, looks up the struct,
   checks `len(payload) == sizeof(struct)`, returns the typed packet (or `None`); tracks
@@ -113,11 +113,23 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
+- **`engine.py`** — `create_db_engine`, the one place the database is opened. Every store builds
+  its **own** `Engine` (SQLite dislikes a connection shared across threads, and the ingest /
+  re-ingest workers run on theirs), so what is shared has to be the *setup function*, not an
+  engine: whichever store opens the file first must configure it exactly as any other would. It
+  applies the SQLite pragmas — `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout` — and
+  passes non-SQLite URLs through untouched, keeping the layer engine-agnostic. Deliberately does
+  **not** set `foreign_keys` (see PACKAGING / DECISIONS).
+- **`backup.py`** — `backup_database()` over SQLite's `VACUUM INTO`: a consistent copy of a *live*
+  database, which a filesystem copy cannot give once WAL is on. Safe to run mid-ingest. Feeds
+  Help → *Back up database…*; writes a copy to a user-chosen path and never exposes the live file.
 - **`schema.py`** — the shared SQLAlchemy table layer.
 - **`sessions.py`** — `SessionStore`: persists classification + session metadata + `game_mode`;
   `session_uid` stored as TEXT (uint64 high-bit); tyre stints as a JSON column; enums as raw
   ints → `safe_enum` on load; `save()` is idempotent (replace-by-uid).
-- **`seasons.py`** — `SeasonStore`: create/get/list/delete seasons, `set_calendar`,
+- **`seasons.py`** — `SeasonStore`: create/get/list/delete seasons, `set_calendar` (which
+  **refuses** an edit that would move, re-point or drop a round holding an assigned session —
+  raises `CalendarConflictError`; the rule lives in `domain/calendars`, see DECISIONS),
   `assign_session` / `unassign_session`, `assignments_for_season`,
   `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
@@ -182,7 +194,7 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   single-lap excursions and self-heals the lap-1 S/F gap; returns `None` below `_MIN_LAPS` (3) so the
   caller falls back to the driven line. Deliberately *not* built on `traces.align` (which shrinks to
   the laps' overlap and would re-open that gap). Store-free — the weekend lap gathering lives in
-  `ui/laps/track_layouts.py`.
+  `ui/laps/track_layout.py`.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.
@@ -204,11 +216,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `display_name_fn(roster)`, the roster→name resolver passed
   as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
   surfaces reuse the same builder.
-  The lap-detail widgets also live here: `tyre_box.py` (`TyreBox` — the 4-box RL/RR/FL/FR tyre
-  graphic mapped to the on-car FL FR / RL RR layout, `wheel_grid_cells()` the tested placement),
-  `damage_panel.py` / `setup_panel.py` (`build_damage_table` / `build_setup_table` over the Qt-free
-  `damage_rows` / `setup_rows`, rendered via `tables.build_kv_table` — a shared key/value table with
-  bold section headers), and `trace_plot.py` (`TracePlot` — stacked, distance-linked telemetry via
+  The lap-detail widgets also live here: `damage_panel.py` (`build_damage_table` over the Qt-free
+  `damage_rows`, rendered via `tables.build_kv_table` — a shared key/value table with bold section
+  headers), `setup_panel.py` (`build_setup_table` over the Qt-free `setup_fields`, rendered as
+  slider rows via `slider_row.py`'s `SetupSliderRow` / `SliderMarkerBar`; the field list and
+  in-game ranges live in `_SETUP_SPEC`), and `trace_plot.py` (`TracePlot` — stacked, distance-linked telemetry via
   pyqtgraph, lazily imported so it degrades to an install hint if absent). `set_traces` draws either
   one lap (per-channel colours, the 1b look) or an **overlay** of several: aligned on a shared grid,
   coloured *and* dash-styled per lap, with a legend row above the plots and a bottom Δ-time row;
@@ -235,17 +247,28 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   The SVG-authored → QGraphicsScene path-item approach from DECISIONS; authoring template in
   `docs/car_template.svg`.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
-  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
-  → detail → weekend) and does nothing but wire their **navigation signals** to page switches —
+  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the five pages (overview → create
+  → detail → weekend, plus the calendar editor) and does nothing but wire their **navigation
+  signals** to page switches —
   each page owns its own widgets, its own route state (e.g. the loaded season/round id), and its
   own data operations (create, delete, assign, roster create/import). Pages never reference
   siblings; they emit intent (`season_requested`, `weekend_requested`, `create_requested`,
   `cancelled`, `overview_requested`, `detail_requested`) and the container decides what shows.
+  One signal is deliberately **not** navigation: `sessions_changed`, emitted by the weekend page
+  when its delete action removes a session's stored results and re-emitted by `SeasonsView` for
+  `MainWindow` to fan out. It exists because other surfaces derive cached state from those rows
+  (the laps surface's canonical track map), and the same no-sibling-references rule means the
+  weekend page cannot invalidate that itself.
   A `_show_*` switches the page first, then calls its `load`/`reload`, so a vanished-target
   fallback signal re-navigates last and wins. Pages: `overview_page.py` (season cards / empty
   state + delete), `create_page.py` (the form + create), `detail_page.py` (calendar + standings +
   LEAGUE roster panel), `weekend_page.py` (round-centric session assignment: a capture picker
-  filtered to the round's track, plus each assigned session's foldable classification).
+  filtered to the round's track, plus each assigned session's foldable classification),
+  `edit_calendar_page.py` (re-author an existing calendar with the same `CalendarPicker` the create
+  page uses; names the locked rounds up front and lets `set_calendar` refuse the rest — validation
+  at save rather than affordances in the picker, so the rule is testable without a `QApplication`).
+  It is **not** in `refresh()`'s if-chain on purpose: an ingest completing mid-edit must not reload
+  the page and discard work in progress.
   `labels.py` holds the shared `mode_label` / `format_label` / `season_title` helpers.
   LEAGUE detail/weekend pages are roster-aware: they load-or-seed the season JSON read-only, offer
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
@@ -256,13 +279,15 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →
   the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
   filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
-  lap via `LapStore.load` and composes the `components/` lap widgets. The left column stacks the
-  tyre box and the `CarStatusGraphic` (iteration 2c); the right holds the damage and setup tables
-  (setup resolved by `SessionResult.setup_for_lap`); below sits the `TracePlot`.
+  lap via `LapStore.load` and composes the `components/` lap widgets. The left column holds the
+  `CarStatusGraphic` (iteration 2c — it replaced the removed `TyreBox` in the post-2c polish, and
+  carries tyre age on its title line with blisters/tyre damage in the corner-gauge tooltips); the
+  right holds the damage and setup tables (setup resolved by `SessionResult.setup_for_lap`); below
+  sits the `TracePlot`.
   When the lap carries Motion it also shows a `TrackMap` panel, wired to the plot's `cursor_moved`
   signal so hovering a trace moves the marker round the circuit (iteration 2b). The map draws the
   **canonical median line** for the whole race weekend when available (iteration 2b.1), falling back
-  to the driven lap's own line; `track_layouts.py` (`TrackLayoutProvider`, Qt-free) does the
+  to the driven lap's own line; `track_layout.py` (`TrackLayoutProvider`, Qt-free) does the
   cross-store walk — every valid Motion lap across the sessions sharing this one's `weekend_link_id`
   at the same `track_id` — feeds them to `analysis.track_layout.build_layout`, and caches the result
   keyed `(weekend_link_id, track_id)`. Its

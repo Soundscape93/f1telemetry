@@ -25,12 +25,22 @@ Motion (0) for g-force. Deferred until a feature needs them: Car Setups, Car Dam
 Motion Ex, Lobby Info, Time Trial, Lap Positions, Event.
 
 ## Authoritative sources & joins
-- **Final Classification (id 8, sent once at race end)** is the source of truth for results and
-  points. **Session History (id 11)** gives per-lap times and sectors — timing comes from here,
-  not from live Lap Data. (Sector field name is `sector1_time_ms_part` — no "in".)
-- **Missing Final Classification → reconstructed result.** Because id 8 is sent *once*, a recording
-  stopped a beat early (or a single dropped datagram) can miss it entirely, which used to leave the
-  results table empty (0 drivers). When it's absent, the assembler synthesizes a best-effort
+- **Final Classification (id 8, sent repeatedly at session end)** is the source of truth for
+  results and points. **Session History (id 11)** gives per-lap times and sectors — timing comes
+  from here, not from live Lap Data. (Sector field name is `sector1_time_ms_part` — no "in".)
+- **The game sends Final Classification several times per session, not once.** Measured
+  2026-08-01 on `captures/20260729_200443.f1cap.zst` (a full league weekend, 105 min): **22 FC
+  packets across 4 sessions** — Q1=6, Q2=5, Q3=6, Race=5. This corrects a long-standing note here
+  and in DECISIONS that said "sent once at race end", and the correction is load-bearing: with
+  5–6 copies, ordinary ~0.3 % packet loss essentially **cannot** lose the classification. Losing
+  it means losing the whole results-screen window, which in practice only a multi-minute recorder
+  stall does (see ROADMAP → *Windows recorder stalls*, fixed in v0.4.2). *Not yet measured:* the
+  **temporal spread** of the copies — whether they arrive as a burst or spaced across the results
+  screen. Only the counts were taken, so don't assert a spacing anywhere until someone measures it.
+- **Missing Final Classification → reconstructed result.** A recording stopped well before the
+  results screen (or a long recorder stall over it) can miss every copy, which used to leave the
+  results table empty (0 drivers). This is **rarer than the old "sent once" note implied**. When
+  it's absent, the assembler synthesizes a best-effort
   classification (`reconstruct_classification`) from the **last Lap Data frame** + **per-car Session
   History**: finishing order, laps, best lap and tyre stints are recovered exactly; **total race
   time** as the sum of Session History lap times (the game defines the FC total as race time
@@ -60,9 +70,11 @@ The normalizer reads, per car: `ai_controlled`, `driver_id`, `network_id`, `team
 - **Humans capture as name `"Player"` when online-name sharing is off.** In this league that's
   the norm, so **resolve league identity by race number** (distinct and stable), not by name.
   Online names appear only when a driver enables public telemetry.
-- **`driver_id == 255` means a human** (no AI driver id). AI `driver_id`s map via `DRIVER_NAMES`
-  — but that table is currently partial (~11 entries); an unresolved AI id usually just means the
-  table needs completing from the spec appendix (see ROADMAP), not that the data is bad.
+- **`driver_id == 255` means a human** (no AI driver id). AI `driver_id`s map via `DRIVER_NAMES`,
+  which is **complete** as of 2026-08-02 — every id from both UDP spec PDFs (F1 25 v3 and the
+  2026 season pack) is in `protocol/reference.py`. An unresolved id now means a value newer than
+  the specs we have, not a gap to fill; `_name()` yields a readable placeholder either way. Use
+  `diagnose_participants.py` to see whether any ids still fail to resolve.
 - **`network_id` is per-lobby** (and 255 when not networked) — useless as a cross-lobby key.
 - **`team_id == 255` (or otherwise unknown) → "Unknown team".** Note: `team_id == -1` is *our
   normalizer's placeholder* for a car that failed the roster join — historically a bug signal,
@@ -176,9 +188,9 @@ BLACK_FLAGGED, RED_FLAGGED, MECHANICAL_FAILURE, …). The UI collapses non-finis
 
 ## Diagnostic tools (read-only, run from the repo root)
 Built during the roster-blank investigation; keep them for future data-quality work.
-Note: these tools open captures with plain `open()`, so they currently read only uncompressed
-`.f1cap` files — decompress a `.f1cap.gz` first (or route them through `open_capture`, see
-ROADMAP).
+They read through `ingest.archive.open_capture`, so a plain `.f1cap`, a `.f1cap.gz` and a
+`.f1cap.zst` all work with no manual decompression. (An older note here said they used plain
+`open()` and needed uncompressed input — that was fixed with the codec-dispatch work.)
 
 - **`python -m f1telemetry.src.ingest.inspect <capture.f1cap>`** — per-`(format, packet id)`
   packet tally plus byte/duration totals; the quick eyeball check that a recording is
