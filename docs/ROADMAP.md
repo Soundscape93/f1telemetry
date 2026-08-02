@@ -221,7 +221,10 @@ weeks). Summary of the locked direction:
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.
 
-### Open — Windows recorder stalls (found 2026-08-01, capture `20260729_182357`)
+### RESOLVED (v0.4.2, verified 2026-08-02) — Windows recorder stalls
+*Kept in full: the reasoning took several wrong turns and the evidence is worth not re-deriving.*
+
+Found 2026-08-01, capture `20260729_182357`.
 On the packaged Windows build the recorder process stops being scheduled for minutes at a time.
 Windows' default 64 KB UDP receive buffer holds only ~0.3 s of telemetry at the ~0.2 MB/s stream
 rate, so everything past that is kernel-dropped; resumption shows a ~64 KB drain at 20–50 MB/s
@@ -269,10 +272,29 @@ suffices.
 suspends for 22 s nor takes the network stack down. The evidence points at sleep, so this would be
 cargo-culting. Not implemented.
 
-**Still open.** Confirm on Windows that a long untouched recording now logs `stay-awake active` and
-**no** `recorder stalled` lines, and that the Final Classification survives. **The "missing middle
-laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly the same root cause,
-not a separate bug.**
+**Verified on Windows v0.4.2** (capture `20260802_101555`, 2026-08-02) — a 27-minute untouched
+recording of Q1/Q2/Q3, against a stall that previously hit at 7.5 minutes:
+
+| | v0.4.1 | v0.4.2 |
+|---|---|---|
+| stall warnings | `recorder stalled 22.3s` at 7.5 min | **none in 27 min** |
+| buffer drains | 64 KB @ 20–50 MB/s | **none** — every gap resumes at 0.13–0.82 MB/s |
+| session clocks | — | Q1 1080→0, Q2 900→0, Q3 720→0, all complete |
+| Final Classification | missing | **Q1=2, Q2=2, Q3=5 (9 total)**, no reconstructed tables |
+
+Log shows `stay-awake active for this recording` at start and `stay-awake released` on stop, so the
+request doesn't outlive the recording. Residual loss 0.64–1.04 % is the accepted Wi-Fi baseline
+(PS5 → laptop), not a recorder problem. `ES_DISPLAY_REQUIRED` was kept — it was never isolated
+from `ES_SYSTEM_REQUIRED`, so dropping it remains an untested one-line experiment.
+
+**Caveat for managed machines.** `SetThreadExecutionState` prevents *sleep*; it cannot override a
+group-policy or password-protected **lock**. That should still be fine — a locked-but-awake machine
+keeps its NIC up and keeps scheduling the recorder, and sleep was the failure mode — but it hasn't
+been tested on a policy-managed device.
+
+**The "missing middle laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly
+the same root cause and should be considered resolved with it** — worth a spot-check on the next
+long Windows race rather than a dedicated investigation.
 
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:
