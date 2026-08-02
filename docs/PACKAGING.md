@@ -137,11 +137,27 @@ The practical measures are therefore:
 - keep it in `data_root()` and **don't surface it** — no "Open database" action anywhere in the UI;
 - expose **captures** and **logs** instead, which is what a tester actually needs;
 - **document** "don't hand-edit the database" in the user guide, together with the rebuild route;
-- queued — **now scheduled for Cycle 1** (PRIORITIES → C2/C3): **WAL mode** (a checklist concern for
-  double-launch, and it eases reader/writer contention while a minutes-long re-ingest runs; it is
-  *not* enabled today) and a **"Back up database…"** action implemented as SQLite's `VACUUM INTO` —
-  the only safe way to copy a *live* WAL database, and the right primitive for "send me your DB" bug
-  reports. Do the two together: `VACUUM INTO` is what makes WAL safe to hand around.
+- **DONE 2026-08-02 (PRIORITIES → C2/C3): WAL mode + a "Back up database…" action.** Shipped
+  together, because `VACUUM INTO` is what makes WAL safe to hand around.
+  **WAL** lives in `storage/engine.py`. The five stores are repositories over the same file and
+  each builds its own engine (SQLite dislikes a connection shared across threads; the ingest
+  workers have their own), so connection setup had to be a shared *function* — `create_db_engine`
+  — rather than a shared engine: whichever store opens the database first must leave it configured
+  as any other would. It sets `journal_mode=WAL` (a reader is no longer locked out by a running
+  ingest — the double-launch concern, and what a minutes-long re-ingest needs),
+  `synchronous=NORMAL` (WAL's usual companion; still crash-durable at the application level, and
+  the residual power-cut risk is acceptable precisely because this database is disposable — see
+  above) and `busy_timeout=10s`. `foreign_keys` is deliberately **not** set: SQLite defaults it
+  off, the cascades here are ORM-level, and enabling it would interact with the intentionally
+  FK-free `session_assignments`. That is an Alembic-era decision, not a WAL one.
+  **The backup** is `storage/backup.py` → `backup_database()`, surfaced as Help → *Back up
+  database…*. It is allowed to run *during* an ingest — a single read transaction that neither
+  blocks the writer nor tears — which is the whole point of pairing it with WAL. Note it does not
+  contradict the "no Open database action" rule above: it writes a **copy** to a path the user
+  picked, and never exposes the live file. Implementation notes for anyone touching it: `VACUUM`
+  cannot run inside a transaction (needs `AUTOCOMMIT`), `VACUUM INTO` refuses an existing
+  destination (the caller unlinks, after the save dialog has asked), and the destination is a
+  **bound parameter** so Windows backslashes and quoted filenames can't break the statement.
 
 Tamper *detection* was considered and dropped: cost without benefit for a private league app.
 
@@ -612,11 +628,14 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
       still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
-- [x] Open the app **twice** → SQLite doesn't wedge. *Passed on both Windows instances (2026-08-02),
-      with Record pressed and no game running — nothing blocked.* **Note what this does not prove:
-      WAL mode is not actually enabled** (no `journal_mode` is set anywhere in `src/storage/`), so
-      the pass is "the contention never happened", not "WAL handled it". Enabling WAL is still
-      wanted — PRIORITIES → C2.
+- [ ] Open the app **twice** → SQLite doesn't wedge. *Re-test wanted.* It passed on both Windows
+      instances (2026-08-02, Record pressed, no game running), but that run predates WAL, so the
+      result meant "the contention never happened", not "WAL handled it". C2 has since enabled WAL
+      (`storage/engine.py`), so this is worth running again — this time it actually exercises the
+      mechanism, ideally with one instance mid-re-ingest while the other browses.
+- [ ] Help → **Back up database…** writes a `.db` beside where the user chose, the status line
+      reports its size, and the copy opens as a working database. Worth doing **while a re-ingest
+      runs** — that is the case C2/C3 exist for.
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
 - [ ] Note SmartScreen behavior and the exact click-through for the tester doc.
 

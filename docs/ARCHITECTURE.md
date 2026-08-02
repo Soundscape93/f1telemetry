@@ -113,6 +113,16 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
+- **`engine.py`** — `create_db_engine`, the one place the database is opened. Every store builds
+  its **own** `Engine` (SQLite dislikes a connection shared across threads, and the ingest /
+  re-ingest workers run on theirs), so what is shared has to be the *setup function*, not an
+  engine: whichever store opens the file first must configure it exactly as any other would. It
+  applies the SQLite pragmas — `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout` — and
+  passes non-SQLite URLs through untouched, keeping the layer engine-agnostic. Deliberately does
+  **not** set `foreign_keys` (see PACKAGING / DECISIONS).
+- **`backup.py`** — `backup_database()` over SQLite's `VACUUM INTO`: a consistent copy of a *live*
+  database, which a filesystem copy cannot give once WAL is on. Safe to run mid-ingest. Feeds
+  Help → *Back up database…*; writes a copy to a user-chosen path and never exposes the live file.
 - **`schema.py`** — the shared SQLAlchemy table layer.
 - **`sessions.py`** — `SessionStore`: persists classification + session metadata + `game_mode`;
   `session_uid` stored as TEXT (uint64 high-bit); tyre stints as a JSON column; enums as raw

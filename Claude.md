@@ -43,7 +43,10 @@ design depends on it.
   (`pyproject.toml` pins `requires-python >=3.11`; the Windows build machine uses 3.14.)
 - **UI:** PySide6 (+ PyQtGraph for charts).
 - **Storage:** SQLite via SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped`/`mapped_column`), kept
-  engine-agnostic so it *could* move to Postgres if a hosted server is ever built.
+  engine-agnostic so it *could* move to Postgres if a hosted server is ever built. Every store
+  opens the database through `storage/engine.py: create_db_engine` (WAL + `synchronous=NORMAL` +
+  `busy_timeout`) — each store owns its own `Engine`, so the *setup* is what's shared, not the
+  engine. Add a pragma there and nowhere else.
 - **Dependency manifest:** `pyproject.toml` (deps pinned `==`; `pyinstaller` under a `[package]`
   extra) — added in packaging Phase 0. Runtime third-party: PySide6, numpy, pyarrow, SQLAlchemy,
   plus lazy `pyqtgraph` (charts) + `zstandard` (new capture archives). `zstandard`'s wheel
@@ -80,7 +83,9 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                  v2025/structs.py, v2026/structs.py
       domain/    models.py, captures.py, normalizer.py, season.py, calendars.py, roster.py
       session/   assembler.py
-      storage/   schema.py, sessions.py, seasons.py, laps.py, captures.py,
+      storage/   engine.py (create_db_engine — the ONE place the DB is opened: WAL +
+                 synchronous=NORMAL + busy_timeout), backup.py (VACUUM INTO),
+                 schema.py, sessions.py, seasons.py, laps.py, captures.py,
                  meta.py (key/value app state — the PIPELINE_VERSION stamp)
       analysis/  standings.py
       ui/        app.py, main_window.py, help_page.py, season_roster.py, workers.py, formatting.py,

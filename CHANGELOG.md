@@ -24,6 +24,11 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 stored moved, so existing captures, sessions and standings are unaffected.
 
 ### Added
+- **Help → Back up database…** saves a copy of your database wherever you choose. It is safe to do
+  while the app is busy — including in the middle of a long re-read — and the copy is always a
+  complete, consistent database rather than a half-written file. Use it when you report a bug, or
+  before doing anything you're unsure about. Your captures remain the real source of truth: a lost
+  database can always be rebuilt from them, which a lost capture cannot.
 - The app now ships its licence and its third-party notices next to the executable, and the Help
   page has a **Licences & notices** button that opens them. They cover the components the build
   bundles (Qt/PySide6, NumPy, Apache Arrow, SQLAlchemy, PyQtGraph, zstandard and the nationality
@@ -31,6 +36,13 @@ stored moved, so existing captures, sessions and standings are unaffected.
   EA or Codemasters, and note that captures can contain other players' online names — so share them
   only with people who expect it. The Help page carries a short version of the same notice, and the
   user guide has it as a closing section.
+
+### Changed
+- The database now uses SQLite's write-ahead logging. In practice: the app stays readable while it
+  is writing, so browsing your seasons and laps during a long "re-read captures" pass no longer
+  competes with it, and opening the app twice by accident is far less likely to leave one of them
+  stuck. Nothing about your stored data changes and no re-read is needed — existing databases
+  switch over the first time this version opens them.
 
 ### Fixed
 - The track map on the lap detail page no longer keeps showing an outdated shape after new laps
