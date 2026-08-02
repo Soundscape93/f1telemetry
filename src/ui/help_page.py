@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from .. import paths
 from ..update_check import CheckStatus, releases_page
-from ..user_guide import resolve_guide
+from ..user_guide import resolve_guide, resolve_notices
 from ..version import __version__
 from .style import MUTED_TEXT_QSS
 from .workers import UpdateCheckWorker
@@ -66,6 +66,19 @@ _SETUP_HTML = (
     "<b>name</b> = canonical name shown in standings<br> "
     "<b>race_number</b> = the stable anchor <br> "
     "<b>online_names</b> = are used for standings if they are provided either by the telemetry data or the roster CSV. "
+)
+
+# The trademark/affiliation and data-responsibility notices, kept short enough to actually be
+# read. The full text (incl. the LGPL notice for the bundled Qt) is in NOTICE.md - shipped
+# beside the exe and opened by the Licences & notices button.
+_ABOUT_HTML = (
+    "F1 Telemetry is an <b>unofficial fan-made tool</b>, not affiliated with or endorsed by "
+    "Formula 1, the FIA, EA or Codemasters. F1 and related marks, and all team, driver and "
+    "circuit names, belong to their owners.<br><br>"
+    "Results and telemetry are read from the game's UDP stream on a best-effort basis and can be "
+    "incomplete — they are <b>not official results</b>. Captures can contain other players' "
+    "online names; you are responsible for how you share them.<br><br>"
+    "© 2026 Kevin Fust (Soundscape93). All rights reserved."
 )
 
 
@@ -125,6 +138,12 @@ class HelpPage(QWidget):
             "Open the full user guide - the PDF shipped next to the app, or the online copy.")
         self._guide_btn.clicked.connect(self._on_open_guide)
 
+        self._notices_btn = QPushButton("Licences && notices")
+        self._notices_btn.setMinimumHeight(32)
+        self._notices_btn.setToolTip(
+            "The licence for this app and the licences of the components it bundles.")
+        self._notices_btn.clicked.connect(self._on_open_notices)
+
         folder_row = QHBoxLayout()
         folder_row.setContentsMargins(0, 0, 0, 0)
         folder_row.setSpacing(8)
@@ -145,6 +164,12 @@ class HelpPage(QWidget):
         setup_body.setStyleSheet(MUTED_TEXT_QSS)
         setup_body.linkActivated.connect(self._on_setup_link)
 
+        about_title = QLabel("About")
+        about_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
+        about_body = QLabel(_ABOUT_HTML)
+        about_body.setWordWrap(True)
+        about_body.setStyleSheet(MUTED_TEXT_QSS)
+
         layout.addWidget(title)
         layout.addWidget(version)
         layout.addWidget(data_dir)
@@ -158,10 +183,15 @@ class HelpPage(QWidget):
         layout.addSpacing(6)
         layout.addWidget(self._guide_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
+        layout.addWidget(self._notices_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
         layout.addLayout(folder_row)
         layout.addSpacing(6)
         layout.addWidget(setup_title)
         layout.addWidget(setup_body)
+        layout.addSpacing(6)
+        layout.addWidget(about_title)
+        layout.addWidget(about_body)
         layout.addStretch(1)
 
         scroll = QScrollArea()
@@ -193,6 +223,11 @@ class HelpPage(QWidget):
         target = resolve_guide()
         url = QUrl.fromLocalFile(str(target.path)) if target.is_local else QUrl(target.url)
         self._open(url, "user guide")
+
+    def _on_open_notices(self) -> None:
+        target = resolve_notices()
+        url = QUrl.fromLocalFile(str(target.path)) if target.is_local else QUrl(target.url)
+        self._open(url, "licences and notices")
 
     def _on_open_folder(self, accessor, noun: str) -> None:
         try:

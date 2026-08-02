@@ -20,6 +20,29 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      dropping it silently tells testers the issues went away. (It was lost after v0.3.0 this way.)
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or
+stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- The app now ships its licence and its third-party notices next to the executable, and the Help
+  page has a **Licences & notices** button that opens them. They cover the components the build
+  bundles (Qt/PySide6, NumPy, Apache Arrow, SQLAlchemy, PyQtGraph, zstandard and the nationality
+  flag icons), state that this is an **unofficial tool** with no affiliation to Formula 1, the FIA,
+  EA or Codemasters, and note that captures can contain other players' online names — so share them
+  only with people who expect it. The Help page carries a short version of the same notice, and the
+  user guide has it as a closing section.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.4.2 — 2026-08-01
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or

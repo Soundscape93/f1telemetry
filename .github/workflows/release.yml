@@ -146,12 +146,21 @@ jobs:
         working-directory: f1telemetry
         shell: pwsh
         run: Copy-Item docs/roster_template.csv dist/f1telemetry/
+      
+      # LGPL v3 notice (Qt/PySide6) requires the licence notice to reach whoever gets the binary, so
+      # these ship beside the exe like the guide - not buried in _internal/.
+      - name: Add the licence notice beside the exe
+        working-directory: f1telemetry
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE dist/f1telemetry
+          Copy-Item NOTICE.md dist/f1telemetry
 
       - name: Sanity-check the bundle
         working-directory: f1telemetry/dist/f1telemetry
         shell: pwsh
         run: |
-          foreach ($item in "f1telemetry.exe", "_internal", "USER_GUIDE.pdf", "roster_template.csv") {
+          foreach ($item in "f1telemetry.exe", "_internal", "USER_GUIDE.pdf", "roster_template.csv", "LICENSE", "NOTICE.md") {
             if (-not (Test-Path $item)) { throw "missing from the bundle: $item" }
           }
 
