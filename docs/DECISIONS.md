@@ -144,6 +144,33 @@ what would trigger revisiting it.
   that suffix via `is_compressed_capture`; the new codec is an addition to the reader, never a
   replacement, so every existing recording stays importable.
 
+- **A calendar stays editable, but assigned rounds are frozen** (E6, 2026-08-02). Editing a
+  calendar is a wholesale replace, and `session_assignments` carries **no FK** to the rounds table
+  on purpose (invariant #4) — so nothing in the database stops an edit from re-filing a stored
+  result under a different track, or orphaning it into a round number that no longer exists.
+  Three options were weighed: *warn and preserve* the orphans, *warn and unassign* them, or
+  *restrict the edit*. We took the third: **a round with an assigned session keeps both its
+  `round_number` and its `track_id`.** The first two manage orphans; this one makes them
+  impossible, which is worth more than the flexibility it costs.
+  - **The check is positional, not gestural.** For each locked round *(n, t)*, the proposed
+    calendar must still have a round *n* whose track is *t*. That single test covers reordering,
+    inserting before, deleting before and truncating — including the case a "no reordering" rule
+    would miss entirely, where inserting a round at position 3 silently renumbers an assigned round
+    5 into round 6 with nothing having been dragged. It also correctly *permits* an edit that
+    leaves a locked round where it was, which matters in the sandbox modes where a track may
+    legitimately appear twice.
+  - **Enforced in `SeasonStore.set_calendar`**, not only in the editor page: at the single write
+    point the invariant is guaranteed rather than remembered, and the rule stays testable without a
+    `QApplication`. `protect_assigned=False` exists for a caller that has already cleared the
+    assignments itself; nothing passes it today.
+  - **The cost, accepted knowingly:** once round 1 has a session assigned, nothing can be inserted
+    before it. In practice a season becomes freely editable from the last assigned round onward,
+    plus reordering among unassigned rounds that don't cross a locked one. That covers the real use
+    case — a wrong calendar is almost always noticed before results exist.
+  - **Calendar only.** Mode, number, nickname and game format are not editable: changing the format
+    moves the track pool out from under the calendar (Madrid is 2026-only). A wrong-mode season is
+    deleted and recreated. Allowing those edits *while a season has no assignments* is a sensible
+    later feature, not part of this one.
 - **Connection setup is a shared function, not a shared engine — and WAL is on** (C2, 2026-08-02).
   Each store deliberately owns its `Engine`: SQLite dislikes a connection shared across threads and
   the ingest / re-ingest workers run on their own. That rules out configuring the database once at

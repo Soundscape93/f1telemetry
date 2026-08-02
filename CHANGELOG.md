@@ -24,6 +24,13 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 stored moved, so existing captures, sessions and standings are unaffected.
 
 ### Added
+- **A season's calendar can now be edited after it's created** — Seasons → open a season →
+  **Edit calendar**. Add, remove and reorder rounds with the same picker used when creating a
+  season. Rounds that already have sessions assigned are **locked**: they keep both their position
+  and their track, and the editor names them before you start. If an edit would move or drop one,
+  it's refused and tells you exactly which rounds are affected — so a stored result can never end
+  up filed under the wrong track. To change a locked round, unassign its sessions first from that
+  round's weekend. The season's mode, number, nickname and game format are not editable here.
 - **Help → Back up database…** saves a copy of your database wherever you choose. It is safe to do
   while the app is busy — including in the middle of a long re-read — and the copy is always a
   complete, consistent database rather than a half-written file. Use it when you report a bug, or

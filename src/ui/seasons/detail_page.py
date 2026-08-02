@@ -45,6 +45,7 @@ class DetailPage(QWidget):
 
     overview_requested = Signal()
     weekend_requested = Signal(int, int)
+    edit_calendar_requested = Signal(int)
 
     def __init__(self, season_store, session_store, season_rosters, parent=None) -> None:
         """Initialize the detail page."""
@@ -86,7 +87,17 @@ class DetailPage(QWidget):
         calendar_layout.setContentsMargins(0, 0, 0, 0)
         cal_caption = QLabel("Calendar")
         cal_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
-        calendar_layout.addWidget(cal_caption)
+        cal_header = QHBoxLayout()
+        cal_header.setContentsMargins(0, 0, 0, 0)
+        cal_header.addWidget(cal_caption)
+        cal_header.addStretch(1)
+        self._edit_calendar_btn = QPushButton("Edit calendar")
+        self._edit_calendar_btn.setToolTip(
+            "Add, remove or reorder rounds. Rounds that already have sessions assigned keep "
+            "their position and their track.")
+        self._edit_calendar_btn.clicked.connect(self._on_edit_calendar)
+        cal_header.addWidget(self._edit_calendar_btn)
+        calendar_layout.addLayout(cal_header)
         hint = QLabel("Double-click a round to open its weekend and assign sessions.")
         hint.setStyleSheet(MUTED_TEXT_QSS)
         calendar_layout.addWidget(hint)
@@ -311,6 +322,11 @@ class DetailPage(QWidget):
             f"Imported {len(roster.members)} roster members.",
         )
         self.load(self._season_id)
+
+    def _on_edit_calendar(self) -> None:
+        """Ask the container to open the calendar editor for the loaded season."""
+        if self._season_id is not None:
+            self.edit_calendar_requested.emit(self._season_id)
 
     def _on_calendar_activated(self, row: int, _column: int) -> None:
         """Request the weekend view for the activated round."""

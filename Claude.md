@@ -189,7 +189,11 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   container coordinating one widget per page via navigation signals. The custom-calendar picker
   is live: `create_page.py` embeds the reusable `ui/components/calendar_picker.py`, driven by
   `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
-  Grand Prix/League = reorderable sandbox with duplicates).
+  Grand Prix/League = reorderable sandbox with duplicates). **An existing calendar is editable**
+  (`ui/seasons/edit_calendar_page.py`, the fifth seasons page): a round holding an assigned session
+  keeps both its `round_number` and its `track_id`, checked positionally and enforced inside
+  `SeasonStore.set_calendar` (raises `CalendarConflictError`) so the rule can't be bypassed.
+  Calendar only — mode/number/nickname/format stay fixed.
   The **Laps** surface is now real: `ui/laps/` (foldable per-session lap cards + track/session
   filter → a lap detail page with the car-status graphic, damage/setup tables and stacked telemetry graphs),
   built on `LapStore.list`/`load`, the N-series-aware `analysis/traces.py`, and reusable lap

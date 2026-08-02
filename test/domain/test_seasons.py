@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from f1telemetry.src.domain.calendars import official_calendar
+from f1telemetry.src.domain.calendars import CalendarConflictError, official_calendar
 from f1telemetry.src.domain.models import Classification, ClassificationEntry, SessionResult
 from f1telemetry.src.domain.season import ROSTER_SEASON_MODES, SeasonMode, SeasonRound
 from f1telemetry.src.protocol.enums import Formula, ResultReason, ResultStatus, SessionType, Weather
@@ -80,6 +80,56 @@ class SeasonCrudTest(StoreTestBase):
         self.assertIsNone(self.seasons.get_season(s.season_id), "deleted season should not be retrievable")
         self.assertEqual(self.seasons.assignments_for_season(s.season_id), [],
                         "deleted season should have no assignments (cascaded)")
+
+
+class SetCalendarGuardTest(StoreTestBase):
+    """set_calendar refuses edits that would invalidate an assigned round (PRIORITIES -> E6)."""
+
+    def _season_with_assignment(self):
+        season = self.seasons.create_season(
+            SeasonMode.GRAND_PRIX, 1, 2025,
+            rounds=(SeasonRound(1, 0), SeasonRound(2, 2), SeasonRound(3, 13)))
+        self.sessions.save(make_session(901))
+        self.seasons.assign_session(901, season.season_id, 2)     # round 2 is now locked
+        return season
+
+    def _tracks(self, season_id):
+        return [(r.round_number, r.track_id)
+                for r in self.seasons.get_season(season_id).rounds]
+
+    def test_editing_around_a_locked_round_is_allowed(self):
+        season = self._season_with_assignment()
+        self.seasons.set_calendar(
+            season.season_id, (SeasonRound(1, 0), SeasonRound(2, 2), SeasonRound(3, 29),
+                               SeasonRound(4, 11)))
+        self.assertEqual(self._tracks(season.season_id),
+                         [(1, 0), (2, 2), (3, 29), (4, 11)])
+
+    def test_moving_a_locked_round_is_refused_and_changes_nothing(self):
+        season = self._season_with_assignment()
+        before = self._tracks(season.season_id)
+        with self.assertRaises(CalendarConflictError) as ctx:
+            self.seasons.set_calendar(
+                season.season_id, (SeasonRound(1, 2), SeasonRound(2, 0), SeasonRound(3, 13)))
+        self.assertEqual([c.round_number for c in ctx.exception.conflicts], [2])
+        self.assertEqual(self._tracks(season.season_id), before, "refused edit must not write")
+
+    def test_dropping_a_locked_round_is_refused(self):
+        season = self._season_with_assignment()
+        with self.assertRaises(CalendarConflictError):
+            self.seasons.set_calendar(season.season_id, (SeasonRound(1, 0),))
+
+    def test_a_season_with_no_assignments_is_freely_editable(self):
+        season = self.seasons.create_season(
+            SeasonMode.GRAND_PRIX, 2, 2025, rounds=(SeasonRound(1, 0), SeasonRound(2, 2)))
+        self.seasons.set_calendar(season.season_id, (SeasonRound(1, 2), SeasonRound(2, 0)))
+        self.assertEqual(self._tracks(season.season_id), [(1, 2), (2, 0)])
+
+    def test_protect_assigned_false_is_the_documented_escape_hatch(self):
+        season = self._season_with_assignment()
+        self.seasons.set_calendar(
+            season.season_id, (SeasonRound(1, 29),), protect_assigned=False)
+        self.assertEqual(self._tracks(season.season_id), [(1, 29)])
 
 
 class AssignmentTest(StoreTestBase):

@@ -73,6 +73,23 @@ Charles,16,xxCL16xx
 A blank template (`roster_template.csv`) is included in the release zip, and can also be saved from
 **Help → Setup / Configuration → Save a blank template CSV…**.
 
+### Changing a season's calendar
+
+Picked the wrong tracks, or the wrong order? Open the season and click **Edit calendar**. You can
+add, remove and reorder rounds with the same picker used when the season was created.
+
+**Rounds that already have sessions assigned are locked** — they keep both their position and their
+track, and the editor lists them before you start. This protects your results: round 5's stored race
+belongs to round 5 *at that track*, so letting it drift would file it under the wrong Grand Prix.
+If an edit would move or remove a locked round, the save is refused and names the rounds involved.
+
+To change a locked round anyway, open that round's weekend and unassign its sessions first — the
+round then unlocks. In practice this is rarely needed: a wrong calendar is usually spotted before
+any results have been assigned, and at that point the whole thing is freely editable.
+
+The season's mode, number, nickname and game format can't be changed here. If one of those is
+wrong, delete the season and create it again.
+
 ## 6. Where your data lives
 
 Your database, captures, lap traces, rosters and logs are stored under:

@@ -40,9 +40,16 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   constraints the game actually enforces per mode: Career/My-Team pick a fixed-length subset
   (10/16/24) of the official order; Grand Prix/League are a reorderable sandbox with duplicates
   allowed (League open-ended, Grand Prix capped at 28). Rules live in `domain/calendars.py`
-  (`calendar_rules`), the widget in `ui/components/calendar_picker.py`. *Next here:* surface the
-  same picker as an edit-calendar action on the detail page (the store already has
-  `set_calendar()`).
+  (`calendar_rules`), the widget in `ui/components/calendar_picker.py`.
+  *Edit-calendar action — **DONE** 2026-08-02 (was PRIORITIES → E6).* The detail page's **Edit
+  calendar** button opens `ui/seasons/edit_calendar_page.py`, a fifth page reusing the same picker
+  unchanged. A round that already has an assigned session is **locked**: it keeps both its
+  `round_number` and its `track_id`, checked positionally (for each locked round *(n, t)* the
+  proposed calendar must still have round *n* at track *t*), which covers reorder, insert-before,
+  delete-before and truncate in one rule. Enforced in `SeasonStore.set_calendar`, which raises
+  `CalendarConflictError`; the page catches it and names the offending rounds. Calendar only —
+  mode / number / nickname / game format are not editable, since changing the format would move
+  the track pool underneath the calendar (Madrid is 2026-only).
 
 - **DONE — nationality flags in the driver standings table.** The season detail page's driver
   standings now read like the session classification table: the Driver cell carries a flag icon,
