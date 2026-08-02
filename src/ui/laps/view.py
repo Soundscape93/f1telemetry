@@ -45,6 +45,24 @@ class LapsView(QWidget):
         if self._stack.currentWidget() is self._overview:
             self._overview.reload()
 
+    def refresh(self) -> None:
+        """Re-query the overview if it's the visible page (called after an ingest completes)."""
+        if self._stack.currentWidget() is self._overview:
+            self._overview.reload()
+
+    def invalidate_caches(self) -> None:
+        """Drop derived caches after an ingest/re-ingest changed the stored laps.
+        
+        Deliberately separate from ``refresh()``, which only touches the *visible* page: the
+        canonical track-map cache lives on the detail page and would otherwise suvrive an ingest
+        made while another surface was showing, and stay stale until the app restarts
+        (PRIORITIES -> ALL). If the detail page happens to be the invisible one, its map is redrawn
+        now rather than on the next navigation.
+        """
+        self._detail.invalidate_layouts()
+        if self._stack.currentWidget() is self._detail:
+            self._detail.reload()
+
     def _show_overview(self) -> None:
         self._stack.setCurrentWidget(self._overview)
         self._overview.reload()

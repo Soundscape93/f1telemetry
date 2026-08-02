@@ -172,6 +172,10 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(_PlaceholderPage(
             "Sessions", "The sessions will be listed here, with details and lap times."))
         self._laps_view = LapsView(self._session_store, self._lap_store)
+        # Deleting a session's stored results changes which laps exist, so the laps surface's
+        # canonical track-map cache has to go the same way it does after an ingest. The weekend
+        # page can't reach the laps view itself - pages never reference siblings (PRIORITIES -> A1).
+        self._seasons_view.sessions_changed.connect(self._laps_view.invalidate_caches)
         self._stack.addWidget(self._laps_view)
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
@@ -291,7 +295,13 @@ class MainWindow(QMainWindow):
         self._test_ingest_button.setEnabled(True)  # TEMP: remove with the test button
 
     def _refresh_current_view(self) -> None:
-        """Refresh whichever data surface is showing, after stored sessions changed."""
+        """Refresh whichever data surface is showing, after stored sessions changed.
+        
+        Cache invalidation runs first and unconditionally: the laps surface memoises a canonical
+        track map per race weekend, and refreshing only the visible page would leave that cache
+        stale unit the next launch (PRIORITIES -> ALL).
+        """
+        self._laps_view.invalidate_caches()
         current = self._stack.currentWidget()
         if current is self._seasons_view:
             self._seasons_view.refresh()
