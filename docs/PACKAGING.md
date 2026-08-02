@@ -13,9 +13,10 @@ built on the author's Windows 11 boot and verified against the clean-machine che
 guided, cancellable re-ingest of the archived captures (see "Phase 2 — done") — verified on dev/Linux
 2026-07-25 and re-verified on the 2nd Windows build 2026-07-26. Phase 3 = the label-driven release
 pipeline (GitHub Actions → a full GitHub Release), the CI-generated `USER_GUIDE.pdf`, and the Help
-page's guide + folder actions (see "Phase 3 — done"); its clean-machine items are **still to be
-checked on the first published build**. Dev runs are unchanged: source runs still resolve every data
-path against the CWD.
+page's guide + folder actions (see "Phase 3 — done"); its clean-machine items were **checked on the
+published build and pass** (confirmed 2026-08-02). Dev runs are unchanged: source runs still resolve
+every data path against the CWD. What remains of packaging is **Phase 4** — see
+[`docs/PRIORITIES.md`](PRIORITIES.md), where it is Cycle 3.
 
 **Goal / first milestone (≈2–3 weeks, before the league season):** a zipped **one-folder
 PyInstaller build for Windows 11** that runs on the author's Windows boot from a clean state,
@@ -136,10 +137,11 @@ The practical measures are therefore:
 - keep it in `data_root()` and **don't surface it** — no "Open database" action anywhere in the UI;
 - expose **captures** and **logs** instead, which is what a tester actually needs;
 - **document** "don't hand-edit the database" in the user guide, together with the rebuild route;
-- queued, not now: **WAL mode** (already a checklist concern for double-launch, and it eases
-  reader/writer contention while a minutes-long re-ingest runs) and a **"Back up database…"** action
-  implemented as SQLite's `VACUUM INTO` — the only safe way to copy a *live* WAL database, and the
-  right primitive for "send me your DB" bug reports.
+- queued — **now scheduled for Cycle 1** (PRIORITIES → C2/C3): **WAL mode** (a checklist concern for
+  double-launch, and it eases reader/writer contention while a minutes-long re-ingest runs; it is
+  *not* enabled today) and a **"Back up database…"** action implemented as SQLite's `VACUUM INTO` —
+  the only safe way to copy a *live* WAL database, and the right primitive for "send me your DB" bug
+  reports. Do the two together: `VACUUM INTO` is what makes WAL safe to hand around.
 
 Tamper *detection* was considered and dropped: cost without benefit for a private league app.
 
@@ -605,7 +607,11 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
       still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
-- [ ] Open the app **twice** → SQLite doesn't wedge (WAL mode; handle "database is locked").
+- [x] Open the app **twice** → SQLite doesn't wedge. *Passed on both Windows instances (2026-08-02),
+      with Record pressed and no game running — nothing blocked.* **Note what this does not prove:
+      WAL mode is not actually enabled** (no `journal_mode` is set anywhere in `src/storage/`), so
+      the pass is "the contention never happened", not "WAL handled it". Enabling WAL is still
+      wanted — PRIORITIES → C2.
 - [ ] **Logs** written to `logs/` and human-readable; an induced exception shows the crash dialog.
 - [ ] Note SmartScreen behavior and the exact click-through for the tester doc.
 
@@ -649,9 +655,15 @@ first:
     no new columns on existing tables, so there was nothing for `ensure_schema` to ALTER;
   - *SmartScreen behaviour / user-doc click-through* — belongs with the published artifact in
     Phase 3's release workflow.
-- **3rd build (pending, Phase 3).** The first build produced *by CI* and published as a Release.
-  Run the Phase-3 checklist items above against the downloaded zip; the earlier items only need a
-  spot-check, since the bundle is built from the same spec.
+- **3rd build (Phase 3) — done, confirmed 2026-08-02.** The first build produced *by CI* and
+  published as a Release (v0.3.0, then v0.4.x). The Phase-3 checklist items above were run against
+  the downloaded zip and pass, including the two that had never executed before: *Check for updates*
+  against a real published Release (the API used to answer 404) and *Open user guide* resolving
+  through `app_dir()` rather than `_MEIPASS`. The author intends to re-run this checklist for most
+  future releases.
+- **Still not covered by any build so far:** the **clean-instance** run (Windows Sandbox or a second
+  user account — see below) and the **SmartScreen click-through wording** for a first-time external
+  tester. Both are PRIORITIES → C4.
 
 ---
 

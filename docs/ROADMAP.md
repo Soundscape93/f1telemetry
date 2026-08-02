@@ -3,17 +3,16 @@
 Planned work and deferred ideas. Not a commitment — a place to park intent so a future session
 (or the VS Code chat) has the context. Roughly ordered by when it's likely to matter.
 
-## Next release (grouping on `staging`)
+> **Ordering lives in [`docs/PRIORITIES.md`](PRIORITIES.md), not here.** This file is the
+> catalogue of ideas and their reasoning; PRIORITIES holds the confirmed P1/P2/P3, the cycle plan,
+> what is done, and what still needs verifying. Read PRIORITIES first to decide *what to work on*;
+> read this file to understand *what a thing is*. If they disagree, PRIORITIES wins on ordering.
 
-Two small features are expected to ship together in the next release, grouped on the `staging`
-branch (see PACKAGING → Versioning & dev release process for the mechanics):
+## Released
 
-1. **Nationality flags in driver standings** — done, see Seasons UI below.
-2. **Missing-capture prune** — done, see Capture compression below.
-
-Neither changes ingest output, so unless something else lands first this release is
-**re-ingest: no**. Both are user-visible, so `minor` is the likely label; `CHANGELOG.md` must
-list both under the same version.
+Both features that this section used to track as "next" have shipped, in **v0.4.0** (2026-08-01):
+nationality flags in the driver standings, and the missing-capture prune. The `staging` grouping
+mechanics they demonstrated are documented in PACKAGING → Versioning & dev release process.
 
 ## Seasons UI — remaining
 - **Done: 2b — per-season rosters + league standings.** `rosters/season_<id>.json` is the
@@ -112,6 +111,9 @@ list both under the same version.
     a race lap 1 (grid past the S/F line) still draws whole. **Absolute rotation follows the game's
     world frame, not the F1.com map art** — matching broadcast orientation would need a per-track
     rotation constant, deliberately not shipped (kept asset-free); a possible later opt-in.
+    *Needs verification (PRIORITIES → E11):* the rendered orientation may already match the in-game
+    map; to be checked against it while recording the next sessions. "Doesn't match the F1.com
+    broadcast art" is expected and is not what that check is about.
   - **2b.1 — canonical track-map refinement (DONE).** The map now draws the **same clean shape every
     time** for a track, decoupled from the driven line, hover intact. A **canonical centerline =
     distance-resampled median racing line** (`analysis/track_layout.build_layout`): resample each
@@ -122,7 +124,7 @@ list both under the same version.
     which would shrink to the overlap and re-open that gap). **No Motion Ex needed** for this
     median-line version; a *true geometric* centerline would need Motion Ex / track-edge / track-width
     data and stays deferred. **Scope is the whole race weekend** (a lone quali session rarely has ≥3
-    valid timed laps): `ui/laps/track_layouts.TrackLayoutProvider` gathers valid Motion laps across
+    valid timed laps): `ui/laps/track_layout.TrackLayoutProvider` gathers valid Motion laps across
     the sessions sharing a `weekend_link_id` at the same `track_id`, builds the layout, and caches it
     keyed `(weekend_link_id, track_id)`. `TrackMap.set_layout` draws it; below `_MIN_LAPS` (3) usable
     laps it falls back to `set_trace` (the driven line). **Hover unchanged:** `cursor_moved` still
@@ -145,10 +147,11 @@ list both under the same version.
     private, friends-only use, but revisit/replace before any broad public distribution.
     **Priority:** deferred behind league-readiness work (packaging, GP roster import, cache
     refresh) — a visual enhancement only, not needed before the next league season.
-    *Still deferred:* **Automatic cache refresh** — the provider's in-memory cache isn't
-    invalidated on a mid-run re-ingest, so a stale weekend layout survives until app restart; fine
-    for personal/testing use, to be made automatic before any release to friends/users (likely after
-    2c, unless it bites earlier). A persisted `track_layouts/*.parquet` cache also stays deferred.
+    *No longer deferred — now PRIORITIES → A1 (P1, Cycle 1):* **automatic cache refresh.** The
+    provider's in-memory cache isn't invalidated on a mid-run re-ingest, so a stale weekend layout
+    survives until app restart. This was to be fixed "before any release to friends/users"; those
+    releases have since shipped (v0.3.0 onward) with it outstanding, which is why it moved to P1.
+    A persisted `track_layouts/*.parquet` cache stays deferred (PRIORITIES → D3).
   - *2c — car-status graphic.* A car silhouette (in-game neon style, tyres as corner gauges) with
     colour-coded tyre / engine / body-damage zones. Rendered as SVG-authored `QGraphicsScene` path
     items over a Qt-free, tested `car_status.py` model; three threshold rules (tyre + engine wear
@@ -163,10 +166,11 @@ list both under the same version.
     — DONE.** `CarStatusGraphic` renders the car — Inkscape-traced body regions, chassis/nose outline,
     floor-edge wings and front suspension — coloured by the model with per-part tooltips, plus four
     procedural corners (on-car tyre + inboard brake block + dashed connector to a wear/temp corner gauge),
-    wired below the tyre box on the detail page. The `_svg_path` parser was extended to the full Inkscape
+    wired into the detail page's left column. The `_svg_path` parser was extended to the full Inkscape
     command set (S/T smooth curves, A arcs; `test_svg_path.py`) so parts are authored visually — see the
-    Inkscape workflow + `docs/car_template.svg` in DECISIONS. *Optional later:* fold
-    `tyre_box._wear_color` into `car_status` (shared 60/80 rule).
+    Inkscape workflow + `docs/car_template.svg` in DECISIONS. *The "optional later: fold
+    `tyre_box._wear_color` into `car_status`" item is moot* — the post-2c polish removed `TyreBox`
+    entirely, so the 60/80 rule now lives only in `car_status`.
 - **Analytics** — the genuinely cross-session work: same-track-different-season lap comparison,
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
@@ -318,9 +322,10 @@ long Windows race rather than a dedicated investigation.
   Packaging → data backfill).
 - **Alembic.** Adopt at the first *non-additive* migration (rename / type change / drop /
   backfill). Until then, additive-only + `ensure_schema`.
-- **Complete `DRIVER_NAMES`.** The AI driver-id table is partial (~11 entries); fill it from the
-  spec appendix so AI driver-id lookups resolve. `diagnose_participants.py` surfaces which ids
-  are still unresolved.
+- **Complete `DRIVER_NAMES`. DONE (2026-08-02).** The AI driver-id table now holds every entry
+  from both UDP spec PDFs (F1 25 v3 + the 2026 season pack). An id that still fails to resolve is
+  newer than the specs we have, not a gap to fill — `diagnose_participants.py` surfaces which, and
+  unknown ids degrade to a readable placeholder rather than an error.
 
 ## Capture compression
 - **Done — the hybrid landed.** Ingest is archive-first (`pipeline.archive_and_ingest`): compress

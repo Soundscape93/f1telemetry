@@ -43,8 +43,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`enums.py`** — `PacketId`, `SessionType`, `ResultStatus`, `ResultReason`, `Formula`,
   `Weather`, tyre/ERS enums, and `safe_enum(EnumCls, value)` → member or raw int (enums grow).
 - **`reference.py`** — id→name lookups: `track_name`, `team_name`, `driver_name`,
-  `nationality_name`, backed by `TEAM_NAMES` / `DRIVER_NAMES` (the driver table is partial —
-  see ROADMAP). Unknown ids return `"Unknown … (n)"`.
+  `nationality_name`, backed by `TEAM_NAMES` / `DRIVER_NAMES` (both complete against the F1 25 v3
+  and 2026 season-pack specs as of 2026-08-02). Unknown ids return `"Unknown … (n)"`.
 - **`registry.py`** — `build_registry()` maps `(format, packet_id)` → struct class.
 - **`parser.py`** — `PacketParser.parse(payload)`: reads the header, looks up the struct,
   checks `len(payload) == sizeof(struct)`, returns the typed packet (or `None`); tracks
@@ -182,7 +182,7 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   single-lap excursions and self-heals the lap-1 S/F gap; returns `None` below `_MIN_LAPS` (3) so the
   caller falls back to the driven line. Deliberately *not* built on `traces.align` (which shrinks to
   the laps' overlap and would re-open that gap). Store-free — the weekend lap gathering lives in
-  `ui/laps/track_layouts.py`.
+  `ui/laps/track_layout.py`.
 
 ### ui/ — PySide6, single window
 - **`app.py`** — builds the `QApplication`, launches the shell.
@@ -204,11 +204,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `display_name_fn(roster)`, the roster→name resolver passed
   as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
   surfaces reuse the same builder.
-  The lap-detail widgets also live here: `tyre_box.py` (`TyreBox` — the 4-box RL/RR/FL/FR tyre
-  graphic mapped to the on-car FL FR / RL RR layout, `wheel_grid_cells()` the tested placement),
-  `damage_panel.py` / `setup_panel.py` (`build_damage_table` / `build_setup_table` over the Qt-free
-  `damage_rows` / `setup_rows`, rendered via `tables.build_kv_table` — a shared key/value table with
-  bold section headers), and `trace_plot.py` (`TracePlot` — stacked, distance-linked telemetry via
+  The lap-detail widgets also live here: `damage_panel.py` (`build_damage_table` over the Qt-free
+  `damage_rows`, rendered via `tables.build_kv_table` — a shared key/value table with bold section
+  headers), `setup_panel.py` (`build_setup_table` over the Qt-free `setup_fields`, rendered as
+  slider rows via `slider_row.py`'s `SetupSliderRow` / `SliderMarkerBar`; the field list and
+  in-game ranges live in `_SETUP_SPEC`), and `trace_plot.py` (`TracePlot` — stacked, distance-linked telemetry via
   pyqtgraph, lazily imported so it degrades to an install hint if absent). `set_traces` draws either
   one lap (per-channel colours, the 1b look) or an **overlay** of several: aligned on a shared grid,
   coloured *and* dash-styled per lap, with a legend row above the plots and a bottom Δ-time row;
@@ -256,13 +256,15 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →
   the session's laps with time + tyre + validity; double-click a lap → detail) with a track/session
   filter + valid-only toggle, reading laps cheaply via `LapStore.list`. `detail_page.py` loads one
-  lap via `LapStore.load` and composes the `components/` lap widgets. The left column stacks the
-  tyre box and the `CarStatusGraphic` (iteration 2c); the right holds the damage and setup tables
-  (setup resolved by `SessionResult.setup_for_lap`); below sits the `TracePlot`.
+  lap via `LapStore.load` and composes the `components/` lap widgets. The left column holds the
+  `CarStatusGraphic` (iteration 2c — it replaced the removed `TyreBox` in the post-2c polish, and
+  carries tyre age on its title line with blisters/tyre damage in the corner-gauge tooltips); the
+  right holds the damage and setup tables (setup resolved by `SessionResult.setup_for_lap`); below
+  sits the `TracePlot`.
   When the lap carries Motion it also shows a `TrackMap` panel, wired to the plot's `cursor_moved`
   signal so hovering a trace moves the marker round the circuit (iteration 2b). The map draws the
   **canonical median line** for the whole race weekend when available (iteration 2b.1), falling back
-  to the driven lap's own line; `track_layouts.py` (`TrackLayoutProvider`, Qt-free) does the
+  to the driven lap's own line; `track_layout.py` (`TrackLayoutProvider`, Qt-free) does the
   cross-store walk — every valid Motion lap across the sessions sharing this one's `weekend_link_id`
   at the same `track_id` — feeds them to `analysis.track_layout.build_layout`, and caches the result
   keyed `(weekend_link_id, track_id)`. Its
