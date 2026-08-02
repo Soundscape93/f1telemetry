@@ -62,6 +62,7 @@ class DetailPage(QWidget):
         self._sessions = session_store
         self._laps = lap_store
         self._layouts = TrackLayoutProvider(session_store, lap_store)
+        self._current_uid: str | None = None            # the lap on screen, for reload()
         self._colorblind = trace_colorblind()  # colorblind reference, persisted
         self._plot: TracePlot | None = None
         self._base_trace = None
@@ -96,6 +97,7 @@ class DetailPage(QWidget):
         clear_layout(self._body)
         lap = self._laps.load(uid, lap_number)
         if lap is None:
+            self._current_uid = None
             self.overview_requested.emit()
             return
         session = self._sessions.load(uid)
@@ -182,6 +184,15 @@ class DetailPage(QWidget):
             missing.setStyleSheet(MUTED_TEXT_QSS)
             self._body.addWidget(missing)
         self._body.addStretch(1)
+
+    def invalidate_layouts(self) -> None:
+        """Forget the cached canonical track maps; the next lap rebuilds them (PRIORITIES -> ALL)."""
+        self._layouts.invalidate()
+
+    def reload(self) -> None:
+        """Re-render the lap currently on screen, if any. No-op before the first load()."""
+        if self._current_uid is not None and self._base_lap_number is not None:
+            self.load(self._current_uid, self._base_lap_number)
 
     def _on_colorblind_toggled(self, enabled: bool) -> None:
         """Persists the palette choice and recolour the live plot in place."""

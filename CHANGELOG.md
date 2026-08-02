@@ -32,6 +32,16 @@ stored moved, so existing captures, sessions and standings are unaffected.
   only with people who expect it. The Help page carries a short version of the same notice, and the
   user guide has it as a closing section.
 
+### Fixed
+- The track map on the lap detail page no longer keeps showing an outdated shape after new laps
+  are read. The map draws one clean outline per race weekend, built from that weekend's laps, and
+  the result was worked out once and then kept for the rest of the session — so recording or
+  re-reading more laps from a weekend changed nothing on screen until the app was restarted. That
+  included the case where a weekend had too few laps to build the clean outline: it stayed on the
+  single driven line even once enough laps existed. The map is now rebuilt whenever stored laps
+  change — after recording, after re-reading your captures, and after deleting a session's stored
+  results — and a lap that is already open is redrawn straight away.
+
 **Known issues**
 
 - Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them

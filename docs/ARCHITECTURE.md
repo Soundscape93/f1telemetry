@@ -241,6 +241,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   own data operations (create, delete, assign, roster create/import). Pages never reference
   siblings; they emit intent (`season_requested`, `weekend_requested`, `create_requested`,
   `cancelled`, `overview_requested`, `detail_requested`) and the container decides what shows.
+  One signal is deliberately **not** navigation: `sessions_changed`, emitted by the weekend page
+  when its delete action removes a session's stored results and re-emitted by `SeasonsView` for
+  `MainWindow` to fan out. It exists because other surfaces derive cached state from those rows
+  (the laps surface's canonical track map), and the same no-sibling-references rule means the
+  weekend page cannot invalidate that itself.
   A `_show_*` switches the page first, then calls its `load`/`reload`, so a vanished-target
   fallback signal re-navigates last and wins. Pages: `overview_page.py` (season cards / empty
   state + delete), `create_page.py` (the form + create), `detail_page.py` (calendar + standings +

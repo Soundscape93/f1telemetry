@@ -222,7 +222,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   layouts, so the map conveys sectors by colour alone (labels could return later as hover/tooltips).
   This used the per-session boundary **distances**, not the per-frame `sector` channel the earlier
   note assumed.
-  Still deferred: **automatic canonical-map cache refresh**, and **corner numbers** (future work — no
+  **Canonical-map cache refresh is done** (2026-08-02): `TrackLayoutProvider.invalidate()`, reached
+  unconditionally from `MainWindow._refresh_current_view()` through `LapsView.invalidate_caches()`,
+  so an ingest or re-ingest can no longer leave a stale weekend layout (or a stale "too few laps →
+  driven line" answer) on screen until restart. Deleting a session's stored results invalidates it
+  too, via the weekend page's `sessions_changed` signal — the one non-navigation signal leaving the
+  seasons surface.
+  Still deferred: **corner numbers** (future work — no
   telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
   `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics
   surface and an edit-calendar action. See `docs/ROADMAP.md`.

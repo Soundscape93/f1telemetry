@@ -145,13 +145,19 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
     `get_circuit_info`, keyed by our `track_id` and scaled by `track_length_m`. **Licensing:** that
     data is community/unofficial (MultiViewer; FastF1 is non-commercial/personal-use) — fine for
     private, friends-only use, but revisit/replace before any broad public distribution.
-    **Priority:** deferred behind league-readiness work (packaging, GP roster import, cache
-    refresh) — a visual enhancement only, not needed before the next league season.
-    *No longer deferred — now PRIORITIES → A1 (P1, Cycle 1):* **automatic cache refresh.** The
-    provider's in-memory cache isn't invalidated on a mid-run re-ingest, so a stale weekend layout
-    survives until app restart. This was to be fixed "before any release to friends/users"; those
-    releases have since shipped (v0.3.0 onward) with it outstanding, which is why it moved to P1.
-    A persisted `track_layouts/*.parquet` cache stays deferred (PRIORITIES → D3).
+    **Priority:** deferred behind league-readiness work (packaging, GP roster import) — a visual
+    enhancement only, not needed before the next league season.
+    *Automatic cache refresh — **DONE** 2026-08-02 (was PRIORITIES → A1).* The provider's in-memory
+    cache was never invalidated, so a stale weekend layout survived a mid-run ingest/re-ingest
+    until app restart. `TrackLayoutProvider.invalidate()` now clears it whole (an ingest can touch
+    any weekend; a re-ingest touches all of them), driven unconditionally from
+    `MainWindow._refresh_current_view()` via `LapsView.invalidate_caches()` — *not* through the
+    visible-page refresh, which would have kept the bug alive whenever the ingest finished while
+    another surface was showing. Deleting a session's stored results goes the same way, via the
+    weekend page's new `sessions_changed` signal. Note the cache held `None` as a real value ("fewer than
+    `_MIN_LAPS` usable laps → draw the driven line"), so a weekend that later became buildable was
+    stuck on the driven line; that entry is dropped too. A persisted `track_layouts/*.parquet`
+    cache stays deferred (PRIORITIES → D3).
   - *2c — car-status graphic.* A car silhouette (in-game neon style, tyres as corner gauges) with
     colour-coded tyre / engine / body-damage zones. Rendered as SVG-authored `QGraphicsScene` path
     items over a Qt-free, tested `car_status.py` model; three threshold rules (tyre + engine wear

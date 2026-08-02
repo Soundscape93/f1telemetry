@@ -19,10 +19,15 @@ something external) · **done**.
 `patch`/`minor` release on `staging`. Rationale: these are cheap, several are promises already
 made in the docs, and none of them depend on anything unbuilt.
 
-- A1 track-map cache invalidation
-- E6 edit-calendar action
+- A1 track-map cache invalidation — **done 2026-08-02**
 - C2 WAL mode + C3 database backup (`VACUUM INTO`)
+- E6 edit-calendar action
 - The documentation-truth pass (A2, F1, F2, F4 + the stale-doc corrections) — **done 2026-08-02**
+
+*Order note:* C2/C3 moved ahead of E6 (the P1 table below lists E6 first). E6 is the largest of
+the three and the only one carrying an open design question — what happens to session assignments
+whose round a calendar edit removes or re-points (`session_assignments` has no FK to rounds,
+invariant #4). C2/C3 are storage-layer and self-contained, so they ship while that is decided.
 
 **Cycle 2 — league data flow.** The one substantial feature block, and the direction the whole
 capture-as-interchange design was built for.
@@ -48,15 +53,11 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 
 | ID | Item | Status | Detail in |
 |---|---|---|---|
-| A1 | Canonical track-map cache is never invalidated on re-ingest | open | ROADMAP → Laps 2b.1; DECISIONS → UI |
+| A1 | Canonical track-map cache is never invalidated on re-ingest | **done 2026-08-02** | ROADMAP → Laps 2b.1; DECISIONS → UI |
 | A2 | Final Classification is sent repeatedly, not once — docs corrected | **done 2026-08-02** | TELEMETRY_NOTES; DECISIONS |
 | E6 | Edit-calendar action on the season detail page | open | ROADMAP → Seasons UI 2c |
 | C2 | Enable WAL mode | open | PACKAGING → Data layout & the database |
 | C3 | "Back up database…" via `VACUUM INTO` | open | PACKAGING → Data layout & the database |
-
-A1 matters most: both ROADMAP and DECISIONS said it would be fixed *before* any release to
-users, and that release (v0.3.0) has shipped. It is a small fix — clear the
-`TrackLayoutProvider` cache when an ingest or re-ingest completes.
 
 C2/C3 are one job. Note that the "open the app twice" checklist item **passed without WAL being
 enabled** (verified 2026-08-02: no `journal_mode` is set anywhere in `src/storage/`), so WAL is a
@@ -128,6 +129,25 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **A1 — canonical track-map cache invalidation.** Done 2026-08-02.
+  `TrackLayoutProvider.invalidate()` clears the whole cache (per-key would be wrong: an ingest can
+  touch any weekend, a re-ingest touches all of them), reached through
+  `DetailPage.invalidate_layouts()` / `LapsView.invalidate_caches()` from
+  `MainWindow._refresh_current_view()`. Two things the fix turned on that are worth remembering:
+  the cache stored `None` as a real value — "this weekend has fewer than `_MIN_LAPS` usable Motion
+  laps, fall back to the driven line" — so a weekend that *became* buildable stayed on the driven
+  line; and invalidation had to be **unconditional** rather than routed through the visible-page
+  refresh, which would have reproduced the bug whenever the ingest finished while Seasons was
+  showing. A lap already on screen is redrawn via the new `DetailPage.reload()`. Covered by
+  `test/ui/test_track_layout_provider.py` (Qt-free, fake stores). Both ROADMAP and DECISIONS had
+  promised this before any release to users, and v0.3.0 onward shipped without it — hence P1.
+  **Scope was widened once during the work:** the weekend page's "Delete from database…" also
+  changes which laps exist but never reached the ingest path, so it left the same stale map. It now
+  emits `sessions_changed`, re-emitted by `SeasonsView` and connected in `MainWindow` to
+  `LapsView.invalidate_caches` — the first non-navigation signal to leave the seasons surface,
+  since pages never reference siblings. The Qt wiring itself has **no automated test**: every
+  existing UI suite is deliberately Qt-free (no `QApplication` anywhere), so it was verified by
+  hand instead.
 - **F7 — Licence, third-party notices and the F1 disclaimer.** Done 2026-08-02. The repo stays
   **public** under a *source-available* `LICENSE` (read it, run the official builds, build it
   privately — but no redistribution, modified builds or reuse elsewhere without permission).

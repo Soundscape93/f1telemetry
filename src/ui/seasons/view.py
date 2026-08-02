@@ -8,6 +8,7 @@ this widget, and inside the one application window - nothing opens a new window.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from ..season_roster import SeasonRosterFiles
@@ -19,6 +20,11 @@ from .weekend_page import WeekendPage
 
 class SeasonsView(QWidget):
     """Browse / create / inspect seasons and drill into weekends, all in one widget."""
+
+    # Not a navigation signal: it says "stored session data changed", so the window can tell the
+    # other surfaces to drop what they derived from it. Re-emitted from the weekend page, which
+    # owns the only delete action that removes stored sessions.
+    sessions_changed = Signal()
 
     def __init__(self, season_store, session_store, parent=None) -> None:
         """Initialize the seasons view and wire page navigation signals."""
@@ -38,6 +44,7 @@ class SeasonsView(QWidget):
         self._detail.weekend_requested.connect(self._show_weekend)
         self._weekend.detail_requested.connect(self._show_detail)
         self._weekend.overview_requested.connect(self._show_overview)
+        self._weekend.sessions_changed.connect(self.sessions_changed)
 
         self._stack = QStackedWidget()
         for page in (self._overview, self._create, self._detail, self._weekend):
