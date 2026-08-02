@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from ..domain.captures import CaptureMeta
+from .engine import create_db_engine
 from .migrations import ensure_schema
 from .schema import Base, CaptureRow, CaptureSessionRow
 
@@ -21,7 +22,7 @@ class CaptureStore:
     """A SQLite-backed store for capture metadata."""
 
     def __init__(self, url: str = _DEFAULT_URL, echo: bool = False) -> None:
-        self._engine = create_engine(url, echo=echo)
+        self._engine = create_db_engine(url, echo=echo)
         Base.metadata.create_all(self._engine)      # new tables (incl. captures)
         ensure_schema(self._engine)                  # additive columns on existing tables
         self._Session = sessionmaker(self._engine)

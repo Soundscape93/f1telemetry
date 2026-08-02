@@ -92,6 +92,21 @@ break the app's data that way, and it makes bug reports much harder to diagnose.
 your captures are the real source of truth, so if the database ever misbehaves, **Help → Re-read
 captures…** rebuilds it from them.
 
+### Backing up your database
+
+**Help → Back up database…** saves a copy wherever you choose. It is safe to use at any time, even
+while the app is recording or part-way through re-reading your captures — the copy is always a
+complete, working database, never a half-written one.
+
+Two things to know about what a backup is *for*:
+
+- **Your captures matter more.** A lost database can be rebuilt from your captures; a lost capture
+  is gone for good. Back up the `captures` folder first, and treat the database copy as a
+  convenience.
+- **It is what to attach to a bug report.** If something looks wrong in your standings or laps, a
+  backup lets the problem be reproduced exactly. Remember it contains other players' online names,
+  so send it only to someone you'd share your captures with (see *Reporting a bug*).
+
 ## 7. Checking for updates
 
 **Help → Check for updates** compares your version with the latest GitHub release. If a newer

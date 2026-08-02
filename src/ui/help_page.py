@@ -89,6 +89,7 @@ class HelpPage(QWidget):
     """
     reingest_requested = Signal()
     prune_captures_requested = Signal()
+    backup_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -131,6 +132,13 @@ class HelpPage(QWidget):
             "Forget capture files the app can no longer find, so re-reading stops listing them. "
             "Shows you the list first. No files are deleted and no sessions are lost.")
         self._prune_btn.clicked.connect(self.prune_captures_requested)
+
+        self._backup_btn = QPushButton("Back up database…")
+        self._backup_btn.setMinimumHeight(32)
+        self._backup_btn.setToolTip(
+            "Save a copy of your database wherever you choose - safe to do while the app is "
+            "working. Attach it when you report a bug; your captures are the real source of truth.")
+        self._backup_btn.clicked.connect(self.backup_requested)
 
         self._guide_btn = QPushButton("Open user guide")
         self._guide_btn.setMinimumHeight(32)
@@ -180,6 +188,8 @@ class HelpPage(QWidget):
         layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(self._prune_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
+        layout.addWidget(self._backup_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(self._guide_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)

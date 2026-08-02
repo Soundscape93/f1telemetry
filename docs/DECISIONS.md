@@ -144,6 +144,30 @@ what would trigger revisiting it.
   that suffix via `is_compressed_capture`; the new codec is an addition to the reader, never a
   replacement, so every existing recording stays importable.
 
+- **Connection setup is a shared function, not a shared engine — and WAL is on** (C2, 2026-08-02).
+  Each store deliberately owns its `Engine`: SQLite dislikes a connection shared across threads and
+  the ingest / re-ingest workers run on their own. That rules out configuring the database once at
+  construction of some central object, because *any* of the five stores may be the one that creates
+  the file. Hence `storage/engine.py: create_db_engine` — every store calls it, so the database is
+  opened identically no matter who got there first.
+  - **`journal_mode=WAL`.** Readers stop being locked out by a writer, which is what the GUI needs
+    while a minutes-long re-ingest runs, and what makes a live backup possible at all.
+  - **`synchronous=NORMAL`.** Chosen from the standing position that this database is *disposable
+    and rebuildable from the captures*, not from a benchmark: a full fsync per commit would buy
+    durability for data we can recreate. Still crash-durable at the application level; the residual
+    risk is losing the last commits to a power cut.
+  - **`foreign_keys` deliberately left OFF.** SQLite defaults it off and the schema's cascades are
+    ORM-level, so turning it on is a real behaviour change — and it would interact with
+    `session_assignments`, which is FK-free *on purpose* (invariant #4). Revisit with Alembic
+    (below), not alongside a pragma change.
+- **Backups are `VACUUM INTO`, and are not an "open the database" action** (C3, 2026-08-02). Once
+  WAL is on, copying the file with the filesystem is wrong: committed pages live in a `-wal`
+  sibling, so the copy can be stale or torn. `VACUUM INTO` writes a checkpointed, defragmented
+  database from one read transaction, and can therefore run *while an ingest writes* — that is why
+  C3 shipped with C2 rather than after it. This does not reopen the settled "the database is never
+  surfaced to the user" decision (see PACKAGING → Data layout): the action hands over a **copy** at
+  a path the user chose. The live file stays unexposed and unserviceable.
+
 ## Migrations
 - **Ad-hoc / additive now; Alembic later.** All schema changes so far are additive (new
   columns/tables) and handled by `create_all` (plus a planned idempotent `ensure_schema` when

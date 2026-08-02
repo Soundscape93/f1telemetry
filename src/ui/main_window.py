@@ -182,6 +182,7 @@ class MainWindow(QMainWindow):
         self._help_page = HelpPage()
         self._help_page.reingest_requested.connect(self._on_manual_reingest)
         self._help_page.prune_captures_requested.connect(self._on_prune_captures)
+        self._help_page.backup_requested.connect(self._on_backup_database)
         self._stack.addWidget(self._help_page)
         self._stack.addWidget(_PlaceholderPage(
             "Bug report", "The bug report form will be shown here."))
@@ -462,6 +463,37 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(cancel_btn)            # the safe answer is the one Enter picks
         box.exec()
         return box.clickedButton() is forget_btn
+
+    def _on_backup_database(self) -> None:
+        """Help -> "Back up database…": write a consistent copy wherever the user chooses.
+
+        Deliberately **not** guarded against a running ingest, unlike the prune action. That guard
+        exists because pruning mutates capture metadata a running job is also touching; a backup
+        only reads, and on a WAL database ``VACUUM INTO`` takes one read transaction that neither
+        blocks the writer nor tears - it simply captures the database as of the moment it began.
+        Being able to do this on a busy database is the point of pairing C3 with C2.
+
+        Synchronous for the same reason the prune is: one statement over a database measured in
+        megabytes, with nothing for a progress dialog to say. Defaults to the home folder rather
+        than ``data_root()`` - the data folder is hidden on Windows, and a backup you can't find
+        is not a backup you can send.
+        """
+        from ..storage.backup import backup_database, default_backup_name
+
+        suggested = str(Path.home() / default_backup_name())
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Back up database", suggested, "Database files (*.db);;All files (*)")
+        if not path:
+            return
+        try:
+            # overwrite=True: getSaveFileName has already asked about an existing file.
+            written = backup_database(self._db_url, path, overwrite=True)
+        except Exception as exc:
+            log.exception("Database backup failed")
+            self._status.setText(f"Error: could not back up the database: {exc}")
+            return
+        size_mb = written.stat().st_size / (1024 * 1024)
+        self._status.setText(f"Backed up the database to {written} ({size_mb:.1f} MB).")
 
     def _start_reingest(self) -> None:
         """Rebuild every stored session from its capture archive on a background thread."""

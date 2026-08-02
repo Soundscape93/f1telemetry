@@ -20,7 +20,7 @@ something external) · **done**.
 made in the docs, and none of them depend on anything unbuilt.
 
 - A1 track-map cache invalidation — **done 2026-08-02**
-- C2 WAL mode + C3 database backup (`VACUUM INTO`)
+- C2 WAL mode + C3 database backup (`VACUUM INTO`) — **done 2026-08-02**
 - E6 edit-calendar action
 - The documentation-truth pass (A2, F1, F2, F4 + the stale-doc corrections) — **done 2026-08-02**
 
@@ -56,12 +56,12 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 | A1 | Canonical track-map cache is never invalidated on re-ingest | **done 2026-08-02** | ROADMAP → Laps 2b.1; DECISIONS → UI |
 | A2 | Final Classification is sent repeatedly, not once — docs corrected | **done 2026-08-02** | TELEMETRY_NOTES; DECISIONS |
 | E6 | Edit-calendar action on the season detail page | open | ROADMAP → Seasons UI 2c |
-| C2 | Enable WAL mode | open | PACKAGING → Data layout & the database |
-| C3 | "Back up database…" via `VACUUM INTO` | open | PACKAGING → Data layout & the database |
+| C2 | Enable WAL mode | **done 2026-08-02** | PACKAGING → Data layout & the database |
+| C3 | "Back up database…" via `VACUUM INTO` | **done 2026-08-02** | PACKAGING → Data layout & the database |
 
-C2/C3 are one job. Note that the "open the app twice" checklist item **passed without WAL being
-enabled** (verified 2026-08-02: no `journal_mode` is set anywhere in `src/storage/`), so WAL is a
-robustness improvement we still want, not a fact the checklist already proved.
+E6 is all that is left of Cycle 1. See *Recently closed* for what C2/C3 settled — including the
+fact that the "open the app twice" checklist item passed *before* WAL existed, so it wants a
+re-test that actually exercises it.
 
 ## P2 — after P1
 
@@ -129,6 +129,30 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C2 / C3 — WAL mode and a `VACUUM INTO` backup.** Done 2026-08-02, one branch, as PACKAGING
+  required ("`VACUUM INTO` is what makes WAL safe to hand around"). The blocker was structural, not
+  technical: all five stores are repositories over the *same* file and each builds its own engine
+  (deliberately — SQLite dislikes a connection shared across threads and the ingest workers have
+  their own), so there was no shared place a pragma could live. `storage/engine.py` now owns
+  `create_db_engine`, and connection setup is a shared **function** rather than a shared engine.
+  It sets `journal_mode=WAL`, `synchronous=NORMAL` and `busy_timeout=10s`.
+  **Two decisions worth not re-litigating:** `synchronous=NORMAL` is justified by the standing
+  "the database is disposable and rebuildable from captures" position, not by a benchmark — full
+  fsync per commit buys durability for data we can recreate; and `foreign_keys` is deliberately
+  **left off**, because SQLite defaults it off, the schema's cascades are ORM-level, and enabling
+  it would interact with the intentionally FK-free `session_assignments` (invariant #4). That
+  belongs with the Alembic trigger (D2), not with WAL.
+  `storage/backup.py` is `VACUUM INTO` behind `backup_database()`. Three things it had to get
+  right, each verified rather than assumed: `VACUUM` cannot run inside a transaction
+  (`AUTOCOMMIT`), `VACUUM INTO` **refuses** an existing destination (so the caller unlinks after
+  the save dialog has already asked), and the path is a bound parameter so Windows backslashes and
+  quotes in a filename can't break the statement. The action is deliberately *not* blocked during
+  an ingest — one read transaction that neither blocks the writer nor tears, which is the entire
+  reason C3 pairs with C2. It is **not** the "Open database" action the project rules out: it
+  writes a copy to a path the user chose and never exposes the live file.
+  **Leaves behind:** the Phase-1 "open the app twice" checklist item passed *before* WAL existed,
+  so its result means "the contention never happened", not "WAL handled it". PACKAGING now asks for
+  a re-test.
 - **A1 — canonical track-map cache invalidation.** Done 2026-08-02.
   `TrackLayoutProvider.invalidate()` clears the whole cache (per-key would be wrong: an ingest can
   touch any weekend, a re-ingest touches all of them), reached through
