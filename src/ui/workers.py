@@ -196,3 +196,49 @@ class ReingestWorker(QThread):
             for s in (meta_store, capture_store, lap_store, store):
                 if s is not None:
                     s.close()
+
+
+class RelocateWorker(QThread):
+    """Searches a folder for captures whose file moved, off the GUI thread.
+    
+    The same shape as :class:`ReingestWorker`, for the same reason: confirming a match means
+    decompressing a candidate archive, which is seconds per file and must not freeze the window
+    when a whole captures folder moved. Its ``CaptureStore`` is built on THIS thread (SQLite
+    dislikes a connection shared across threads) and disposed in a ``finally``, and the pipeline
+    import lives inside ``run`` so it stays out of the start-up path.
+    """
+
+    progress = Signal(int, int, str)        # captures found so far, captures wanted, file being read
+    done = Signal(object)               # pipeline.RelocateSummary
+    failed = Signal(str)                    # error message
+
+    def __init__(self, db_url: str, search_dir: str, *, captures_dir: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._db_url = db_url
+        self._search_dir = search_dir
+        self._captures_dir = captures_dir
+        self.stop_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the search to stop after the file it's on; safe from the GUI thread."""
+        self.stop_event.set()
+
+    def run(self) -> None:
+        from ..pipeline import relocate_moved_captures
+        from ..storage.captures import CaptureStore
+
+        store = None
+        try:
+            store = CaptureStore(self._db_url)
+            summary = relocate_moved_captures(
+                store, self._search_dir,
+                captures_dir=self._captures_dir,
+                on_progress=self.progress.emit,
+                cancelled=self.stop_event.is_set,
+            )
+            self.done.emit(summary)
+        except Exception as exc:            # surface any failure to the UI rather than dying silently
+            self.failed.emit(str(exc))
+        finally:
+            if store is not None:
+                store.close()

@@ -156,20 +156,33 @@ Only captures that are still in your `captures` folder can be rebuilt. If some a
 says so ("*N of M sessions updated*") — those sessions keep their old data, which is harmless: they
 simply won't show the newest details.
 
-### Cleaning up captures you deleted
+### Captures the app can no longer find
 
-Deleting a capture file leaves its entry behind, so every re-read keeps reporting it as missing.
-**Help → Clean up missing captures** clears those leftovers. It shows the full list first — file
-name and where each was last seen — and nothing happens until you confirm.
+If the app reports captures as missing, do these two things **in order** — the first looks for them,
+the second gives up on them.
+
+**1. Help → Find moved captures…** Point it at the folder your recordings are in now — an old
+captures folder, an external drive, wherever they ended up — and it searches it, subfolders
+included. Anything it recognises is matched up again, and those sessions become re-readable
+straight away.
+
+It identifies a capture by its **contents**, not its name, so it can't confuse someone else's
+recording with yours. **Nothing is moved, copied or deleted** — only the app's note of where each
+capture lives. Two things to know: a capture you *renamed* as well as moved won't be recognised, and
+one found on an external drive will go missing again when you disconnect that drive (copy it into
+your `captures` folder if you want it permanently).
+
+**2. Help → Clean up missing captures.** For captures that really are gone — deleted, rather than
+moved. Their leftover entries are what make every re-read keep reporting them. It shows the full
+list first — file name and where each was last seen — and nothing happens until you confirm.
 
 **No files are deleted** — it only removes the app's *record* of captures that are already gone.
 Sessions, seasons, standings and rosters are untouched, and if a file ever turns up again,
 importing it puts its entry straight back.
 
-A capture that was only **moved** should be put back rather than forgotten: move it into your
-`captures` folder (or import it again) and it's found. If the app says *every* capture is missing,
-check **Help → Open captures folder** first — that usually means the folder itself moved or is on a
-drive that isn't connected.
+If the app says *every* capture is missing, that usually means the folder itself moved or is on a
+drive that isn't connected — check **Help → Open captures folder**, then use *Find moved captures…*
+rather than cleaning up.
 
 ## 9. Reporting a bug
 

@@ -187,6 +187,32 @@ what would trigger revisiting it.
     ORM-level, so turning it on is a real behaviour change — and it would interact with
     `session_assignments`, which is FK-free *on purpose* (invariant #4). Revisit with Alembic
     (below), not alongside a pragma change.
+- **A capture that moved is located by its contents, and only ever re-pointed** (B4, 2026-08-03).
+  `CaptureRow.path` is advisory and the content hash is the identity, which has an unpleasant
+  consequence: `find_missing_captures` can say the bytes aren't where the app looks, but *not*
+  whether the file was moved or deleted. The prune handed that judgement to the user; this hands
+  the app the other half of the job — go and look — so forgetting a capture stops being the only
+  available answer.
+  - **The search space is the known-missing rows, not the captures folder.** A row that resolves is
+    already correct; scanning "everything" would let a stale duplicate found on a memory stick
+    re-point a perfectly good row. So the pass asks *"where did these specific captures go?"*, never
+    *"what captures are in this folder?"* — the latter question is the **import**'s, and the two are
+    deliberately not the same code path.
+  - **`(file name, size)` is a hint; the hash is the ruling.** Confirming a match costs a full
+    decompression pass, so a candidate is read only when a `stat` says it could be one of ours, and
+    accepted only when the sha256 of its decompressed payload equals the row's identity. Relocating
+    on name+size alone would be right almost always — capture names are timestamps — and *silently*
+    wrong the rest of the time, filing one recording's metadata against another's bytes. Almost
+    always is not a property worth having here.
+  - **It re-points; it does not copy home.** A capture found on an external drive leaves the row
+    pointing at that drive, and goes missing again when it's unplugged. Copying into the local
+    captures folder is the import flow's job (DECISIONS above: Drive is transport, the local archive
+    is the home); doing it behind a button labelled "find" would move hundreds of megabytes the user
+    didn't ask for.
+  - **The cost, accepted knowingly:** a capture renamed *as well as* moved never reaches the hash,
+    because nothing pre-filters to it. Hashing every unrecognised file in a folder to catch that
+    case would mean decompressing gigabytes of strangers on the chance one is ours. It stays a prune
+    job, and the guide says so.
 - **Backups are `VACUUM INTO`, and are not an "open the database" action** (C3, 2026-08-02). Once
   WAL is on, copying the file with the filesystem is wrong: committed pages live in a `-wal`
   sibling, so the copy can be stale or torn. `VACUUM INTO` writes a checkpointed, defragmented

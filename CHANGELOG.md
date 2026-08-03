@@ -18,6 +18,23 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
+or stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- **Help → Find moved captures…** looks for capture files the app has lost track of, instead of
+  only offering to forget them. Point it at a folder — an old captures folder, an external drive,
+  wherever your recordings ended up — and it searches it, including subfolders, and updates where
+  the app looks for anything it recognises. Those sessions become re-readable again straight away.
+  It identifies a capture by its **contents**, not by its name: a file only has to be read at all
+  when its name *and* size match a capture that's missing, and it's only accepted when the contents
+  match too — so a same-named file from someone else's recording can never be mistaken for yours.
+  **No file is moved, copied or deleted** — only the app's note of where each capture lives.
+  Use this **before** *Clean up missing captures*, which now says so: a capture that moved isn't a
+  capture that's gone. Two things it can't do — a capture that was renamed *as well as* moved won't
+  be recognised (clean that one up instead), and a capture found on an external drive stays pointed
+  at that drive, so it goes missing again when the drive is disconnected.
+
 ## v0.5.0 — 2026-08-02
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged; nothing about how captures are read or

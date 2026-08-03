@@ -224,11 +224,13 @@ class IngestRoundTripTest(unittest.TestCase):
     def test_hash_is_codec_independent(self):
         """A gzip -> zstd re-archive changes every byte on disk but not the capture's identity.
 
-        This is what lets the content hash be the dedupe key for league capture imports: the
-        hash is taken over the decompressed payload, never the archive.
+        This is what lets the content hash be the dedupe key for league capture imports and the
+        proof of identity when a moved capture is located. Asserted through ``hash_capture``,
+        which is the read pass ``ingest_capture`` performs, isolated - so the scan path and the
+        ingest path can never disagree about what a capture *is*.
         """
         from f1telemetry.src.ingest.archive import (CODEC_GZIP, CODEC_ZSTD, HashingReader,
-                                                    archive_capture, open_capture)
+                                                    archive_capture, hash_capture, open_capture)
 
         datagrams = [_make_datagram(2025, 0), _make_datagram(2026, 3)]
         hashes = {}
@@ -236,12 +238,14 @@ class IngestRoundTripTest(unittest.TestCase):
             path = self._write_capture(datagrams)
             archive_path = archive_capture(path, codec=codec)
             self.addCleanup(lambda p=archive_path: os.path.exists(p) and os.remove(p))
+            hashes[codec] = hash_capture(str(archive_path))
 
             with open_capture(str(archive_path)) as fh:
                 reader = HashingReader(fh)
                 while reader.read(4096):
                     pass
-                hashes[codec] = reader.content_hash
+            self.assertEqual(hashes[codec], reader.content_hash,
+                             "hash_capture must equal the hash ingest computes as it reads")
 
         self.assertEqual(hashes[CODEC_GZIP], hashes[CODEC_ZSTD],
                          "the content hash must be taken over the decompressed payload, so a "

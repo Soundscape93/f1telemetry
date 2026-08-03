@@ -368,15 +368,33 @@ long Windows race rather than a dedicated investigation.
   drive reconnected while the dialog waits keeps its capture), and a warning when *every* capture
   is missing — the signature of a moved folder. No schema change, no `PIPELINE_VERSION` bump.
   See DECISIONS → Storage.
-- **Next — locate a moved capture by content hash.** The other half of the above, and now the only
-  piece missing: scan the captures folder, match each file's hash against `captures`, and
-  `relocate()` the row instead of forgetting it. Cheaper than it sounds — `relocate()` already
-  exists, so this is purely a scanner, and `known_files()` pre-filters by name+size so only real
-  candidates get decompressed and hashed. It slots in **between** `find_missing_captures` and
-  `prune_missing_captures`, which were split for exactly this.
-- **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
-  never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
-  (it isn't in the file), so the column exists now; wiring waits for the import flow above.
+- **Done — locating a moved capture by content hash** (B4, 2026-08-03). *Help → Find moved
+  captures…* walks a folder the user picks and re-points a `captures` row at the file it finds,
+  so a moved capture stops being indistinguishable from a deleted one. It slots in **between**
+  `find_missing_captures` and `prune_missing_captures`, which were split for exactly this, and the
+  prune dialog now sends the user here first.
+  `pipeline.relocate_moved_captures` searches **only** the known-missing rows — a row that already
+  resolves is correct, and re-pointing it at a second copy found on a memory stick would be a
+  regression. `(file name, size)` pre-filters (a `stat`), the content hash rules:
+  `archive.hash_capture` is `ingest_capture`'s read pass isolated, so the scan path and the ingest
+  path can't drift about what a capture *is* (asserted in `test_hash_is_codec_independent`). The
+  walk is recursive and suffix-filtered, and stops as soon as everything wanted has been found.
+  Threaded (`RelocateWorker`), unlike the prune: confirming a match costs a decompression pass per
+  candidate. Two deliberate limits: it **re-points, it does not copy home** (copying into the local
+  captures folder is what the league import is for — conflating them would silently duplicate
+  hundreds of MB behind a button that says "find"), and a capture that was renamed *as well as*
+  moved never reaches the hash and stays a job for the prune. First production caller of
+  `CaptureStore.relocate`, which needed two fixes on the way: it was annotated `-> None` but
+  returns `bool`, and derived `file_name` with `rsplit("/")` — the *entire path* on Windows,
+  breaking both `known_files()` and `resolve_capture_path`'s fallback.
+- **Loose end: `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but never set.**
+  No UI wires it, and — worth being precise about — **nothing reads it either**: no view, no query,
+  no standings path. The earlier claim that it is "the one capture field a re-ingest can't
+  backfill" is true only of a *re-ingest*, which feeds the stored value back; a **re-import** sets
+  it, because `CaptureStore.record` replaces by hash. So nothing is lost irreversibly by leaving it
+  blank. Current plan is therefore not a branch of its own but one optional "Recorded by" field on
+  the league import dialog, filled at the moment the admin actually knows the answer. See
+  PRIORITIES → Cycle 2.
 
 ## Possible, uncertain
 - **Hosted multi-user league platform** — signup / authorization, colleagues upload their own
