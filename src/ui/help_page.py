@@ -88,6 +88,7 @@ class HelpPage(QWidget):
     not run alongside) - the same emit-and-let-the-container-act split as the seasons pages. 
     """
     reingest_requested = Signal()
+    find_moved_captures_requested = Signal()
     prune_captures_requested = Signal()
     backup_requested = Signal()
 
@@ -125,6 +126,13 @@ class HelpPage(QWidget):
             "Rebuild your stored sessions from the saved capture files. Needed after an update "
             "that reads more from a capture; your seasons and rosters are kept.")
         self._reingest_btn.clicked.connect(self.reingest_requested)
+
+        self._find_moved_btn = QPushButton("Find moved captures")
+        self._find_moved_btn.setMinimumHeight(32)
+        self._find_moved_btn.setToolTip(
+            "Search a folder for capture files the app has lost track of, and point it at them "
+            "again. Use this before cleaning up - a moved capture isn't a lost one.")
+        self._find_moved_btn.clicked.connect(self.find_moved_captures_requested)
 
         self._prune_btn = QPushButton("Clean up missing captures")
         self._prune_btn.setMinimumHeight(32)
@@ -186,6 +194,8 @@ class HelpPage(QWidget):
         layout.addWidget(self._status)
         layout.addSpacing(6)
         layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(6)
+        layout.addWidget(self._find_moved_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(self._prune_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)

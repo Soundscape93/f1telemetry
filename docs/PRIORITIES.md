@@ -34,11 +34,27 @@ whose round a calendar edit removes or re-points (`session_assignments` has no F
 invariant #4). C2/C3 are storage-layer and self-contained, so they ship while that is decided.
 
 **Cycle 2 — league data flow.** The one substantial feature block, and the direction the whole
-capture-as-interchange design was built for.
+capture-as-interchange design was built for. **Two branches, not three** — see the order note.
 
-- B2 league capture import from a shared folder
-- B3 `recorded_by` wiring (ships with B2)
-- B4 locate a moved capture by content hash (shares B2's hash/scan machinery)
+- B4 locate a moved capture by content hash — **done 2026-08-03**
+- B2 league capture import from a shared folder, carrying B3's one field
+
+*Order note (revised 2026-08-03):* the listed order was B2 → B3 → B4; it is **reversed** for B4.
+Both items need the same primitive — hash a capture on disk without parsing it — and B4 is the
+small consumer that puts `archive.hash_capture` in place and proves it on real archives before the
+large feature leans on it. B4 also fixes a live foot-gun rather than adding surface: a *moved*
+capture was indistinguishable from a *deleted* one, and the only action offered was the one that
+forgets it. ROADMAP already said B4 "slots in between `find_missing_captures` and
+`prune_missing_captures`", and that split was already in the code.
+
+**B3 stopped being its own item.** The column, the domain field and the `recorded_by` plumbing all
+exist; nothing sets a value and — the deciding fact — **nothing reads one**. A settings page and an
+identity flow to feed a write-only column is speculative work. Its stated justification was also
+overstated: only a *re-ingest* can't backfill it, while a *re-import* sets it (replace-by-hash), so
+leaving it blank loses nothing irreversibly. It becomes one optional "Recorded by" text field on
+B2's import dialog — filled at the moment the admin actually knows the answer, blank without
+penalty. Embedding it in the `.f1cap` header (format v2) was weighed and **rejected as unwarranted**
+by anything current: a real on-disk format change for a field with no consumer.
 
 **Cycle 3 — release-phase process.** Effectively the rest of the C block: Phase 4 packaging
 reach, the installer, the real auto-updater, and the remaining build-robustness items. Promoted
@@ -72,8 +88,8 @@ actually exercises it.
 | ID | Item | Status | Detail in |
 |---|---|---|---|
 | B2 | League capture import from a shared folder | open | ROADMAP → Capture compression; DECISIONS → Storage |
-| B3 | `recorded_by` is plumbed but never set | open | ROADMAP → Capture compression |
-| B4 | Locate a moved capture by content hash | open | ROADMAP → Capture compression; DECISIONS → Storage |
+| B3 | `recorded_by` is plumbed but never set | folded into B2 — see Cycle 2 | ROADMAP → Capture compression |
+| B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
 | A4 | Windows light/dark switch leaves text miscoloured | open | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
@@ -130,6 +146,34 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **B4 — locate a moved capture by content hash.** Done 2026-08-03; the first item of Cycle 2.
+  *Help → Find moved captures…* walks a folder the user picks and re-points a `captures` row at the
+  file it finds. The point is not the feature but the gap it closes: `find_missing_captures` can
+  only say the bytes aren't where the app looks, so until now a *moved* capture and a *deleted* one
+  were the same thing to the app and the only action offered was the one that forgets it.
+  **Three decisions worth not re-litigating.** The search space is **only the known-missing rows** —
+  a row that resolves is already correct, and re-pointing it at a second copy found on a memory
+  stick would be a regression, not a fix. **Name and size pre-filter; the hash rules** — a candidate
+  is read only when `(basename, size)` matches a missing row (a `stat`) and accepted only when the
+  sha256 of its decompressed payload matches, so a folder full of strangers is cheap and one
+  recording's metadata can never be filed against another's bytes. And it **re-points rather than
+  copies home**: copying into the local captures folder is what B2's import is for, and doing it
+  here would silently duplicate hundreds of MB behind a button that says "find".
+  **Accepted limits, chosen not discovered:** a capture renamed *as well as* moved never reaches the
+  hash (still a prune job), and one found on an external drive goes missing again when the drive is
+  disconnected — that is what `relocate` means.
+  `archive.hash_capture` is `ingest_capture`'s read pass isolated; `test_hash_is_codec_independent`
+  now asserts the two agree, so the scan path and the ingest path can't drift about what a capture
+  *is*. Threaded (`RelocateWorker`), unlike the prune, because confirming a match costs a
+  decompression pass per candidate.
+  **Two latent defects fixed on the way** — this is the first production caller of
+  `CaptureStore.relocate`, which was annotated `-> None` but returns `bool`, and derived `file_name`
+  with `rsplit("/")`: the *entire path* on Windows, which would have corrupted the very field
+  `known_files()` and `resolve_capture_path`'s fallback key on. `MainWindow._busy()` replaced a
+  guard copy-pasted at four call sites; this was the fourth worker, and a handler that forgot one
+  would let two jobs write the same SQLite file from two threads.
+  Covered by 12 cases in `test/ingest/test_reingest.py`. The Qt wiring has **no automated test** —
+  every UI suite here is deliberately Qt-free — so it was verified by hand.
 - **A3 — "missing middle laps".** Verified 2026-08-03 and closed. A full test race on Windows under
   v0.5.0 recorded every lap continuously, confirming the root cause was the machine sleeping
   mid-session (fixed in v0.4.2) and not anything in ingest. The original symptom — laps 1–2 then

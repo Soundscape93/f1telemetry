@@ -17,8 +17,8 @@ from enum import Enum, auto
 
 from .domain.captures import CaptureMeta
 from .domain.models import SessionResult
-from .ingest.archive import (HashingReader, archive_capture, capture_codec,
-                                is_compressed_capture, open_capture)
+from .ingest.archive import (HashingReader, archive_capture, capture_codec, hash_capture,
+                                is_capture_file, is_compressed_capture, open_capture)
 from .ingest.recording import read_header, read_packet
 from .protocol.parser import PacketParser
 from .protocol.registry import build_registry
@@ -302,6 +302,141 @@ def find_missing_captures(capture_store: CaptureStore,
     """
     return [meta for meta in capture_store.list_captures()
             if resolve_capture_path(meta, captures_dir) is None]
+
+
+# --- locating captures that moved --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RelocateSummary:
+    """What one search-for-moved-captures pass recoveredm and what it still coudn't find."""
+
+    relocated: tuple[tuple[str, str], ...] = ()   # (file name, the path it was found at)
+    still_missing: tuple[str, ...] = ()           # file names nothing in the folder matched
+    scanned: int = 0                              # capture files seen in the search folder
+    hashed: int = 0                              # of those, how many were read to confirm
+    errors: tuple[str, ...] = ()                   # "<file name>: <error>" per unreadable file
+    cancelled: bool = False
+
+
+def _walk_captures(root: str | os.PathLike) -> Iterator[str]:
+    """Every capture file under ``root``, recursively, in a stable order.
+
+    Recursive because both folders this is ever pointed at are trees: the league's shared folder
+    is ``<League>/<Season>/<Round>-<Track>/`` (DECISIONS -> Storage), and a captures folder that
+    "moved" has usually moved *into* a subfolder of wherever the user points us. Non-captures are
+    rejected by suffix, so walking a large drive costs directory listings and nothing else.
+    """
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in sorted(filenames):
+            if is_capture_file(name):
+                yield os.path.join(dirpath, name)
+
+
+def relocate_moved_captures(capture_store: CaptureStore, search_dir: str | os.PathLike, *,
+                            captures_dir: str | os.PathLike | None = None,
+                            on_progress: Callable[[int, int, str], None] | None = None,
+                            cancelled: Callable[[], bool] | None = None,
+                            hash_file: Callable[[str], str] = hash_capture) -> RelocateSummary:
+    """Find captures whose file moved and re-point their metadata at it. **Never** moves a file.
+
+    The missing half of the prune (docs/ROADMAP -> Capture compression), and it belongs *before*
+    it: ``find_missing_captures`` can only report that bytes are not where the app looks, and a
+    moved capture and a deleted one are identical at the row level. This is the app going to look
+    rather than asking the user to give up - so ``prune_missing_captures`` becomes the answer for
+    captures that are genuinely gone, instead of the only answer available.
+
+    **Only known-missing captures are hunted for.** The search space is
+    ``find_missing_captures``, not the whole ``captures`` table: a row whose file resolves is
+    already correct, and re-pointing it at a second copy found on a memory stick would be a
+    regression, not a fix.
+
+    **Name and size pre-filter; the content hash decides.** A candidate is read only when its
+    ``(basename, size)` matches a missing row - which costs a ``stat`` - and is relocated only
+    when the hash of its decompressed payload equals the row's identity. So the pass is cheap on
+    a folder full of strangers, and it can never file one recording's metadata against another
+    recording's bytes. The cost of that rigour is the one case it cannot solve: a capture that
+    was renamed *and* moved never reaches the hash, and stays a job for the prune.
+
+    It **re-points, it does not copy home**: a capture found on an external drive leaves the row
+    pointing at that drive, and unplugging it makes the capture missing again. Copying a capture
+    into the local captures folder is what the league *import* flow is for; conflating the two
+    would silently duplicate hundreds of megabytes behind a button that says "find".
+
+    ``cancelled`` is polled per file, and ``hash_file`` is injectable purely so the tests can
+    drive the matching without real multi-hundred-megabyte archives.
+    """
+    missing = find_missing_captures(capture_store, captures_dir)
+    total = len(missing)
+    if not missing:
+        log.info("Capture search: nothing is missing, nothing to look for")
+        return RelocateSummary()
+
+    # (file name, size) -> the missing captures that could be this file. A list, not one value:
+    # two recordings can share a name and a size, and only the hash can tell them apart.
+    wanted: dict[tuple[str, int], list[CaptureMeta]] = {}
+    for meta in missing:
+        wanted.setdefault((meta.file_name, meta.file_size), []).append(meta)
+
+    relocated: list[tuple[str, str]] = []
+    found_hashes: set[str] = set()
+    errors: list[str] = []
+    scanned = hashed = 0
+    was_cancelled = False
+
+    log.info("Capture search: %d missing capture(s) under %s", total, search_dir)
+    for path in _walk_captures(search_dir):
+        if not wanted:              # everything we came for has been found
+            break
+        if cancelled is not None and cancelled():
+            was_cancelled = True
+            log.info("Capture search cancelled after %d file(s)", scanned)
+            break
+
+        scanned += 1
+        try:
+            size = os.path.getsize(path)
+        except OSError:         # vanished or unreadable mid-walk; not our problem
+            continue
+        candidates = wanted.get((os.path.basename(path), size))
+        if not candidates:
+            continue                # can't be one of ours - never worth decompressing
+
+        if on_progress is not None:
+            on_progress(len(relocated), total, os.path.basename(path))
+        try:
+            content_hash = hash_file(path)
+        except Exception as exc:                # a corrupt candidate must not abort the whole pass
+            log.exception("Capture search: could not read candidate %s", path)
+            errors.append(f"{os.path.basename(path)}: {exc}")
+            continue
+        hashed += 1
+
+        match = next((m for m in candidates if m.content_hash == content_hash), None)
+        if match is None:
+            log.info("Capture search: %s matches a missing capture by name and size but not by "
+                     "content - leaving it alone", path)
+            continue
+
+        found_at = os.path.abspath(path)
+        capture_store.relocate(content_hash, found_at, size, capture_codec(path))
+        log.info("Capture search: relocated %s to %s", match.file_name, found_at)
+        relocated.append((match.file_name, found_at))
+        found_hashes.add(content_hash)
+        candidates.remove(match)
+        if not candidates:
+            wanted.pop((match.file_name, match.file_size), None)
+
+    summary = RelocateSummary(
+        relocated=tuple(relocated),
+        still_missing=tuple(m.file_name for m in missing
+                            if m.content_hash not in found_hashes),
+        scanned=scanned,
+        hashed=hashed,
+        errors=tuple(errors),
+        cancelled=was_cancelled,
+    )
+    log.info("Capture search finished: %s", summary)
+    return summary
 
 
 def prune_missing_captures(capture_store: CaptureStore, content_hashes: Iterable[str],
