@@ -124,15 +124,22 @@ up opportunistically rather than scheduled.
   rendered map against the in-game track map when recording the next sessions. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
-- **A3 — "missing middle laps".** The aborted Windows race showing laps 1–2 then ~16–18 is almost
-  certainly the same sleep root cause fixed in v0.4.2. **Plan:** spot-check on the next long
-  Windows race; not worth a dedicated investigation.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 
 ## Recently closed
 
+- **A3 — "missing middle laps".** Verified 2026-08-03 and closed. A full test race on Windows under
+  v0.5.0 recorded every lap continuously, confirming the root cause was the machine sleeping
+  mid-session (fixed in v0.4.2) and not anything in ingest. The original symptom — laps 1–2 then
+  ~16–18 — was lost telemetry, never a parsing fault, so there was nothing to fix here once v0.4.2
+  landed.
+  **Do not reopen this on the wrong symptom.** The same race showed a single missing lap number,
+  which is *correct*: a red flag makes the game skip one lap (restart is on lap *n+2*), documented
+  in TELEMETRY_NOTES → "A red flag skips a lap number". One missing number after a slow lap is the
+  game; several consecutive laps missing, usually with the Final Classification gone too, is lost
+  telemetry.
 - **E6 — edit-calendar action.** Done 2026-08-02; the last item of Cycle 1. `EditCalendarPage` is a
   fifth page in `SeasonsView`, reusing the create page's `CalendarPicker` unchanged — which is what
   it was factored into `components/` for.

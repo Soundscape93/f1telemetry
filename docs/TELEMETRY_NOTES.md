@@ -176,6 +176,26 @@ each captured session (and mark still-pending ones); rows saved before it was ca
 `session_link_id` order (last race = GP). Note: both Sprint and GP award points, so both stay in
 `RACE_SESSION_TYPES` for standings — the slot distinction is a *display/Results* concern only.
 
+## A red flag skips a lap number — the gap is correct
+A red-flagged race leaves a **one-lap hole in the lap numbering**, and it is not a capture bug.
+Confirmed in-game (2026-08-03) and the same for every player, because it is how the game runs a
+restart rather than anything about the telemetry:
+
+1. the race is red-flagged during lap *n* — that lap ends slow, since the game takes over control;
+2. the *race strategy* window appears, and the player presses restart;
+3. racing resumes on lap ***n+2***.
+
+Lap *n+1* is never driven. In real F1 that lap is the trip from the pit lane back to the starting
+grid; the game skips it and restarts directly from the grid box, so no lap row is ever produced for
+it. A capture of such a race therefore shows e.g. laps 1–11 then 13–20, with 12 simply absent.
+
+**Why this is worth writing down:** that symptom looks exactly like the "missing middle laps" bug
+(PRIORITIES → A3), which was real but had a completely different cause — the Windows machine
+sleeping mid-session, fixed in v0.4.2. Tell them apart by the **size and shape** of the gap: a
+single missing lap number bracketed by a slow lap is a red-flag restart and is expected; a run of
+several consecutive laps missing, usually with the Final Classification gone too, is lost telemetry.
+Only the second one is a bug.
+
 ## Track ids worth remembering
 Imola is **27** (in the 2025 calendar); Madrid is **42** (new in 2026, replaces Imola in that
 calendar). `official_calendar(year)` encodes the preset order for each.
