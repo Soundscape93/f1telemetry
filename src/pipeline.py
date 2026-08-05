@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -17,7 +18,7 @@ from enum import Enum, auto
 
 from .domain.captures import CaptureMeta
 from .domain.models import SessionResult
-from .ingest.archive import (HashingReader, archive_capture, capture_codec, hash_capture,
+from .ingest.archive import (CAPTURE_SUFFIXES, HashingReader, archive_capture, capture_codec, hash_capture,
                                 is_capture_file, is_compressed_capture, open_capture)
 from .ingest.recording import read_header, read_packet
 from .protocol.parser import PacketParser
@@ -568,4 +569,261 @@ def reingest_all(capture_store: CaptureStore, session_store: SessionStore, *,
         cancelled=was_cancelled,
     )
     log.info("Re-ingest finished: %s", summary)
+    return summary
+
+
+# --- league capture import --------------------------------------------------------------
+#
+# The other half of the capture-as-interchange design (DECISIONS -> Storage): a member drops a 
+# recording in the shared folder, an admin pulls it into their own database. Read and write are
+# split the way the prune is - `find_missing_captures`is what the user is shown and
+# `import_captures` is what acts - so hundreds of megabytes are never copied before a human said
+# yes. Placed at the end of the module rather than beside `archive_and_ingest` purely so it can
+# call `resolve_capture_path`and `_walk_captures` without forward references.
+
+@dataclass(frozen=True)
+class ImportCandidate:
+    """A file in the source folder that looks like a capture this database doesn't have."""
+
+    path: str
+    file_name: str
+    file_size: int
+
+
+@dataclass(frozen=True)
+class ImportSummary:
+    """What one import pass brought in and what it deliberately did not."""
+
+    imported: tuple[str, ...] = ()                 # copied in and ingested
+    sessions_stored: int = 0                       # sessions those captures added to the database
+    recovered: tuple[str, ...] = ()                 # already known, but the local archive had gone missing
+    updated: tuple[str, ...] = ()                   # already known and present; only "recorded_by" changed
+    skipped: tuple[str, ...] = ()                   # already imported and still present; nothing to do
+    errors: tuple[str, ...] = ()                    # "<file name>: <error>", one per capture that failed
+    cancelled: bool = False
+
+
+def find_importable_captures(source_dir: str | os.PathLike, capture_store: CaptureStore) -> list[ImportCandidate]:
+    """Captures in ``source_dir`` that look new, cheaply enough to run before asking the user.
+
+    The read half of the import: a recursive walk, one ``stat`` per capture file, and a single
+    ``known_files()`` query - no archive is opened, so this is fast enough to run synchronously
+    on a shared drive and report a count and a size before any thread starts.
+
+    ``(file name, size)`` is a **pre-filter, not a decision**. It exists to avoid decompressing
+    a folder the admin has already imported five times; the content hash in
+    :func:`import_captures` is what actually rules on identity, so a capture renamed along the
+    way costs one wasted read rather than becoming a duplicate. The inverse - two genuinely
+    different recordings sharing a name *and* a byte-exact size - would be skipped, which is why
+    the pre-filter is only safe given the game's timestamp naming and multi-hundred-megabyte
+    files.
+    """
+    known = capture_store.known_files()
+    candidates: list[ImportCandidate] = []
+    for path in _walk_captures(source_dir):
+        try:
+            size = os.path.getsize(path)
+        except OSError:         # vanished or unreadable mid-walk
+            continue
+        name = os.path.basename(path)
+        if (name, size) in known:
+            continue
+        candidates.append(ImportCandidate(path=path, file_name=name, file_size=size))
+    log.info("Import scan: %d candidate(s) in %s", len(candidates), source_dir)
+    return candidates
+
+
+def _split_capture_name(file_name: str) -> tuple[str, str]:
+    """``("20260802_210340", "f1cap.zst").
+    
+    Not ``os.path.splitext``: a capture suffix is two parts, so that would cut in the wrong place
+    and strand ``.f1cap``in a stem.
+    """
+    for suffix in CAPTURE_SUFFIXES:
+        if file_name.endswith(suffix):
+            return file_name[: -len(suffix)], suffix
+    return file_name, ""
+
+
+def _unique_destination(directory: str, file_name: str) -> str:
+    """A path in ``directory`` for ``file_name`` that doesn't exist yet.
+
+    A name clash here is **not** a duplicate import - the content hash has already said this is a
+    recording we don't hold. It means two different recordings share a name, which the game's
+    timestamp naming makes rare but not impossible when two members record the same race. So the
+    incoming file is numbered rather than either overwriting what's there or being dropped.
+    """
+    destindation = os.path.join(directory, file_name)
+    if not os.path.exists(destindation):
+        return destindation
+    stem, suffix = _split_capture_name(file_name)
+    counter = 2
+    while True:
+        candidate = os.path.join(directory, f"{stem}-{counter}{suffix}")
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
+
+def _is_inside(path: str, directory: str) -> bool:
+    """Whether ``path`` already lives under ``directory``, symlinks resolved."""
+    root = os.path.realpath(directory)
+    try:
+        return os.path.commonpath([root, os.path.realpath(path)]) == root
+    except ValueError:        # drives differ on Windows
+        return False
+
+
+def _copy_capture(candidate: ImportCandidate, captures_dir: str) -> str:
+    """Copy a capture into the local captures folder and return where it landed.
+
+    Copy-home is the point, not an optimisation (DECISIONS -> Storage): the shared drive is
+    **transport** and the local archive is the **home**, so nothing in the database is ever left
+    pointing at a folder that syncs, disconnects, or gets tidied up by somebody else. The source
+    file is never touched, moved or deleted.
+
+    **A capture that is already inside the captures folder is ingested in place.** Importing from
+    any folder that *contains* the data root - a home directory, a whole drive - otherwise makes
+    the app copy its own archive beside itself under a ``-2`` name, which is pure waste. Reading
+    it in place also makes "point the importer at your own captures folder" a legitimate way to
+    pick up a loose capture that was never ingested.
+
+    Written to a ``.part`` name and ``os.replace``d into place - the same guarantee
+    ``archive_capture`` gives, so an interrupted copy can't leave a half-written file that looks
+    like a whole capture.
+    """
+    if _is_inside(candidate.path, captures_dir):
+        return candidate.path
+
+    destination = _unique_destination(captures_dir, candidate.file_name)
+    temp = f"{destination}.part"
+    try:
+        shutil.copy2(candidate.path, temp)
+        os.replace(temp, destination)
+    except Exception:
+        if os.path.exists(temp):
+            os.remove(temp)
+        raise
+    return destination
+
+
+def import_captures(candidates: Iterable[ImportCandidate], capture_store: CaptureStore, 
+                    session_store: SessionStore, *, captures_dir: str | os.PathLike,
+                    lap_store=None, recorded_by: str | None = None,
+                    on_progress: Callable[[int, int, str], None] | None = None,
+                    cancelled: Callable[[], bool] | None = None,
+                    hash_file: Callable[[str], str] = hash_capture,
+                    ingest: Callable[..., list[SessionResult]] = ingest_capture) -> ImportSummary:
+    """Copy league captures into the local captures folder and ingest them.
+
+    Takes the candidate *list* rather than a folder - like ``prune_missing_captures`` taking
+    hashes - because what runs must be exactly what the user was shown and agreed to, not a
+    second scan that might have found something else in the meantime.
+
+    Each candidate is hashed first, which decides between four outcomes:
+
+    * **new** - copied home and ingested. The capture row lands pointing at the local copy.
+    * **known, and the local archive is still there** - skipped. Re-syncing a shared folder is a
+      no-op, which is the whole reason the metadata table is keyed on a content hash.
+    * **known, but the local archive has gone missing** - copied home and the row ``relocate``d.
+      The shared folder is a backup of last resort, and this is the one path that uses it as one.
+      Deliberately *not* re-ingested: the derived rows are already there, and rebuilding them is
+      what "Re-read captures" is for.
+    * **known, and only ``recorded_by`` differs** - updated in place. Without this, "already
+      imported" would mean the value could never be corrected (DECISIONS -> Storage).
+
+    ``recorded_by`` is optional and is the importer's claim about the file, not something the
+    file asserts (PRIORITIES -> Cycle 2). Blank is a perfectly good answer and never overwrites a
+    stored value.
+
+    **A capture that fails to ingest keeps its local copy**, unlike ``archive_and_ingest``, which
+    deletes a raw only once its bytes are proven. Nothing is at risk here - the source in the
+    shared folder is untouched either way - and a capture that won't parse is precisely the one
+    the admin wants a local copy of to look at.
+
+    ``cancelled`` is polled *between* captures, so a copy or an ingest is never interrupted
+    half-way. ``hash_file`` and ``ingest`` are injectable purely so the tests can drive the
+    decision table without multi-hundred-megabyte archives.
+    """
+    candidates = list(candidates)
+    total = len(candidates)
+    captures_dir = str(captures_dir)
+    os.makedirs(captures_dir, exist_ok=True)
+
+    imported: list[str] = []
+    recovered: list[str] = []
+    updated: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    sessions_stored = 0
+    was_cancelled = False
+
+    log.info("Import starting: %d candidate(s) into %s", total, captures_dir)
+    for index, candidate in enumerate(candidates, start=1):
+        if cancelled is not None and cancelled():
+            was_cancelled = True
+            log.info("Import cancelled at %d of %d", index - 1, total)
+            break
+        if on_progress is not None:
+            on_progress(index, total, candidate.file_name)
+
+        try:
+            content_hash = hash_file(candidate.path)
+        except Exception as exc:                    # unreadable source: skip it, keep going
+            log.exception("Import: could not read %s", candidate.path)
+            errors.append(f"{candidate.file_name}: {exc}")
+            continue
+
+        known = capture_store.get(content_hash)
+        if known is not None and resolve_capture_path(known, captures_dir) is not None:
+            if recorded_by and recorded_by != known.recorded_by:
+                capture_store.set_recorded_by(content_hash, recorded_by)
+                log.info("Import: %s is already held; updated recorded_by", candidate.file_name)
+                updated.append(candidate.file_name)
+            else:
+                log.info("Import: %s is already held, skipping", candidate.file_name)
+                skipped.append(candidate.file_name)
+            continue
+
+        try:
+            destination = _copy_capture(candidate, captures_dir)
+        except Exception as exc:
+            log.exception("Import: could not copy %s", candidate.path)
+            errors.append(f"{candidate.file_name}: {exc}")
+            continue
+
+        if known is not None:
+            # Known, but the local archive was gone - take the shared copy as the new home.
+            # A RECOVERY, not a skip: a file really was copied and the row now points at it.
+            capture_store.relocate(content_hash, destination,
+                                   os.path.getsize(destination), capture_codec(destination))
+            if recorded_by and recorded_by != known.recorded_by:
+                capture_store.set_recorded_by(content_hash, recorded_by)
+            log.info("Import: recovered missing archive %s from the shared folder",
+                     os.path.basename(destination))
+            recovered.append(os.path.basename(destination))
+            continue
+
+
+        try:
+            sessions = ingest(destination, session_store, lap_store=lap_store,
+                              capture_store=capture_store, recorded_by=recorded_by)
+        except Exception as exc:                    # one bad archive must not abort the whole folder
+            log.exception("Import: could not ingest %s", destination)
+            errors.append(f"{candidate.file_name}: {exc}")
+            continue
+        sessions_stored += len(sessions)
+        log.info("Import: %s -> %s (%d session(s))", candidate.file_name, destination, len(sessions))
+        imported.append(os.path.basename(destination))
+
+    summary = ImportSummary(
+        imported=tuple(imported),
+        sessions_stored=sessions_stored,
+        recovered=tuple(recovered),
+        updated=tuple(updated),
+        skipped=tuple(skipped),
+        errors=tuple(errors),
+        cancelled=was_cancelled,
+    )
+    log.info("Import finished: %s", summary)
     return summary

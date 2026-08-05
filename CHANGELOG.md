@@ -22,6 +22,18 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 or stored moved, so existing captures, sessions and standings are unaffected.
 
 ### Added
+- **Help → Import captures…** brings in recordings a league member shared with you. Pick the folder
+  they're in — a synced Drive folder, a memory stick, your Downloads — and everything new is copied
+  into your own captures folder and read, subfolders included. The originals are left exactly where
+  they are; nothing is moved, renamed or deleted.
+  You're told how many captures were found and how much will be copied **before** anything starts,
+  and you can cancel part-way without leaving a mess. **Re-running it on the same folder is safe**:
+  captures are recognised by their contents, not their name, so anything already imported is simply
+  skipped — even if someone renamed it. It's also how you get a capture back if you deleted your
+  local copy but it's still in the shared folder.
+  There's an optional **"Who recorded them?"** box. Leave it blank if you don't know; fill it in and
+  the app remembers who a capture came from once it's on your machine, which the shared drive can no
+  longer tell you. Importing the same captures again with a different name corrects it.
 - **Help → Find moved captures…** looks for capture files the app has lost track of, instead of
   only offering to forget them. Point it at a folder — an old captures folder, an external drive,
   wherever your recordings ended up — and it searches it, including subfolders, and updates where
@@ -34,6 +46,12 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   capture that's gone. Two things it can't do — a capture that was renamed *as well as* moved won't
   be recognised (clean that one up instead), and a capture found on an external drive stays pointed
   at that drive, so it goes missing again when the drive is disconnected.
+
+### Changed
+- The **Ingest .f1cap (test)** button next to *Record* is gone. It was a development leftover that
+  the user guide had been describing as the way to import a capture; **Help → Import captures…**
+  replaces it properly and handles a whole folder at once. The header now carries only the record
+  control, so starting or stopping a recording stays one click away from every page.
 
 ## v0.5.0 — 2026-08-02
 

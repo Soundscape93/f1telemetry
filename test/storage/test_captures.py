@@ -74,6 +74,14 @@ class CaptureStoreTest(unittest.TestCase):
         self.assertEqual((loaded.path, loaded.codec, loaded.file_size),
                          ("/captures/monza.f1cap.zst", "zstd", 1_000))
         self.assertEqual(loaded.file_name, "monza.f1cap.zst")  # unchanged
+
+    def test_set_recorded_by_can_correct_an_imported_capture(self):
+        """The only way to fix provenance later - a re-import, not a re-ingest (DECISIONS)."""
+        self.store.record(meta := _meta(recorded_by=None))
+        self.assertTrue(self.store.set_recorded_by(meta.content_hash, "anna"))
+
+        self.assertEqual(self.store.get(meta.content_hash).recorded_by, "anna")
+        self.assertFalse(self.store.set_recorded_by("z" * 64, "anna"))
     
     def test_delete_forgets_a_capture(self):
         self.store.record(meta := _meta())
