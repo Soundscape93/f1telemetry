@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QMainWindow,
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .workers import IngestWorker, RecorderWorker, ReingestWorker
+from .workers import ImportWorker, IngestWorker, RecorderWorker, ReingestWorker, RelocateWorker
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
@@ -82,6 +83,10 @@ class MainWindow(QMainWindow):
         self._ingest: IngestWorker | None = None
         self._reingest: ReingestWorker | None = None
         self._reingest_dialog: QProgressDialog | None = None
+        self._relocate: RelocateWorker | None = None
+        self._relocate_dialog: QProgressDialog | None = None
+        self._import: ImportWorker | None = None
+        self._import_dialog: QProgressDialog | None = None
 
         # Resolve the per user data pahts once; the workers reuse them on their own threads.
         self._db_url = paths.db_url()
@@ -149,16 +154,10 @@ class MainWindow(QMainWindow):
         self._record_button.setMinimumHeight(36)
         self._record_button.clicked.connect(self._on_button_clicked)
 
-        # TEMP: dev-only button to ingest an existing .f1cap; remove before release.
-        self._test_ingest_button = QPushButton("Ingest .f1cap (test)")
-        self._test_ingest_button.setMinimumHeight(36)
-        self._test_ingest_button.clicked.connect(self._on_test_ingest)
-
         self._status = QLabel("Idle")
         self._status.setWordWrap(True)
 
         layout.addWidget(self._record_button)
-        layout.addWidget(self._test_ingest_button)
         layout.addSpacing(12)
         layout.addWidget(self._status, 1)
         return header
@@ -181,6 +180,8 @@ class MainWindow(QMainWindow):
             "Analytics", "The analytics will be shown here, with charts and graphs."))
         self._help_page = HelpPage()
         self._help_page.reingest_requested.connect(self._on_manual_reingest)
+        self._help_page.import_captures_requested.connect(self._on_import_captures)
+        self._help_page.find_moved_captures_requested.connect(self._on_find_moved_captures)
         self._help_page.prune_captures_requested.connect(self._on_prune_captures)
         self._help_page.backup_requested.connect(self._on_backup_database)
         self._stack.addWidget(self._help_page)
@@ -189,28 +190,22 @@ class MainWindow(QMainWindow):
         
     # --- button / state machine ------------------------------------------------------------
 
+    def _busy(self) -> bool:
+        """Whether a job that owns stores on its own thread is running.
+
+        One predicate rather than one copy per handler: every new worker has to be added here
+        exactly once, and a guard that forgot one would let two jobs write the same SQLite file
+        from two threads.
+        """
+        return any(worker is not None for worker in
+                   (self._recorder, self._ingest, self._reingest, self._relocate, self._import))
+
     def _on_button_clicked(self) -> None:
         """Handle the record button click; start or stop recording depending on the current state."""
         if self._recorder is None:
             self._start_recording()
         else:
             self._stop_recording()
-
-    def _on_test_ingest(self) -> None:
-        """TEMP: pick an existing .f1cap and ingest it, to test storing a captured weekend."""
-        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
-            return
-        start_dir = str(paths.captures_dir())
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a .f1cap / .f1cap.gz / .f1cap.zst to ingest", start_dir,
-             "Captures (*.f1cap *.f1cap.gz *.f1cap.zst);;All files (*)"
-        )
-        if not path:
-            return
-        self._record_button.setEnabled(False)
-        self._test_ingest_button.setEnabled(False)
-        self._status.setText(f"Ingesting {Path(path).name} ...")
-        self._start_ingest(path)
 
     def _start_recording(self) -> None:
         """Start recording live telemetry to a .f1cap file in the captures directory."""
@@ -280,12 +275,14 @@ class MainWindow(QMainWindow):
 
     def _on_failed(self, message: str) -> None:
         """Handle a failure from any worker; reset the button and show the error."""
-        for attr in ("_recorder", "_ingest", "_reingest"):
+        for attr in ("_recorder", "_ingest", "_reingest", "_relocate", "_import"):
             worker = getattr(self, attr)
             if worker is not None:
                 worker.wait()  # ensure the thread has finished before deleting it
             setattr(self, attr, None)
         self._close_reingest_dialog()
+        self._close_relocate_dialog()
+        self._close_import_dialog()
         self._reset_button()
         self._status.setText(f"Error: {message}")
 
@@ -293,7 +290,6 @@ class MainWindow(QMainWindow):
         """Reset the record button to its initial state."""
         self._record_button.setText("Record session(s)")
         self._record_button.setEnabled(True)
-        self._test_ingest_button.setEnabled(True)  # TEMP: remove with the test button
 
     def _refresh_current_view(self) -> None:
         """Refresh whichever data surface is showing, after stored sessions changed.
@@ -379,17 +375,193 @@ class MainWindow(QMainWindow):
 
     def _on_manual_reingest(self) -> None:
         """Help -> "Re-read captures": the same guided rebuild, on demand."""
-        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+        if self._busy():
             self._status.setText("Busy - wait for the current job to finish.")
             return
-        answer = QMessageBox.question(
-            self, "Re-read captures",
-            "Re-read every stored capture and rebuild your stored sessions?\n\n"
-            "Seasons, round assignments and rosters are kept. This can take a few minutes.",
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            self._start_reingest()
+        self._start_reingest()
 
+    # --- league captures import ------------------------------------------------------------
+
+    def _on_import_captures(self) -> None:
+        """Help -> "Import captures…": pull league members' recordings into this database.
+
+        The other half of the capture-as-interchange design (DECISIONS -> Storage), and now the
+        supported way to import a capture someone sent you - it replaces the dev-only
+        "Ingest .f1cap (test)" header button.
+
+        **Scanning is synchronous, copying is not.** The scan is a directory walk, one ``stat``
+        per capture and a single ``known_files()`` query, so the user is told the count and the
+        size before any thread starts; the copy and the ingest are what run on a worker.
+
+        The "Recorded by" prompt **is** the confirmation - one modal, not two. Its label already
+        states what will be copied and where, so OK is the agreement and Cancel the refusal. The
+        field is optional by design (PRIORITIES -> Cycle 2): blank is a good answer, and a later
+        re-import can still fill it in.
+        """
+        from ..pipeline import find_importable_captures
+        from ..storage.captures import CaptureStore
+
+        if self._busy():
+            self._status.setText("Busy - wait for the current job to finish.")
+            return
+
+        source_dir = QFileDialog.getExistingDirectory(
+            self, "Choose the folder holding the captures to import", str(Path.home()))
+        if not source_dir:
+            return
+
+        try:
+            with CaptureStore(self._db_url) as store:
+                candidates = find_importable_captures(source_dir, store)
+        except Exception as exc:
+            log.exception("Could not scan %s for importable captures", source_dir)
+            self._status.setText(f"Error: could not read that folder: {exc}")
+            return
+
+        if not candidates:
+            self._status.setText(
+                "No new captures were found there, everything in that folder is already "
+                "imported.")
+            return
+
+        noun = "capture" if len(candidates) == 1 else "captures"
+        total_size = _format_size(sum(c.file_size for c in candidates))
+        recorded_by, accepted = QInputDialog.getText(
+            self, "Import captures",
+            f"{len(candidates)} new {noun} found ({total_size}).\n"
+            "They will be copied into your captures folder and read. The originals are left "
+            "where they are.\n\n"
+            "Who recorded them?  (optional — leave blank if you don't know)")
+        if not accepted:
+            return
+
+        self._record_button.setEnabled(False)
+
+        dialog = QProgressDialog(
+            "Importing captures …\nLarge captures take a while — the app hasn't frozen.",
+            "Cancel", 0, len(candidates), self)
+        dialog.setWindowTitle("Import captures")
+        dialog.setWindowModality(Qt.WindowModality.NonModal)        # the rest of the app stays usable
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)          # closed when the worker reports, not when the bar fills
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self._cancel_import)
+        dialog.show()
+        self._import_dialog = dialog
+
+        self._import = ImportWorker(
+            self._db_url, candidates, trace_dir=self._trace_dir, 
+            captures_dir=str(paths.captures_dir()), 
+            recorded_by=recorded_by.strip() or None)
+        self._import.progress.connect(self._on_import_progress)
+        self._import.done.connect(self._on_import_done)
+        self._import.failed.connect(self._on_failed)
+        self._import.start()
+        self._status.setText(f"Importing {len(candidates)} capture(s) ...")
+
+    def _cancel_import(self) -> None:
+        """Ask the import to stop; it finishes the capture it's on so nothing is left partial."""
+        if self._import is not None:
+            self._import.cancel()
+            self._status.setText("Finishing the current capture, then stopping ...")
+
+    def _on_import_progress(self, index: int, total: int, file_name: str) -> None:
+        if self._import_dialog is None:
+            return
+        self._import_dialog.setMaximum(total)
+        self._import_dialog.setValue(index - 1)         # index-1 finished; this one is in progress
+        self._import_dialog.setLabelText(
+            f"Importing capture {index} of {total}: {file_name}\n"
+            "Large captures take a while — the app can be used while it runs.")
+
+    def _on_import_done(self, summary) -> None:
+        worker, self._import = self._import, None
+        if worker is not None:
+            worker.wait()  # ensure the thread has finished before deleting it
+
+        self._close_import_dialog()
+        self._reset_button()
+        self._status.setText(_import_message(summary))
+        # Unlike the prune and the search, this one really did store sessions.
+        self._refresh_current_view(
+        )
+    
+    def _close_import_dialog(self) -> None:
+        if self._import_dialog is not None:
+            self._import_dialog.close()
+            self._import_dialog = None
+        
+    # --- find captures that moved ------------------------------------------------------------
+
+    def _on_find_moved_captures(self) -> None:
+        """Help -> "Find moved captures…": re-point metadata at files that moved, not vanished.
+
+        The step that belongs *before* the prune (docs/ROADMAP -> Capture compression). A moved
+        capture and a deleted one look identical at the row level, so the app offers to go and
+        look before it offers to forget.
+
+        Threaded, unlike the prune: name and size only say "worth reading", and the content hash
+        that actually decides costs a decompression pass per candidate - so a captures folder
+        that moved wholesale is minutes of work, not milliseconds.
+        """
+        if self._busy():
+            self._status.setText("Busy - wait for the current job to finish.")
+            return
+
+        search_dir = QFileDialog.getExistingDirectory(
+            self, "Choose a folder to search for your captures", str(paths.captures_dir()))
+        if not search_dir:
+            return
+
+        self._record_button.setEnabled(False)
+
+        dialog = QProgressDialog(
+            f"Looking for your captures in\n{search_dir}", "Cancel", 0, 0, self)
+        dialog.setWindowTitle("Find moved captures")
+        dialog.setWindowModality(Qt.WindowModality.NonModal)        # the rest of the app stays usable
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)          # closed when the worker reports, not when the bar fils
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self._cancel_relocate)
+        dialog.show()
+        self._relocate_dialog = dialog
+
+        self._relocate = RelocateWorker(
+            self._db_url, search_dir, captures_dir=str(paths.captures_dir()))
+        self._relocate.progress.connect(self._on_relocate_progress)
+        self._relocate.done.connect(self._on_relocate_done)
+        self._relocate.failed.connect(self._on_failed)
+        self._relocate.start()
+        self._status.setText("Searching for captures that moved ...")
+
+    def _cancel_relocate(self) -> None:
+        if self._relocate is not None:
+            self._relocate.cancel()
+            self._status.setText("Finishing the current file, then stopping ...")
+
+    def _on_relocate_progress(self, found: int, total: int, file_name: str) -> None:
+        if self._relocate_dialog is None:
+            return
+        self._relocate_dialog.setMaximum(total)
+        self._relocate_dialog.setValue(found)
+        self._relocate_dialog.setLabelText(
+            f"Found {found} of {total} missing capture(s).\nChecking {file_name} …")
+
+    def _on_relocate_done(self, summary) -> None:
+        worker, self._relocate = self._relocate, None
+        if worker is not None:
+            worker.wait()  # ensure the thread has finished before deleting it
+
+        self._close_relocate_dialog()
+        self._reset_button()
+        # No view refresh: only capture metadata moved, no session, lap or standing was touched
+        self._status.setText(_relocate_message(summary))
+
+    def _close_relocate_dialog(self) -> None:
+        if self._relocate_dialog is not None:
+            self._relocate_dialog.close()
+            self._relocate_dialog = None
+        
     # --- missing-captures prune ------------------------------------------------------------
 
     def _on_prune_captures(self) -> None:
@@ -408,7 +580,7 @@ class MainWindow(QMainWindow):
         from ..pipeline import find_missing_captures, prune_missing_captures
         from ..storage.captures import CaptureStore
 
-        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+        if self._busy():
             self._status.setText("Busy - wait for the current job to finish.")
             return
 
@@ -445,8 +617,8 @@ class MainWindow(QMainWindow):
             "Their entries can be removed, so re-reading your captures stops listing them.\n\n"
             "No files are deleted - this only clears the app's record of captures that are "
             "already gone. Your sessions, seasons, standings and rosters are not affected.\n\n"
-            "If a capture was only moved, put it back in your captures folder (or import it "
-            "again) instead - then it's found again and nothing is lost.")
+            "If a capture was only moved, use \"Find moved captures…\" first and point it at "
+            "the folder they're in now - then nothing is lost.")
         if len(missing) == total:
             # Every row missing is far more often a removed/disconneted drive than a mass delete.
             info = ("Every capture the app knows about is missing. That usually means the "
@@ -497,10 +669,9 @@ class MainWindow(QMainWindow):
 
     def _start_reingest(self) -> None:
         """Rebuild every stored session from its capture archive on a background thread."""
-        if self._recorder is not None or self._ingest is not None or self._reingest is not None:
+        if self._busy():
             return
         self._record_button.setEnabled(False)
-        self._test_ingest_button.setEnabled(False)
 
         dialog = QProgressDialog(
             "Re-reading your captures …\nThis can take a few minutes — the app hasn't frozen.",
@@ -563,6 +734,10 @@ class MainWindow(QMainWindow):
         if self._reingest is not None:
             self._reingest.wait()
             self._reingest.wait()
+        if self._relocate is not None:
+            self._relocate.wait()
+        if self._import is not None:
+            self._import.wait()
         if self._ingest is not None:
             self._ingest.wait()
         self._session_store.close()
@@ -611,3 +786,57 @@ def _prune_message(summary) -> str:
     if summary.kept:
         parts.append(f"{len(summary.kept)} capture(s) turned up again and were kept.")
     return " ".join(parts)
+
+
+def _relocate_message(summary) -> str:
+    """One status line for a search pass - what came back, and what to do about the rest."""
+    if summary.scanned == 0 and not summary.still_missing:
+        return "Every capture the app knows about is already where it expects - nothing to find."
+
+    if summary.relocated:
+        noun = "capture" if len(summary.relocated) == 1 else "captures"
+        parts = [f"Found {len(summary.relocated)} moved {noun}; the app now looks in the right "
+                 "place for them."]
+    else:
+        parts = [f"No moved captures were found there ({summary.scanned} capture file(s) "
+                 "checked)."]
+    if summary.still_missing:
+        parts.append(f"{len(summary.still_missing)} capture(s) are still missing - try another "
+                     "folder, or use \"Clean up missing captures\" to forget them.")
+    if summary.errors:
+        parts.append(f"{len(summary.errors)} file(s) could not be read: {summary.errors[0]}")
+    if summary.cancelled:
+        parts.append("The search was canceled.")
+    return " ".join(parts)
+
+
+def _format_size(num_bytes: int) -> str:
+    """Bytes as MB/GB, an import moves hundreds of MBs and the user should know first."""
+    mb = num_bytes / (1024 * 1024)
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+def _import_message(summary) -> str:
+    """One status line for an import pass - what came in, and what was already here.
+
+    Says "already imported" out loud rather than staying silent about it: re-running an import on
+    a synced folder is the normal case, and a pass that reports nothing looks like a pass that
+    failed.
+    """
+    parts = []
+    if summary.imported:
+        noun = "capture" if len(summary.imported) == 1 else "captures"
+        parts.append(f"Imported {len(summary.imported)} new {noun} "
+                     f"({summary.sessions_stored} session(s) stored).")
+    if summary.recovered:
+        parts.append(f"{len(summary.recovered)} capture(s) missing from your captures folder "
+                     "were copied back in.")
+    if summary.updated:
+        parts.append(f"Updated who recorded {len(summary.updated)} already-imported capture(s).")
+    if summary.skipped:
+        parts.append(f"{len(summary.skipped)} were already imported.")
+    if summary.errors:
+        parts.append(f"{len(summary.errors)} failed: {summary.errors[0]}")
+    if summary.cancelled:
+        parts.append("The import was cancelled.")
+    return " ".join(parts) if parts else "Nothing was imported."

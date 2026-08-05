@@ -187,6 +187,92 @@ what would trigger revisiting it.
     ORM-level, so turning it on is a real behaviour change — and it would interact with
     `session_assignments`, which is FK-free *on purpose* (invariant #4). Revisit with Alembic
     (below), not alongside a pragma change.
+- **`recorded_by` is a claim made at import time, not an identity feature** (B3, 2026-08-03). The
+  column, the `CaptureMeta` field and the `ingest_capture(recorded_by=…)` parameter have existed
+  since the metadata table landed, and nothing has ever set one. Three ways to fill it were weighed:
+  a local "your name" setting plus an import field, embedding it in the `.f1cap` header as format
+  v2, or leaving imports blank forever. **We took the first, minus the setting.**
+  - **Nothing reads it.** No view, no query, no standings path consumes `recorded_by` today.
+    Building a settings page and an identity flow to feed a write-only column is speculative work,
+    and this project doesn't do that. So the whole of B3 collapses to *one optional text field on a
+    dialog that is being built anyway* — which is why it stopped being its own item.
+  - **It is a claim, not a property of the file.** The admin types who sent them the capture; the
+    file itself asserts nothing. That is honest and sufficient, because the admin is exactly who
+    knows. It does mean a capture that changes hands twice can be mislabelled — accepted, because
+    nothing depends on the value.
+  - **Why record it at all, given the shared drive shows the uploader:** the drive's record does not
+    survive the copy-home step this design mandates (Drive is transport, the local archive is the
+    home). Once imported, the app is the only place that answer could live.
+  - **Format v2 was rejected.** Writing the name into a new `.f1cap` header would make a shared
+    capture self-describing and survive any number of hand-offs — genuinely the better long-term
+    shape, and what "the producing peer" above gestures at. It is also a real on-disk format change,
+    with a reader/writer bump and its own risk, for a field with no consumer, and every existing
+    capture would stay v1/unknown regardless. Revisit only if something actually starts reading
+    provenance.
+  - **Blank is fine, and it is not a one-shot.** `CaptureStore.record` replaces by hash, so a later
+    re-import from the shared folder sets or corrects the value. Only a *re-ingest* can't — it feeds
+    the stored value back, which is what keeps a rebuild from erasing it. Making that true in
+    practice needed `CaptureStore.set_recorded_by` (B2): without it an already-held capture is
+    skipped outright, and the correction path would have been documentation rather than behaviour.
+- **Importing is by content, copies home, and never touches the source** (B2, 2026-08-04). The
+  capture file has been the league's interchange format by design since the metadata table landed;
+  this is the flow that finally uses it. Read and write are split like the prune —
+  `find_importable_captures` (a walk, one `stat` per file, one `known_files()` query, no archive
+  opened) is what the user is shown, and `import_captures` acts on exactly that list — because
+  hundreds of megabytes should never move before a human agreed to it.
+  - **The hash decides; `(name, size)` only pre-filters.** The pre-filter exists so re-scanning an
+    already-imported folder doesn't decompress it again. Being a hint, it errs both ways: a renamed
+    capture costs one wasted read (fine), and two genuinely different recordings sharing a name
+    *and* a byte-exact size would be skipped (accepted — the game's timestamp naming plus
+    multi-hundred-megabyte files makes that collision effectively impossible).
+  - **Four outcomes, not two.** New → copy + ingest. Already held → skip, so re-syncing is a no-op.
+    Known but the local archive is gone → copy home and `relocate`, the one path that treats the
+    shared folder as a backup of last resort — and deliberately *not* re-ingested, because the
+    derived rows already exist and rebuilding them is what "Re-read captures" is for. Only
+    `recorded_by` differs → update in place.
+  - **Copy-home is the decision, not an optimisation.** Ingesting straight from the shared folder
+    would leave rows pointing at a directory that syncs, disconnects, or gets tidied up by someone
+    else — the same class of problem that ruled out putting the database on a synced drive. So the
+    local archive is always the home and the source is never moved, renamed or deleted. A name clash
+    is numbered rather than overwritten: the hash has already said this is a recording we don't
+    hold, so a clash can only be two different recordings, never a duplicate.
+  - **…but a capture already inside the captures folder is ingested in place.** Found the hard way:
+    importing from any folder that *contains* the data root — a home directory, a whole drive — made
+    the app copy its own archives beside themselves under `-2` names. Copy-home means *get it to the
+    home folder*, and a file already there is already home. This also turns the failure into a
+    feature: pointing the importer at the captures folder itself is now the way to pick up a loose
+    recording that was never ingested, which is the one capability the retired
+    `Ingest .f1cap (test)` button had that nothing else replaced.
+  - **A failed import keeps its local copy** — the inverse of `archive_and_ingest`, which deletes a
+    raw only once its bytes are proven. Nothing is at risk here because the shared original is
+    untouched either way, and a capture that won't parse is precisely the one the admin wants
+    locally to look at.
+- **A capture that moved is located by its contents, and only ever re-pointed** (B4, 2026-08-03).
+  `CaptureRow.path` is advisory and the content hash is the identity, which has an unpleasant
+  consequence: `find_missing_captures` can say the bytes aren't where the app looks, but *not*
+  whether the file was moved or deleted. The prune handed that judgement to the user; this hands
+  the app the other half of the job — go and look — so forgetting a capture stops being the only
+  available answer.
+  - **The search space is the known-missing rows, not the captures folder.** A row that resolves is
+    already correct; scanning "everything" would let a stale duplicate found on a memory stick
+    re-point a perfectly good row. So the pass asks *"where did these specific captures go?"*, never
+    *"what captures are in this folder?"* — the latter question is the **import**'s, and the two are
+    deliberately not the same code path.
+  - **`(file name, size)` is a hint; the hash is the ruling.** Confirming a match costs a full
+    decompression pass, so a candidate is read only when a `stat` says it could be one of ours, and
+    accepted only when the sha256 of its decompressed payload equals the row's identity. Relocating
+    on name+size alone would be right almost always — capture names are timestamps — and *silently*
+    wrong the rest of the time, filing one recording's metadata against another's bytes. Almost
+    always is not a property worth having here.
+  - **It re-points; it does not copy home.** A capture found on an external drive leaves the row
+    pointing at that drive, and goes missing again when it's unplugged. Copying into the local
+    captures folder is the import flow's job (DECISIONS above: Drive is transport, the local archive
+    is the home); doing it behind a button labelled "find" would move hundreds of megabytes the user
+    didn't ask for.
+  - **The cost, accepted knowingly:** a capture renamed *as well as* moved never reaches the hash,
+    because nothing pre-filters to it. Hashing every unrecognised file in a folder to catch that
+    case would mean decompressing gigabytes of strangers on the chance one is ours. It stays a prune
+    job, and the guide says so.
 - **Backups are `VACUUM INTO`, and are not an "open the database" action** (C3, 2026-08-02). Once
   WAL is on, copying the file with the filesystem is wrong: committed pages live in a `-wal`
   sibling, so the copy can be stale or torn. `VACUUM INTO` writes a checkpointed, defragmented

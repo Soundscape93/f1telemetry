@@ -38,6 +38,9 @@ _DEFAULT_CODEC = CODEC_ZSTD
 # zstd-10 costs 6x the UPC for 2% less size
 _LEVELS = {CODEC_GZIP: 6, CODEC_ZSTD: 3}
 
+RAW_SUFFIX = ".f1cap"
+CAPTURE_SUFFIXES = (RAW_SUFFIX, _GZIP_SUFFIX, _ZSTD_SUFFIX)
+
 
 def capture_codec(path: str | Path) -> str:
     """The codec a capture path is stored in, from its suffix."""
@@ -51,6 +54,16 @@ def capture_codec(path: str | Path) -> str:
 
 def is_compressed_capture(path: str | Path) -> bool:
     return capture_codec(path) != CODEC_NONE
+
+
+def is_capture_file(path: str | Path) -> bool:
+    """Whether a name looks like one of ours - raw or archived, any codec.
+    
+    Deliberately *not* ``capture_codec(...) != CODEC_NONE``: that answers "how is this
+    compressed?" and calls a stray ``.txt`` and uncompressed capture. This answers "is this
+    worth looking at at all?", which is what a folder scan needs before it stats or reads anything.
+    """
+    return str(path).endswith(CAPTURE_SUFFIXES)
 
 
 def compressed_capture_path(path: str | Path, codec: str = _DEFAULT_CODEC) -> Path:
@@ -157,3 +170,25 @@ class HashingReader:
     def content_hash(self) -> str:
         """sha256 of everything read so far; final once the capture is streamed to EOF."""
         return self._digest.hexdigest()
+
+
+def hash_capture(path: str | Path, *, chunk_size: int = 1 << 20) -> str:
+    """The content hash of a capture on disk - the same value ingest computes, without ingesting.
+
+    ``ingest_capture`` gets this free by wrapping its read pass in a :class:`HashingReader`;
+    this is that pass on its own, so a folder scan can ask *"is this file one I already know?"*
+    without parsing a single packet or touching the database.
+
+    It hashes the **decompressed** payload, so the answer is codec-independent: a capture a
+    league member archived as gzip and one re-archived as zstd share an identity even though
+    they share no bytes on disk. That is what makes the hash usable as the dedupe key for
+    imports and as proof of identity for a capture that moved.
+
+    Costs exactly one decompression pass - seconds on a race weekend, but not free. Callers
+    pre-filter on facts that cost a ``stat`` (name, size) so only plausible candidates are read.
+    """
+    with open_capture(path) as fh:
+        reader = HashingReader(fh)
+        while reader.read(chunk_size):
+            pass
+    return reader.content_hash

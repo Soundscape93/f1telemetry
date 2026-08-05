@@ -34,11 +34,41 @@ whose round a calendar edit removes or re-points (`session_assignments` has no F
 invariant #4). C2/C3 are storage-layer and self-contained, so they ship while that is decided.
 
 **Cycle 2 — league data flow.** The one substantial feature block, and the direction the whole
-capture-as-interchange design was built for.
+capture-as-interchange design was built for. **Two branches, not three** — see the order note.
 
-- B2 league capture import from a shared folder
-- B3 `recorded_by` wiring (ships with B2)
-- B4 locate a moved capture by content hash (shares B2's hash/scan machinery)
+- B4 locate a moved capture by content hash — **done 2026-08-03**
+- B2 league capture import from a shared folder, carrying B3's one field — **done 2026-08-04**
+
+**Cycle 2 is complete.** Both branches are on `staging` and share the `## Unreleased` section; the
+grouped `staging` → `main` release PR (label **`minor`**) is what turns them into a version.
+**Cycle 3 is next** — do not start it without re-reading the cycle plan above.
+
+*B2 scope, confirmed 2026-08-03 and delivered:* the shared/manual capture import flow; an
+**optional** "Recorded by" text field on the import prompt (blank is fine, no validation); and a
+**proper user-facing import action** — the header's `Ingest .f1cap (test)` button retired and
+replaced by something presented as the real way to import a capture someone sent you, not as a dev
+affordance. Explicitly **not** in scope, and not built: any settings page, profile or identity
+feature.
+
+*Order note (revised 2026-08-03):* the listed order was B2 → B3 → B4; it is **reversed** for B4.
+Both items need the same primitive — hash a capture on disk without parsing it — and B4 is the
+small consumer that puts `archive.hash_capture` in place and proves it on real archives before the
+large feature leans on it. B4 also fixes a live foot-gun rather than adding surface: a *moved*
+capture was indistinguishable from a *deleted* one, and the only action offered was the one that
+forgets it. ROADMAP already said B4 "slots in between `find_missing_captures` and
+`prune_missing_captures`", and that split was already in the code.
+
+**B3 is dropped as its own item — decided 2026-08-03.** The column, the domain field and the
+`recorded_by` plumbing all exist; nothing sets a value and — the deciding fact — **nothing reads
+one**. A settings page and an identity flow to feed a write-only column is speculative work. Its
+stated justification was also overstated: only a *re-ingest* can't backfill it, while a *re-import*
+sets it (replace-by-hash), so leaving it blank loses nothing irreversibly. It becomes one optional
+"Recorded by" text field on B2's import dialog — cheap because that dialog is being built anyway,
+and filled at the one moment the admin actually knows the answer. What it buys, precisely: the
+shared drive shows who *uploaded*, but that record does not survive the copy-home step the design
+mandates, so after import the app is the only place the answer could live. Embedding it in the
+`.f1cap` header (format v2) was weighed and **rejected as unwarranted** by anything current: a real
+on-disk format change for a field with no consumer.
 
 **Cycle 3 — release-phase process.** Effectively the rest of the C block: Phase 4 packaging
 reach, the installer, the real auto-updater, and the remaining build-robustness items. Promoted
@@ -71,9 +101,9 @@ actually exercises it.
 
 | ID | Item | Status | Detail in |
 |---|---|---|---|
-| B2 | League capture import from a shared folder | open | ROADMAP → Capture compression; DECISIONS → Storage |
-| B3 | `recorded_by` is plumbed but never set | open | ROADMAP → Capture compression |
-| B4 | Locate a moved capture by content hash | open | ROADMAP → Capture compression; DECISIONS → Storage |
+| B2 | League capture import from a shared folder | **done 2026-08-04** | ROADMAP → Capture compression; DECISIONS → Storage |
+| B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
+| B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
 | A4 | Windows light/dark switch leaves text miscoloured | open | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
@@ -104,6 +134,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | E9 | Corner numbers on the track map (**licensing caveat**) | DECISIONS → UI |
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
+| E13 | Move the capture/database actions off Help into their own surface | ROADMAP → Other surfaces |
 
 ---
 
@@ -124,15 +155,82 @@ up opportunistically rather than scheduled.
   rendered map against the in-game track map when recording the next sessions. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
-- **A3 — "missing middle laps".** The aborted Windows race showing laps 1–2 then ~16–18 is almost
-  certainly the same sleep root cause fixed in v0.4.2. **Plan:** spot-check on the next long
-  Windows race; not worth a dedicated investigation.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 
 ## Recently closed
 
+- **B2 / B3 — league capture import, and the one field `recorded_by` became.** Done 2026-08-04;
+  the last of Cycle 2. *Help → Import captures…* walks a chosen folder, copies anything new into
+  the local captures folder and ingests it. Read and write are split like the prune, so the count
+  and the total size are shown before a thread starts and the pass acts on exactly the list the
+  user agreed to.
+  **Four outcomes decided by content hash**, never by name: *new* → copy home + ingest; *already
+  held* → skip; *known but the local archive is gone* → copy home + `relocate` (the shared folder
+  as backup of last resort, deliberately **without** re-ingesting — rebuilding derived rows is
+  "Re-read captures"' job); *only `recorded_by` differs* → update in place.
+  **Copy-home is the point, not an optimisation:** the shared drive is transport, the local archive
+  is the home, so no row is left pointing at a folder that syncs or disconnects. The source is never
+  touched. A name clash is **numbered**, not overwritten — the hash already ruled, so a clash can
+  only be two *different* recordings sharing a name. **A capture already inside the captures folder
+  is ingested in place** — learned in testing, by importing from a home directory containing the
+  data root and watching the app copy its own archives beside themselves under `-2` names. That fix
+  also restores the one capability the retired test button had: point the importer at the captures
+  folder to pick up a loose recording that was never ingested.
+  **One inversion of `archive_and_ingest`, on purpose:** a capture that fails to ingest **keeps**
+  its local copy. Nothing is at risk (the shared original is untouched), and a capture that won't
+  parse is exactly the one worth having locally to look at.
+  **B3 closed as one optional field**, as decided the day before. `CaptureStore.set_recorded_by` is
+  the piece that makes "a re-import can correct it" true rather than aspirational — without it an
+  already-held capture is simply skipped and the value could never change. Nothing reads
+  `recorded_by` yet; E13 is the first thing that plausibly would.
+  **Retired the `Ingest .f1cap (test)` header button**, which had been marked dev-only in code while
+  `USER_GUIDE.md` §4 documented it as *the* import path — wrong in one place or the other since
+  v0.3.0. The header now carries only the record control.
+  Covered by `test/ingest/test_import.py` (19 cases) plus one in `test_captures.py`. Qt wiring
+  verified by hand — and it earned its keep: three bugs (a `Signal` arity mismatch that silently
+  stalled the progress dialog, a missing `_close_import_dialog`, and the copy-beside-itself above)
+  were only reachable through the real app, because every test suite here is deliberately Qt-free.
+  **Left behind:** Help now hosts five actions that aren't Help content — filed as **E13**.
+- **B4 — locate a moved capture by content hash.** Done 2026-08-03; the first item of Cycle 2.
+  *Help → Find moved captures…* walks a folder the user picks and re-points a `captures` row at the
+  file it finds. The point is not the feature but the gap it closes: `find_missing_captures` can
+  only say the bytes aren't where the app looks, so until now a *moved* capture and a *deleted* one
+  were the same thing to the app and the only action offered was the one that forgets it.
+  **Three decisions worth not re-litigating.** The search space is **only the known-missing rows** —
+  a row that resolves is already correct, and re-pointing it at a second copy found on a memory
+  stick would be a regression, not a fix. **Name and size pre-filter; the hash rules** — a candidate
+  is read only when `(basename, size)` matches a missing row (a `stat`) and accepted only when the
+  sha256 of its decompressed payload matches, so a folder full of strangers is cheap and one
+  recording's metadata can never be filed against another's bytes. And it **re-points rather than
+  copies home**: copying into the local captures folder is what B2's import is for, and doing it
+  here would silently duplicate hundreds of MB behind a button that says "find".
+  **Accepted limits, chosen not discovered:** a capture renamed *as well as* moved never reaches the
+  hash (still a prune job), and one found on an external drive goes missing again when the drive is
+  disconnected — that is what `relocate` means.
+  `archive.hash_capture` is `ingest_capture`'s read pass isolated; `test_hash_is_codec_independent`
+  now asserts the two agree, so the scan path and the ingest path can't drift about what a capture
+  *is*. Threaded (`RelocateWorker`), unlike the prune, because confirming a match costs a
+  decompression pass per candidate.
+  **Two latent defects fixed on the way** — this is the first production caller of
+  `CaptureStore.relocate`, which was annotated `-> None` but returns `bool`, and derived `file_name`
+  with `rsplit("/")`: the *entire path* on Windows, which would have corrupted the very field
+  `known_files()` and `resolve_capture_path`'s fallback key on. `MainWindow._busy()` replaced a
+  guard copy-pasted at four call sites; this was the fourth worker, and a handler that forgot one
+  would let two jobs write the same SQLite file from two threads.
+  Covered by 12 cases in `test/ingest/test_reingest.py`. The Qt wiring has **no automated test** —
+  every UI suite here is deliberately Qt-free — so it was verified by hand.
+- **A3 — "missing middle laps".** Verified 2026-08-03 and closed. A full test race on Windows under
+  v0.5.0 recorded every lap continuously, confirming the root cause was the machine sleeping
+  mid-session (fixed in v0.4.2) and not anything in ingest. The original symptom — laps 1–2 then
+  ~16–18 — was lost telemetry, never a parsing fault, so there was nothing to fix here once v0.4.2
+  landed.
+  **Do not reopen this on the wrong symptom.** The same race showed a single missing lap number,
+  which is *correct*: a red flag makes the game skip one lap (restart is on lap *n+2*), documented
+  in TELEMETRY_NOTES → "A red flag skips a lap number". One missing number after a slow lap is the
+  game; several consecutive laps missing, usually with the Final Classification gone too, is lost
+  telemetry.
 - **E6 — edit-calendar action.** Done 2026-08-02; the last item of Cycle 1. `EditCalendarPage` is a
   fifth page in `SeasonsView`, reusing the create page's `CalendarPicker` unchanged — which is what
   it was factored into `components/` for.

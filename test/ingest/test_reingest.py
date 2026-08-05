@@ -1,5 +1,6 @@
-"""The Phase-2 guided re-ingest and the missing prune: the version gate, capture resolution,
-the rebuild pass and the forgetting archives that are gone.
+"""The Phase-2 guided re-ingest, locating captures that moved, and the missing prune: the
+version gate, capture resolution, the rebuild pass, the search, and forgetting archives that
+are gone.
 
 Fixture-free: ``reingest_all``'s ``ingest`` hook is injected (the same style as
 ``check_for_update``'s ``urlopen``), so the *accounting* - which captures were re-read, which
@@ -18,8 +19,9 @@ from datetime import datetime, timezone
 from f1telemetry.src.domain.captures import CaptureMeta
 from f1telemetry.src.domain.models import SessionResult
 from f1telemetry.src.pipeline import (PipelineState, PruneSummary, ReingestSummary,
-                                      check_pipeline_version, find_missing_captures,
-                                      prune_missing_captures, reingest_all, resolve_capture_path)
+                                      RelocateSummary, check_pipeline_version,
+                                      find_missing_captures, prune_missing_captures,
+                                      reingest_all, relocate_moved_captures, resolve_capture_path)
 from f1telemetry.src.protocol.enums import Formula, SessionType, Weather
 from f1telemetry.src.storage.captures import CaptureStore
 from f1telemetry.src.storage.meta import LEGACY_PIPELINE_VERSION, MetaStore
@@ -314,6 +316,208 @@ class PruneMissingCapturesTest(unittest.TestCase):
 
         self.assertEqual(summary.missing, ())
         self.assertEqual(summary.captures_total, 1)
+
+
+class RelocateMovedCapturesTest(unittest.TestCase):
+    """Finding a capture whose file moved: name+size pre-filter, the content hash decides.
+
+    ``hash_file`` is injected the way ``reingest_all``'s ``ingest`` is, so the *matching* is
+    exercised on byte-sized files instead of real archives. ``_meta`` derives a capture's hash
+    from its name, so the fake hasher only has to read a file's basename to agree with the store.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.mkdtemp(prefix="relocate_")
+        self.addCleanup(lambda: shutil.rmtree(self.temp, ignore_errors=True))
+        self.db_url = f"sqlite:///{os.path.join(self.temp, 'test.db')}"
+        self.sessions = SessionStore(self.db_url)
+        self.addCleanup(self.sessions.close)
+        self.captures = CaptureStore(self.db_url)
+        self.addCleanup(self.captures.close)
+        # Where the app looks (empty), and where the files actually are.
+        self.home = os.path.join(self.temp, "captures")
+        self.elsewhere = os.path.join(self.temp, "elsewhere")
+        os.makedirs(self.home)
+        os.makedirs(self.elsewhere)
+        self.hashed: list[str] = []
+
+    def _hash(self, path: str) -> str:
+        """Stand in for ``hash_capture``: the name is the identity, as in ``_meta``."""
+        self.hashed.append(os.path.basename(path))
+        return os.path.basename(path).ljust(64, "0")
+
+    def _known(self, name: str, uids: tuple[str, ...] = ("111",), size: int = 1_000):
+        """A capture the store knows about, whose file is not where it was recorded."""
+        meta = _meta(name, os.path.join("/gone", name), uids, file_size=size)
+        self.captures.record(meta)
+        return meta
+
+    def _file(self, folder: str, name: str, size: int = 1_000) -> str:
+        path = os.path.join(folder, name)
+        os.makedirs(folder, exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"x" * size)
+        return path
+
+    def test_a_moved_capture_is_found_and_relocated(self):
+        meta = self._known("monza.f1cap.zst")
+        moved_to = self._file(self.elsewhere, "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(summary.relocated, (("monza.f1cap.zst", moved_to),))
+        self.assertEqual(summary.still_missing, ())
+        self.assertEqual(self.captures.get(meta.content_hash).path, moved_to)
+
+    def test_a_relocated_capture_stops_being_missing_and_can_be_reingested(self):
+        """The payoff: the row is usable again, so the session behind it is rebuildable."""
+        self.sessions.save(_session(111))
+        self._known("monza.f1cap.zst")
+        self._file(self.elsewhere, "monza.f1cap.zst")
+
+        relocate_moved_captures(self.captures, self.elsewhere, captures_dir=self.home,
+                                hash_file=self._hash)
+
+        self.assertEqual(find_missing_captures(self.captures, self.home), [])
+        summary = reingest_all(self.captures, self.sessions, captures_dir=self.home,
+                               ingest=_Recorder({"monza.f1cap.zst": [_session(111)]}))
+        self.assertEqual(summary.missing, ())
+        self.assertEqual(summary.sessions_rebuilt, 1)
+
+    def test_only_name_and_size_matches_are_ever_read(self):
+        """The pre-filter is the whole point - decompressing a stranger costs seconds."""
+        self._known("monza.f1cap.zst", size=1_000)
+        # A second capture that is never found, so `wanted` never empties and the walk is not
+        # cut short by the found-everything break (pinned separately below).
+        self._known("imola.f1cap.zst", uids=("222",), size=1_000)
+        self._file(self.elsewhere, "monza.f1cap.zst", size=1_000)
+        self._file(self.elsewhere, "spa.f1cap.zst", size=1_000)         # wrong name
+        self._file(self.elsewhere, "monza.f1cap.gz", size=1_000)        # wrong name
+        self._file(self.elsewhere, "notes.txt", size=1_000)             # not a capture at all
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(self.hashed, ["monza.f1cap.zst"])
+        self.assertEqual(summary.hashed, 1)
+        self.assertEqual(summary.scanned, 3, "the .txt is rejected by suffix, never counted")
+
+    def test_the_walk_stops_once_everything_wanted_is_found(self):
+        """A search that is already done must not keep stat-ing the rest of a large drive."""
+        self._known("aaa.f1cap.zst")
+        self._file(self.elsewhere, "aaa.f1cap.zst")     # sorts first
+        self._file(self.elsewhere, "zzz.f1cap.zst")     # never reached
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(len(summary.relocated), 1)
+        self.assertEqual(summary.scanned, 1, "the walk breaks as soon as nothing is still wanted")
+
+    def test_a_different_size_is_never_read(self):
+        self._known("monza.f1cap.zst", size=1_000)
+        self._file(self.elsewhere, "monza.f1cap.zst", size=2_000)
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(self.hashed, [])
+        self.assertEqual(summary.still_missing, ("monza.f1cap.zst",))
+
+    def test_a_name_and_size_twin_with_another_hash_is_not_relocated(self):
+        """Why the hash is not optional: name+size is a hint, never an identity."""
+        meta = self._known("monza.f1cap.zst")
+        impostor = self._file(self.elsewhere, "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(
+            self.captures, self.elsewhere, captures_dir=self.home,
+            hash_file=lambda path: "f" * 64)
+
+        self.assertEqual(summary.relocated, ())
+        self.assertEqual(summary.still_missing, ("monza.f1cap.zst",))
+        self.assertEqual(self.captures.get(meta.content_hash).path, "/gone/monza.f1cap.zst",
+                         "a row must never be re-pointed at bytes that aren't its own")
+        self.assertNotEqual(impostor, "")   # the impostor file is left exactly where it was
+
+    def test_the_search_is_recursive(self):
+        """The league folder is a tree, and a moved captures folder lands inside one."""
+        self._known("monza.f1cap.zst")
+        buried = self._file(os.path.join(self.elsewhere, "2026", "01-Melbourne"),
+                            "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(summary.relocated, (("monza.f1cap.zst", buried),))
+
+    def test_captures_that_are_not_missing_are_left_alone(self):
+        """A row that resolves is already right; a second copy on a stick must not steal it."""
+        home_copy = self._file(self.home, "monza.f1cap.zst")
+        self.captures.record(_meta("monza.f1cap.zst", home_copy, ("111",)))
+        self._file(self.elsewhere, "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual(summary, RelocateSummary(), "nothing missing means nothing to search")
+        self.assertEqual(self.hashed, [], "the folder is not even walked")
+
+    def test_what_no_folder_had_is_reported_still_missing(self):
+        self._known("monza.f1cap.zst")
+        self._known("spa.f1cap.zst", uids=("222",))
+        self._file(self.elsewhere, "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, hash_file=self._hash)
+
+        self.assertEqual([name for name, _ in summary.relocated], ["monza.f1cap.zst"])
+        self.assertEqual(summary.still_missing, ("spa.f1cap.zst",))
+
+    def test_an_unreadable_candidate_is_reported_not_fatal(self):
+        self._known("bad.f1cap.zst")
+        self._known("good.f1cap.zst", uids=("222",))
+        self._file(self.elsewhere, "bad.f1cap.zst")
+        good = self._file(self.elsewhere, "good.f1cap.zst")
+
+        def hash_file(path):
+            if os.path.basename(path) == "bad.f1cap.zst":
+                raise RuntimeError("corrupt archive")
+            return self._hash(path)
+
+        with self.assertLogs("f1telemetry.src.pipeline", level="ERROR"):
+            summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                              captures_dir=self.home, hash_file=hash_file)
+
+        self.assertEqual(len(summary.errors), 1)
+        self.assertIn("bad.f1cap.zst", summary.errors[0])
+        self.assertEqual(summary.relocated, (("good.f1cap.zst", good),),
+                         "one unreadable file must not cost the others their relocation")
+
+    def test_cancel_stops_the_walk(self):
+        self._known("monza.f1cap.zst")
+        self._file(self.elsewhere, "monza.f1cap.zst")
+
+        summary = relocate_moved_captures(self.captures, self.elsewhere,
+                                          captures_dir=self.home, cancelled=lambda: True,
+                                          hash_file=self._hash)
+
+        self.assertTrue(summary.cancelled)
+        self.assertEqual(self.hashed, [], "cancel is polled before a file is opened")
+        self.assertEqual(summary.still_missing, ("monza.f1cap.zst",))
+
+    def test_progress_reports_found_against_wanted(self):
+        self._known("monza.f1cap.zst")
+        self._known("spa.f1cap.zst", uids=("222",))
+        self._file(self.elsewhere, "monza.f1cap.zst")
+        self._file(self.elsewhere, "spa.f1cap.zst")
+        seen: list[tuple[int, int, str]] = []
+
+        relocate_moved_captures(self.captures, self.elsewhere, captures_dir=self.home,
+                                on_progress=lambda f, t, n: seen.append((f, t, n)),
+                                hash_file=self._hash)
+
+        self.assertEqual([(f, t) for f, t, _ in seen], [(0, 2), (1, 2)])
 
 
 

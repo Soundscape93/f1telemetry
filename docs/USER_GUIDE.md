@@ -46,8 +46,32 @@ compressed (zstd), and imported automatically. The record control is available f
 
 ## 4. Importing & sharing captures
 
-Captures are portable, content-hashed files (`.f1cap.zst`). Share them with league members; use the
-**Ingest .f1cap** button to import one you received — both new `.zst` and older `.gz` files work.
+Captures are portable, self-contained files (`.f1cap.zst`). They are the league's exchange format:
+when someone else drove a race you need results for, they share their capture and you import it.
+
+**Sharing.** Copy the file out of your `captures` folder (Help → *Open captures folder*) and put it
+wherever the league shares things — a Drive folder, a memory stick, a chat message. A sensible tree
+is `<League>/<Season>/<Round>-<Track>/`.
+
+**Importing.** **Help → Import captures…**, then pick the folder the captures are in. The app looks
+through it (subfolders included), tells you how many new captures it found and how much will be
+copied, and asks — optionally — **who recorded them**. Confirm and it copies each one into your own
+`captures` folder and reads it. Both new `.zst` and older `.gz` files work.
+
+Worth knowing:
+
+- **The originals are left alone.** Nothing is moved, renamed or deleted from the folder you picked.
+  Your `captures` folder becomes the home copy, so a capture stays readable when the drive is
+  disconnected or someone tidies up the shared folder.
+- **Re-running it is safe.** Captures are recognised by their *contents*, not their file name, so
+  anything already imported is skipped — even if it was renamed along the way. Importing a synced
+  folder every few weeks does no harm.
+- **It doubles as a recovery.** If you deleted your local copy of a capture but it's still in the
+  shared folder, importing brings it back and reconnects it to your stored sessions.
+- **"Who recorded them?" is optional.** Leave it blank if you don't know. It's worth filling in
+  because once the capture is on your machine, the shared drive can no longer tell you who put it
+  there. Import the same captures again with a different name to correct it.
+- You can cancel part-way. Captures already brought in stay; the rest simply aren't imported yet.
 
 ## 5. League / multiplayer rostering
 
@@ -156,20 +180,33 @@ Only captures that are still in your `captures` folder can be rebuilt. If some a
 says so ("*N of M sessions updated*") — those sessions keep their old data, which is harmless: they
 simply won't show the newest details.
 
-### Cleaning up captures you deleted
+### Captures the app can no longer find
 
-Deleting a capture file leaves its entry behind, so every re-read keeps reporting it as missing.
-**Help → Clean up missing captures** clears those leftovers. It shows the full list first — file
-name and where each was last seen — and nothing happens until you confirm.
+If the app reports captures as missing, do these two things **in order** — the first looks for them,
+the second gives up on them.
+
+**1. Help → Find moved captures…** Point it at the folder your recordings are in now — an old
+captures folder, an external drive, wherever they ended up — and it searches it, subfolders
+included. Anything it recognises is matched up again, and those sessions become re-readable
+straight away.
+
+It identifies a capture by its **contents**, not its name, so it can't confuse someone else's
+recording with yours. **Nothing is moved, copied or deleted** — only the app's note of where each
+capture lives. Two things to know: a capture you *renamed* as well as moved won't be recognised, and
+one found on an external drive will go missing again when you disconnect that drive (copy it into
+your `captures` folder if you want it permanently).
+
+**2. Help → Clean up missing captures.** For captures that really are gone — deleted, rather than
+moved. Their leftover entries are what make every re-read keep reporting them. It shows the full
+list first — file name and where each was last seen — and nothing happens until you confirm.
 
 **No files are deleted** — it only removes the app's *record* of captures that are already gone.
 Sessions, seasons, standings and rosters are untouched, and if a file ever turns up again,
 importing it puts its entry straight back.
 
-A capture that was only **moved** should be put back rather than forgotten: move it into your
-`captures` folder (or import it again) and it's found. If the app says *every* capture is missing,
-check **Help → Open captures folder** first — that usually means the folder itself moved or is on a
-drive that isn't connected.
+If the app says *every* capture is missing, that usually means the folder itself moved or is on a
+drive that isn't connected — check **Help → Open captures folder**, then use *Find moved captures…*
+rather than cleaning up.
 
 ## 9. Reporting a bug
 

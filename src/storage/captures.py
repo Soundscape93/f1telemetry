@@ -6,6 +6,7 @@ I re-ingest to back-fill the session?" without decompressing a payload.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -53,14 +54,37 @@ class CaptureStore:
                 db.flush()
             db.add(self._to_row(meta))
     
-    def relocate(self, content_hash: str, path: str, file_size: int, codec: str) -> None:
-        """Point a known capture at a new file, e.g. after it's archived. False if unknown."""
+    def relocate(self, content_hash: str, path: str, file_size: int, codec: str) -> bool:
+        """Point a known capture at a new file, e.g. after it's archived or found again.
+        
+        Returns False if the hash isn't known. ``file_name`` is re-derived because the file may
+        have been renamed as well as moved, and it is what the folder-scan pre-filter
+        (:meth:`known_files`) and ``pipeline.resolve_capture_path``'s capture-dir fallback both
+        key on - a stale name here silently breaks both.
+        """
         with self._Session.begin() as db:
             row = db.get(CaptureRow, content_hash)
             if row is None:
                 return False
             row.path, row.file_size, row.codec = path, file_size, codec
-            row.file_name = path.rsplit("/", 1)[-1]
+            # os.path.basename, nor rsplit("/"): a Windows path is backslash-separated, and
+            # splitting it on "/" would store the entire path as the file name.
+            row.file_name = os.path.basename(path)
+            return True
+
+    def set_recorded_by(self, content_hash: str, recorded_by: str | None) -> bool:
+        """Record who produced a capture. False if the hash isn't known.
+
+        Separate from :meth:`record` because it is the one capture field that does **not** come
+        from the file (DECISIONS -> Storage): an import can only learn it from the person doing
+        the importing, and re-importing a capture that is already known is the only way to
+        correct it later. Without this, "already imported" would mean "nothing can be changed".
+        """
+        with self._Session.begin() as db:
+            row = db.get(CaptureRow, content_hash)
+            if row is None:
+                return False
+            row.recorded_by = recorded_by
             return True
     
     def delete(self, content_hash: str) -> bool:

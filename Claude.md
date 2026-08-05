@@ -159,7 +159,15 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   success — a capture that fails to parse is kept as both raw and archive. Existing `.f1cap.gz`
   archives stay readable and are ingested in place (never rewritten). A `captures` metadata table
   (`CaptureStore`, keyed by a codec-independent content hash) makes captures queryable without
-  decompressing them — the base for a future "import league captures from a folder" flow.
+  decompressing them. **League capture import is live** (Help → Import captures…): a folder scan
+  pre-filtered by `known_files()`, then per capture the hash decides between copy-home+ingest,
+  skip, recover-a-missing-archive, or update `recorded_by` — the interchange direction the whole
+  design was built for. The shared folder is transport; the local archive is always the home, and
+  the source is never touched. A capture
+  whose file **moved** can be found again by content (`pipeline.relocate_moved_captures` +
+  `archive.hash_capture`, Help → Find moved captures…): name and size pre-filter, the hash decides,
+  and only the known-missing rows are searched for. It re-points the row, never copies the file —
+  copying home is the import flow's job.
 - **Standings:** driver standings (by name or race number) and constructor standings; LEAGUE
   standings resolve drivers through the per-season roster — or, with no roster file, through the
   in-memory capture seed, which is enough on its own when every member shares their online name

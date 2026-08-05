@@ -69,6 +69,17 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
+- **E13 — a captures / maintenance surface.** The Help page has accumulated five actions that are
+  not Help content: *Import captures…*, *Re-read captures*, *Find moved captures…*, *Clean up
+  missing captures* and *Back up database…*. They landed there because Help was the only real page
+  that wasn't a data surface, and each was individually too small to justify a page. Together they
+  are now the app's whole data-maintenance story living under a heading that promises documentation.
+  They want their own sidebar section, leaving Help as version / setup / about / notices.
+  *Not urgent* — everything works and is discoverable — and **deliberately after Cycle 2**. Worth
+  deciding alongside **E1 (Sessions)**: both are about where non-Seasons data actions live, and a
+  captures surface that lists the `captures` table (file, size, sessions, recorded by, last seen)
+  would answer "which capture holds this session?" — the direction `CaptureStore.for_session` was
+  built for, and the first thing that would actually *read* `recorded_by`.
 - **Sessions** — a list of every captured session; likely also a *session-centric* assignment
   path (complement to the round-centric one in the weekend view). The per-session detail renders
   its classification via `ui/components/classification_table.py` (the same builder the weekend
@@ -352,9 +363,35 @@ long Windows race rather than a dedicated investigation.
   `capture_sessions`, `CaptureStore`, keyed by a codec-independent content hash) so captures are
   queryable without decompressing. The diagnostic tools read through `open_capture`. See
   ARCHITECTURE → Capture compression and DECISIONS → Storage.
-- **Next — league capture import.** Build on the metadata table: an "import new captures from a
-  shared folder" flow (dedupe on content hash, `CaptureStore.known_files()` pre-filter, populate
-  `recorded_by`). This is the shared-league-data direction; see DECISIONS → Storage.
+- **Done — league capture import** (B2 + B3, 2026-08-04). *Help → Import captures…* is the flow the
+  whole capture-as-interchange design was built for. Read and write are split like the prune:
+  `find_importable_captures` is a walk plus one `stat` per file and a single `known_files()` query
+  — no archive opened — so the user sees the count and the total size before a thread starts, and
+  `import_captures` is what acts on the list they agreed to.
+  **Four outcomes, decided by content hash**, not by name: *new* → copy home + ingest; *already
+  held* → skip (a re-synced folder is a no-op, which is the entire reason the table is keyed on a
+  hash); *known but missing locally* → copy home + `relocate`, the one path that treats the shared
+  folder as a backup of last resort, deliberately without re-ingesting (rebuilding derived rows is
+  "Re-read captures"' job); *only `recorded_by` differs* → update in place.
+  **Copy-home is the point, not an optimisation:** the shared drive is transport and the local
+  archive is the home, so no row is ever left pointing at a folder that syncs, disconnects or gets
+  tidied up by someone else. The source is never touched; copies go via `.part` + `os.replace`, the
+  same guarantee `archive_capture` gives. A name clash is numbered (`monza-2.f1cap.zst`) rather than
+  overwriting — it can only mean two *different* recordings sharing a name, since the hash already
+  ruled. **A capture already inside the captures folder is ingested in place** (`_is_inside`): found
+  the hard way, by importing from a home directory that contained the data root and watching the app
+  copy its own archives beside themselves. It also makes "point it at your captures folder" the way
+  to pick up a loose recording that was never ingested — the one thing the retired
+  `Ingest .f1cap (test)` button did that nothing else replaced.
+  A capture that fails to ingest **keeps** its local copy, unlike `archive_and_ingest`:
+  nothing is at risk because the shared original is untouched, and a capture that won't parse is
+  exactly the one worth having locally.
+  Also **retired the `Ingest .f1cap (test)` header button** — labelled dev-only in code while the
+  user guide documented it as *the* import path, wrong in one place or the other since v0.3.0.
+  `docs/USER_GUIDE.md` §4 rewritten in the same branch.
+  **`recorded_by` closes with it** (B3): one optional field on the import prompt, the importer's
+  claim about the file. `CaptureStore.set_recorded_by` exists so "a re-import can correct it" is
+  true rather than aspirational — without it an already-held capture would simply be skipped.
 - **Done — pruning `captures` rows whose file is gone.** Deleting a capture file left its
   `captures` row behind, so every future re-ingest listed it under `ReingestSummary.missing` (and
   logged "no archive found") — harmless, but the noise grew with every deleted recording.
@@ -368,15 +405,35 @@ long Windows race rather than a dedicated investigation.
   drive reconnected while the dialog waits keeps its capture), and a warning when *every* capture
   is missing — the signature of a moved folder. No schema change, no `PIPELINE_VERSION` bump.
   See DECISIONS → Storage.
-- **Next — locate a moved capture by content hash.** The other half of the above, and now the only
-  piece missing: scan the captures folder, match each file's hash against `captures`, and
-  `relocate()` the row instead of forgetting it. Cheaper than it sounds — `relocate()` already
-  exists, so this is purely a scanner, and `known_files()` pre-filters by name+size so only real
-  candidates get decompressed and hashed. It slots in **between** `find_missing_captures` and
-  `prune_missing_captures`, which were split for exactly this.
-- **Deferred loose end:** `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but
-  never set — no UI/QSetting wires it yet. It's the one capture field a re-ingest can't backfill
-  (it isn't in the file), so the column exists now; wiring waits for the import flow above.
+- **Done — locating a moved capture by content hash** (B4, 2026-08-03). *Help → Find moved
+  captures…* walks a folder the user picks and re-points a `captures` row at the file it finds,
+  so a moved capture stops being indistinguishable from a deleted one. It slots in **between**
+  `find_missing_captures` and `prune_missing_captures`, which were split for exactly this, and the
+  prune dialog now sends the user here first.
+  `pipeline.relocate_moved_captures` searches **only** the known-missing rows — a row that already
+  resolves is correct, and re-pointing it at a second copy found on a memory stick would be a
+  regression. `(file name, size)` pre-filters (a `stat`), the content hash rules:
+  `archive.hash_capture` is `ingest_capture`'s read pass isolated, so the scan path and the ingest
+  path can't drift about what a capture *is* (asserted in `test_hash_is_codec_independent`). The
+  walk is recursive and suffix-filtered, and stops as soon as everything wanted has been found.
+  Threaded (`RelocateWorker`), unlike the prune: confirming a match costs a decompression pass per
+  candidate. Two deliberate limits: it **re-points, it does not copy home** (copying into the local
+  captures folder is what the league import is for — conflating them would silently duplicate
+  hundreds of MB behind a button that says "find"), and a capture that was renamed *as well as*
+  moved never reaches the hash and stays a job for the prune. First production caller of
+  `CaptureStore.relocate`, which needed two fixes on the way: it was annotated `-> None` but
+  returns `bool`, and derived `file_name` with `rsplit("/")` — the *entire path* on Windows,
+  breaking both `known_files()` and `resolve_capture_path`'s fallback.
+- **Loose end: `recorded_by` is plumbed through `ingest_capture` / `CaptureMeta` but never set.**
+  No UI wires it, and — worth being precise about — **nothing reads it either**: no view, no query,
+  no standings path. The earlier claim that it is "the one capture field a re-ingest can't
+  backfill" is true only of a *re-ingest*, which feeds the stored value back; a **re-import** sets
+  it, because `CaptureStore.record` replaces by hash. So nothing is lost irreversibly by leaving it
+  blank. **Settled 2026-08-03, shipped 2026-08-04 with B2:** not a branch of its own, but one
+  **optional** "Recorded by" field on the league import prompt — filled at the moment the admin
+  actually knows the answer, blank without penalty. No settings page, profile or identity feature.
+  Still nothing *reads* it; if something ever does, revisit the format-v2 idea then and not before.
+  See PRIORITIES → Cycle 2 and DECISIONS → Storage.
 
 ## Possible, uncertain
 - **Hosted multi-user league platform** — signup / authorization, colleagues upload their own
