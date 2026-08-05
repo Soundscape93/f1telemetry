@@ -12,7 +12,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from ..crash import install_excepthook
+from ..crash import install_excepthook, install_threading_excepthook
 from ..logging_setup import configure_logging
 from ..paths import data_root
 from ..version import __version__
@@ -44,8 +44,11 @@ def main() -> None:
     app.setApplicationName("f1telemetry")
     app.setOrganizationName("f1telemetry")
     app.setApplicationVersion(__version__)
-    
+
+    # Both hooks, and both after the QApplication: install_excepthook builds the GUI-thread relay
+    # that lets a worker-thread crash reach a dialog without touching Qt off-thread.
     install_excepthook(log_file)
+    install_threading_excepthook(log_file)
     _install_theme_refresh(app)
 
     window = MainWindow()
