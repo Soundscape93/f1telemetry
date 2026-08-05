@@ -18,6 +18,14 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Fixed
+- An unexpected internal error during a background job — recording, reading captures, importing,
+  or searching for moved captures — now reports itself properly instead of risking taking the app
+  down with it. The error dialog is always opened from the main window; previously a job could try
+  to open it from its own background thread, which Windows can turn into an outright crash. Errors
+  raised in background work are also written to the log with the name of the job that raised them,
+  so a log you send with a bug report says which one it was.
+
 ## v0.6.0 — 2026-08-05
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read

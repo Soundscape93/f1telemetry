@@ -74,9 +74,38 @@ on-disk format change for a field with no consumer.
 reach, the installer, the real auto-updater, and the remaining build-robustness items. Promoted
 above the big UI surfaces deliberately — testers are real, new surfaces are not yet needed.
 
-- C8 Phase 4 (macOS/Linux artifacts, Inno Setup installer + firewall allow-rule, velopack)
-- C5 `threading.excepthook`, C6 startup capability self-check, C7 pyqtgraph bloat trim
-- C4 clean-instance test (Windows Sandbox / second user account)
+*Order confirmed 2026-08-05, with one change from the list as first written.* The listed order put
+C8 — the largest and riskiest — first. It runs **last** instead, and C6 moves ahead of C7:
+
+- C5 `threading.excepthook` — **done 2026-08-05**
+- C6 startup capability self-check
+- C7 pyqtgraph bloat trim — **after C6, not before.** PACKAGING's own risk register gives the
+  mitigation for "pyqtgraph/zstandard missed → the app silently ships the fallback" as "explicit
+  hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
+  whose failure mode is that silent degrade — so C6 is the instrument that makes C7 verifiable
+  rather than hopeful. Reversed, the trim is done blind.
+- C4 clean-instance test (Windows Sandbox / second user account) — run against a build carrying
+  C5–C7. Not code: a checklist the author executes, producing doc updates only.
+- C8 Phase 4 — see the split below.
+
+**C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
+- **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
+  the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
+  consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
+  and an unsigned build walking into Gatekeeper.
+- **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
+  PACKAGING's #3 "easy to forget". **Open question to settle before code:** the allow-rule needs
+  elevation, while the clean-machine checklist asserts "launch as a non-admin user" — so it is
+  either a per-user install with no rule, or an elevated install with one.
+- **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
+  self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
+  toolchain that would replace the zip artifact verified across three builds, for a handful of
+  testers whose notify-only path was confirmed working against a real Release on 2026-08-02. It
+  buys the least and risks the most.
+
+*Not in Cycle 3, but noted:* **A4** (Windows light/dark switch leaves text miscoloured) sits in P2
+and has shipped as a known issue in every release since v0.3.0. It is packaging-phase polish
+during the packaging cycle — the strongest candidate for promotion if the cycle has room.
 
 **Deliberately after Cycle 3:** E1/E2 (Sessions surface + deleted-sessions manager), E3
 (Analytics), E5 (Bug report page). See *Deferred* below for why.
@@ -121,7 +150,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
-| C5 | `threading.excepthook` for worker threads | PACKAGING → Phase 0 |
+| C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | PACKAGING → Phase 1 known issues |
 | C8 | Phase 4: macOS/Linux, Inno Setup installer, velopack auto-updater | PACKAGING → Phased plan |
@@ -164,6 +193,29 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C5 — `threading.excepthook`, and the crash-dialog thread bug it uncovered.** Done 2026-08-05;
+  the first item of Cycle 3. The hook itself is nearly a no-op today and that is worth knowing
+  rather than rediscovering: **`threading.excepthook` never fires for a `QThread`** (the
+  interpreter calls it from `Thread._bootstrap_inner`, which QThread does not go through), and
+  every worker here is a QThread. It is a net for future bare-`Thread` work and for third-party
+  threads.
+  **The defect found while scoping it is the substance.** Every worker's `finally` sits *outside*
+  its `except` — `IngestWorker`, `ReingestWorker`, `RelocateWorker` and `ImportWorker` all dispose
+  stores there — so an exception from `store.close()` escapes `run()` entirely, reaches
+  `sys.excepthook` via PySide6, and had `crash._show_dialog` constructing a `QMessageBox` **on the
+  worker thread**. Building a QWidget off the GUI thread is undefined behaviour in Qt and can abort
+  the process: the crash handler was able to convert a survivable error into a hard crash.
+  **Three decisions worth not re-litigating.** `_report` checks the thread and shows the dialog
+  *directly* when already on the GUI thread — a start-up crash happens before `app.exec()`, so a
+  uniformly-queued call would never be delivered. Off-thread it emits through a queued-connection
+  `QObject` relay, built by `install_excepthook` on the GUI thread so the object *lives* there.
+  And **only strings cross the boundary**, never the exception — its traceback would pin worker
+  frames alive across threads.
+  Covered by `test/test_crash.py` (Qt-free): both hooks log and chain to the previous hook,
+  `KeyboardInterrupt` / `SystemExit` pass through unlogged, and `_report` builds no dialog when
+  there is no GUI thread. **Verified by hand through `UpdateCheckWorker`** (Help → Check for
+  updates), whose `result_ready.emit` is already outside its try/except — no capture, database or
+  recording needed to make an exception escape a worker thread.
 - **B2 / B3 — league capture import, and the one field `recorded_by` became.** Done 2026-08-04;
   the last of Cycle 2. *Help → Import captures…* walks a chosen folder, copies anything new into
   the local captures folder and ingests it. Read and write are split like the prune, so the count

@@ -379,8 +379,22 @@ Landed modules and what they do:
   `data_root()/logs/f1telemetry.log` (2 MB × 5), plus a console handler in dev only. Called first
   in `main()`.
 - **`src/crash.py`** — `install_excepthook(log_file)`: logs any uncaught exception and shows a
-  `QMessageBox` pointing at the log. Installed after the `QApplication`. (Worker threads already
-  emit `failed`; a `threading.excepthook` is a later add.)
+  `QMessageBox` pointing at the log. Installed after the `QApplication`. **Extended by C5
+  (Cycle 3):** a second hook, `install_threading_excepthook`, because Python has two —
+  `sys.excepthook` never fires for a plain `threading.Thread`, whose failures the interpreter
+  routes to `threading.excepthook` and whose default prints to a stderr a windowed build does not
+  have. Nothing uses a bare `Thread` today (every worker is a `QThread`, which `threading.excepthook`
+  does *not* cover), so that half is a net for future work.
+  **The load-bearing half is the thread rule:** the dialog is only ever built on the GUI thread.
+  Every worker's `finally` sits outside its `except` (`IngestWorker`, `ReingestWorker`,
+  `RelocateWorker`, `ImportWorker` all dispose stores there), so an exception from `store.close()`
+  escapes `run()`, reaches `sys.excepthook` via PySide6, and used to construct a `QMessageBox` on
+  the worker thread — undefined behaviour in Qt, and able to abort the process from inside the
+  crash handler. `_report` now shows the dialog directly when it is already on the GUI thread (a
+  start-up crash precedes `app.exec()`, so a queued call would never be delivered) and otherwise
+  emits through a queued-connection `QObject` relay built on the GUI thread by
+  `install_excepthook`. Only strings cross the boundary — never the exception, whose traceback
+  would pin worker frames alive.
 - **`pyproject.toml`** (repo root) — the dependency manifest, deps pinned `==` to the validated
   versions, with `pyqtgraph`/`zstandard` listed explicitly (Phase 1 must force-include them) and
   `pyinstaller` under an optional `package` extra. Version is a static mirror of `src/version.py`
