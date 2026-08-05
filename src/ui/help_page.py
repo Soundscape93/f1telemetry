@@ -88,6 +88,7 @@ class HelpPage(QWidget):
     not run alongside) - the same emit-and-let-the-container-act split as the seasons pages. 
     """
     reingest_requested = Signal()
+    import_captures_requested = Signal()
     find_moved_captures_requested = Signal()
     prune_captures_requested = Signal()
     backup_requested = Signal()
@@ -119,6 +120,13 @@ class HelpPage(QWidget):
         self._status.setWordWrap(True)
         self._status.setOpenExternalLinks(True)         # clickable release link in the label
         self._status.setStyleSheet(MUTED_TEXT_QSS)
+
+        self._import_btn = QPushButton("Import captures…")
+        self._import_btn.setMinimumHeight(32)
+        self._import_btn.setToolTip(
+            "Bring in captures a league member shared with you. Pick the folder they're in - "
+            "everything new is copied into your own captures folder and read.")
+        self._import_btn.clicked.connect(self.import_captures_requested)
 
         self._reingest_btn = QPushButton("Re-read captures")
         self._reingest_btn.setMinimumHeight(32)
@@ -192,6 +200,8 @@ class HelpPage(QWidget):
         layout.addSpacing(6)
         layout.addWidget(self._check_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self._status)
+        layout.addSpacing(6)
+        layout.addWidget(self._import_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)
         layout.addWidget(self._reingest_btn, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addSpacing(6)

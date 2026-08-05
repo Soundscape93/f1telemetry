@@ -71,6 +71,21 @@ class CaptureStore:
             # splitting it on "/" would store the entire path as the file name.
             row.file_name = os.path.basename(path)
             return True
+
+    def set_recorded_by(self, content_hash: str, recorded_by: str | None) -> bool:
+        """Record who produced a capture. False if the hash isn't known.
+
+        Separate from :meth:`record` because it is the one capture field that does **not** come
+        from the file (DECISIONS -> Storage): an import can only learn it from the person doing
+        the importing, and re-importing a capture that is already known is the only way to
+        correct it later. Without this, "already imported" would mean "nothing can be changed".
+        """
+        with self._Session.begin() as db:
+            row = db.get(CaptureRow, content_hash)
+            if row is None:
+                return False
+            row.recorded_by = recorded_by
+            return True
     
     def delete(self, content_hash: str) -> bool:
         """Forget a capture. False if it wasn't known."""

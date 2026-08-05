@@ -242,3 +242,59 @@ class RelocateWorker(QThread):
         finally:
             if store is not None:
                 store.close()
+
+
+class ImportWorker(QThread):
+    """Copies league captures into the local captures folder and ingests them, off the GUI thread.
+
+    The same shape as :class:`ReingestWorker`: its stores are built on THIS thread (SQLite
+    dislikes a connection shared across threads) and disposed in one ``finally``, the heavy
+    pipeline imports live inside ``run``, and cancellation is cooperative and polled between
+    captures. This is the longest-running job in the app - a league weekend is hundreds of
+    megabytes to copy *and* to parse - so it is the one that least belongs on the GUI thread.
+    """
+
+    progress = Signal(int, int, str)        # captures index (1-based), total, capture file name
+    done = Signal(object)                   # pipeline.ImportSummary
+    failed = Signal(str)                    # error message
+
+    def __init__(self, db_url: str, candidates: list, *, trace_dir: str = "lap_traces",
+                 captures_dir: str = "", recorded_by: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self._db_url = db_url
+        self._candidates = candidates
+        self._trace_dir = trace_dir
+        self._captures_dir = captures_dir
+        self._recorded_by = recorded_by
+        self.stop_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the import to stop after the capture it's on; safe from the GUI thread."""
+        self.stop_event.set()
+
+    def run(self) -> None:
+        from ..pipeline import import_captures
+        from ..storage.captures import CaptureStore
+        from ..storage.laps import LapStore
+        from ..storage.sessions import SessionStore
+
+        store = lap_store = capture_store = None
+        try:
+            store = SessionStore(self._db_url)
+            lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            capture_store = CaptureStore(self._db_url)
+            summary = import_captures(
+                self._candidates, capture_store, store,
+                captures_dir=self._captures_dir,
+                lap_store=lap_store,
+                recorded_by=self._recorded_by,
+                on_progress=self.progress.emit,
+                cancelled=self.stop_event.is_set,
+            )
+            self.done.emit(summary)
+        except Exception as exc:            # surface any failure to the UI rather than dying silently
+            self.failed.emit(str(exc))
+        finally:
+            for s in (capture_store, lap_store, store):
+                if s is not None:
+                    s.close()
