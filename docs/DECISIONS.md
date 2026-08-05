@@ -236,6 +236,13 @@ what would trigger revisiting it.
     local archive is always the home and the source is never moved, renamed or deleted. A name clash
     is numbered rather than overwritten: the hash has already said this is a recording we don't
     hold, so a clash can only be two different recordings, never a duplicate.
+  - **…but a capture already inside the captures folder is ingested in place.** Found the hard way:
+    importing from any folder that *contains* the data root — a home directory, a whole drive — made
+    the app copy its own archives beside themselves under `-2` names. Copy-home means *get it to the
+    home folder*, and a file already there is already home. This also turns the failure into a
+    feature: pointing the importer at the captures folder itself is now the way to pick up a loose
+    recording that was never ingested, which is the one capability the retired
+    `Ingest .f1cap (test)` button had that nothing else replaced.
   - **A failed import keeps its local copy** — the inverse of `archive_and_ingest`, which deletes a
     raw only once its bytes are proven. Nothing is at risk here because the shared original is
     untouched either way, and a capture that won't parse is precisely the one the admin wants

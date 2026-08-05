@@ -378,7 +378,12 @@ long Windows race rather than a dedicated investigation.
   tidied up by someone else. The source is never touched; copies go via `.part` + `os.replace`, the
   same guarantee `archive_capture` gives. A name clash is numbered (`monza-2.f1cap.zst`) rather than
   overwriting — it can only mean two *different* recordings sharing a name, since the hash already
-  ruled. A capture that fails to ingest **keeps** its local copy, unlike `archive_and_ingest`:
+  ruled. **A capture already inside the captures folder is ingested in place** (`_is_inside`): found
+  the hard way, by importing from a home directory that contained the data root and watching the app
+  copy its own archives beside themselves. It also makes "point it at your captures folder" the way
+  to pick up a loose recording that was never ingested — the one thing the retired
+  `Ingest .f1cap (test)` button did that nothing else replaced.
+  A capture that fails to ingest **keeps** its local copy, unlike `archive_and_ingest`:
   nothing is at risk because the shared original is untouched, and a capture that won't parse is
   exactly the one worth having locally.
   Also **retired the `Ingest .f1cap (test)` header button** — labelled dev-only in code while the

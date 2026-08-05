@@ -31,6 +31,9 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   captures are recognised by their contents, not their name, so anything already imported is simply
   skipped — even if someone renamed it. It's also how you get a capture back if you deleted your
   local copy but it's still in the shared folder.
+  Pointing it at a folder that already contains your own captures folder is harmless: anything
+  that's already there is read where it lies rather than copied beside itself. So you can also
+  point it *at* your captures folder to pick up a loose recording that was never read.
   There's an optional **"Who recorded them?"** box. Leave it blank if you don't know; fill it in and
   the app remembers who a capture came from once it's on your machine, which the shared drive can no
   longer tell you. Importing the same captures again with a different name corrects it.

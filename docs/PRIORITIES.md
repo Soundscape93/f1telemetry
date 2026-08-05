@@ -173,7 +173,11 @@ up opportunistically rather than scheduled.
   **Copy-home is the point, not an optimisation:** the shared drive is transport, the local archive
   is the home, so no row is left pointing at a folder that syncs or disconnects. The source is never
   touched. A name clash is **numbered**, not overwritten — the hash already ruled, so a clash can
-  only be two *different* recordings sharing a name.
+  only be two *different* recordings sharing a name. **A capture already inside the captures folder
+  is ingested in place** — learned in testing, by importing from a home directory containing the
+  data root and watching the app copy its own archives beside themselves under `-2` names. That fix
+  also restores the one capability the retired test button had: point the importer at the captures
+  folder to pick up a loose recording that was never ingested.
   **One inversion of `archive_and_ingest`, on purpose:** a capture that fails to ingest **keeps**
   its local copy. Nothing is at risk (the shared original is untouched), and a capture that won't
   parse is exactly the one worth having locally to look at.
@@ -184,9 +188,11 @@ up opportunistically rather than scheduled.
   **Retired the `Ingest .f1cap (test)` header button**, which had been marked dev-only in code while
   `USER_GUIDE.md` §4 documented it as *the* import path — wrong in one place or the other since
   v0.3.0. The header now carries only the record control.
-  Covered by `test/ingest/test_import.py` (17 cases) plus one in `test_captures.py`. Qt wiring
-  verified by hand. **Left behind:** Help now hosts five actions that aren't Help content — filed as
-  **E13**.
+  Covered by `test/ingest/test_import.py` (19 cases) plus one in `test_captures.py`. Qt wiring
+  verified by hand — and it earned its keep: three bugs (a `Signal` arity mismatch that silently
+  stalled the progress dialog, a missing `_close_import_dialog`, and the copy-beside-itself above)
+  were only reachable through the real app, because every test suite here is deliberately Qt-free.
+  **Left behind:** Help now hosts five actions that aren't Help content — filed as **E13**.
 - **B4 — locate a moved capture by content hash.** Done 2026-08-03; the first item of Cycle 2.
   *Help → Find moved captures…* walks a folder the user picks and re-points a `captures` row at the
   file it finds. The point is not the feature but the gap it closes: `find_missing_captures` can
