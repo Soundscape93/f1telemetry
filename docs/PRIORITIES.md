@@ -93,9 +93,9 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 | C2 | Enable WAL mode | **done 2026-08-02** | PACKAGING → Data layout & the database |
 | C3 | "Back up database…" via `VACUUM INTO` | **done 2026-08-02** | PACKAGING → Data layout & the database |
 
-Nothing is left in P1. See *Recently closed* for what each item settled — including the fact that
-the "open the app twice" checklist item passed *before* WAL existed, so it wants a re-test that
-actually exercises it.
+Nothing is left in P1. See *Recently closed* for what each item settled. The one loose thread it
+left — the "open the app twice" check having passed *before* WAL existed — is now **closed**: it was
+re-run under WAL on 2026-08-05 and passes.
 
 ## P2 — after P1
 
@@ -147,12 +147,15 @@ up opportunistically rather than scheduled.
   `GRAND_PRIX` (the 2026 league runs in Grand Prix multiplayer), but the league's *normal* state
   — drivers captured as `"Player"` with telemetry restricted, grouped by race number via
   `roster.member_key` — has never been tested on a real capture. **Plan:** the author sets their
-  own online name/ID to restricted at the **next race (~mid-August 2026)**. Deliberately *not*
-  asking other members to change their settings, since they'd risk leaving them restricted
-  afterwards. Season-critical if wrong (standings), so verify before trusting a full season's
-  table.
+  own online name/ID to restricted at the next race, **scheduled for ~2026-08-12** (confirmed
+  2026-08-05). Deliberately *not* asking other members to change their settings, since they'd risk
+  leaving them restricted afterwards. Season-critical if wrong (standings), so verify before
+  trusting a full season's table. **When it runs, capture the session and check it against
+  `LeagueRoster.session_keys` before assuming the standings are right** — a wrong grouping shows up
+  as two members merged into one row, or one member split across two.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
-  rendered map against the in-game track map when recording the next sessions. Note that absolute
+  rendered map against the in-game track map when recording the next sessions — which is the same
+  ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
@@ -276,9 +279,10 @@ up opportunistically rather than scheduled.
   an ingest — one read transaction that neither blocks the writer nor tears, which is the entire
   reason C3 pairs with C2. It is **not** the "Open database" action the project rules out: it
   writes a copy to a path the user chose and never exposes the live file.
-  **Leaves behind:** the Phase-1 "open the app twice" checklist item passed *before* WAL existed,
-  so its result means "the contention never happened", not "WAL handled it". PACKAGING now asks for
-  a re-test.
+  **The loose end it left is closed:** the Phase-1 "open the app twice" checklist item had passed
+  *before* WAL existed, so its result meant "the contention never happened", not "WAL handled it".
+  Re-run under WAL on **2026-08-05 — passes**, so the mechanism itself is now proven rather than
+  merely un-triggered. PACKAGING's checklist item is ticked.
 - **A1 — canonical track-map cache invalidation.** Done 2026-08-02.
   `TrackLayoutProvider.invalidate()` clears the whole cache (per-key would be wrong: an ingest can
   touch any weekend, a re-ingest touches all of them), reached through
@@ -317,7 +321,8 @@ up opportunistically rather than scheduled.
   `protocol/reference.py` (97 entries). The "partial, ~11 entries" claim was stale in three files
   and is corrected.
 - **The "open the app twice" check.** Run on both Windows instances with Record pressed and no
-  game running — nothing wedged. See C2 above for what this does *not* prove.
+  game running — nothing wedged. That run predated WAL, so it proved only that the contention never
+  happened; **re-run under WAL on 2026-08-05 and passes**, which does prove the mechanism. Closed.
 - **A2 / F1 / F2 / F4 and the stale-doc sweep.** This commit.
 
 ## Deferred, with reasons

@@ -628,11 +628,10 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
       still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
-- [ ] Open the app **twice** → SQLite doesn't wedge. *Re-test wanted.* It passed on both Windows
-      instances (2026-08-02, Record pressed, no game running), but that run predates WAL, so the
-      result meant "the contention never happened", not "WAL handled it". C2 has since enabled WAL
-      (`storage/engine.py`), so this is worth running again — this time it actually exercises the
-      mechanism, ideally with one instance mid-re-ingest while the other browses.
+- [x] Open the app **twice** → SQLite doesn't wedge. **Re-tested under WAL, 2026-08-05 — passes.**
+      The first run (2026-08-02, Record pressed, no game running) predated C2, so its result only
+      meant "the contention never happened", not "WAL handled it". This run is against
+      `storage/engine.py`'s WAL + `busy_timeout`, so the mechanism is actually exercised.
 - [ ] Help → **Back up database…** writes a `.db` beside where the user chose, the status line
       reports its size, and the copy opens as a working database. Worth doing **while a re-ingest
       runs** — that is the case C2/C3 exist for.
