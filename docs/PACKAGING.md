@@ -712,9 +712,45 @@ first:
 - **Qt platform plugin missing** → app won't start. Fallback: verify on a clean machine; PyInstaller
   Qt hooks normally cover it.
 - **pyqtgraph / zstandard missed** (lazy imports) → app silently ships the fallback. Fallback:
-  explicit hidden imports + a startup self-check that warns if a "real" feature degraded.
+  explicit hidden imports + a startup self-check that warns if a "real" feature degraded —
+  **the self-check is now built (C6, Cycle 3): `src/capabilities.py`.**
 - **pyarrow bloat / Windows DLL-load quirks** (~100 MB+). Fallback: verify Parquet read/write early;
-  worst case a startup capability probe.
+  worst case a startup capability probe — **also covered by `src/capabilities.py`**, with the
+  caveat recorded below.
+
+### The startup capability self-check (C6)
+
+`src/capabilities.py` is Qt-free and only *reports*; what to do about a degraded build is the
+caller's call. `MainWindow` runs it one event-loop turn after the window paints — **before** the
+pipeline-version check, since a build that lost pyqtgraph is worth mentioning before offering a
+multi-minute re-ingest — logs one line per capability on **every** launch, and shows a single
+warning dialog naming the consequences only when something is degraded. Deliberately **no Help-page
+surface**: Help already carries five actions that aren't Help content (PRIORITIES → E13).
+
+Four capabilities are probed: charts (pyqtgraph), capture compression (zstandard), lap traces
+(pyarrow) and the bundled flag SVGs.
+
+**Probe depth is per capability, and that is the design.** A capability is probed by *importing*
+it, because an import is the only thing that catches a module which is present but will not load —
+pyarrow's Windows DLL quirk is the named example, and `find_spec` says yes while the import still
+fails. The single exception is **pyqtgraph**, probed with `find_spec` alone: importing it here
+would undo the laziness that keeps start-up quick, and the regression this module exists for — *a
+bundle that never shipped it* — is visible without importing. **That is what makes C6 the
+prerequisite for C7**, whose entire risk is an `excludes` edit silently dropping pyqtgraph.
+
+Two limits, chosen rather than overlooked:
+
+1. A module *present but broken at import* reads OK for pyqtgraph. Not silent, though — it raises
+   into the log the first time a lap is opened, and that difference is what decided the split.
+2. `traces` can never actually report degraded today: a broken pyarrow kills `main_window`'s module
+   import (`→ storage.laps → trace_files`) before the window exists, so it is a start-up crash
+   caught by `crash.py`, not a silent degrade. The probe earns its place as a log line a tester's
+   report can carry, and stops being vacuous the day that import becomes lazy.
+
+A probe that throws is reported as a **degraded capability**, not dropped — a self-check that can
+take start-up down is worse than no self-check, but one that quietly shortens its own report is
+worse still. `check_capabilities(probes=…)` is injectable so the aggregation is testable without a
+broken environment. Covered by `test/test_capabilities.py`.
 - **Unsigned Windows exe / SmartScreen** "unknown publisher." Fallback: one-folder (fewer flags) +
   documented "More info → Run anyway"; code-signing cert only if it scares testers.
 - **macOS Gatekeeper** (unsigned). Fallback: documented right-click→Open; notarize later if ever.

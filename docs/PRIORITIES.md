@@ -78,7 +78,7 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 C8 — the largest and riskiest — first. It runs **last** instead, and C6 moves ahead of C7:
 
 - C5 `threading.excepthook` — **done 2026-08-05**
-- C6 startup capability self-check
+- C6 startup capability self-check — **done 2026-08-05**
 - C7 pyqtgraph bloat trim — **after C6, not before.** PACKAGING's own risk register gives the
   mitigation for "pyqtgraph/zstandard missed → the app silently ships the fallback" as "explicit
   hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
@@ -151,7 +151,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
-| C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | PACKAGING → Risks |
+| C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | PACKAGING → Phase 1 known issues |
 | C8 | Phase 4: macOS/Linux, Inno Setup installer, velopack auto-updater | PACKAGING → Phased plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
@@ -193,6 +193,29 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C6 — startup capability self-check.** Done 2026-08-05; the second item of Cycle 3, and the
+  prerequisite for C7. `src/capabilities.py` (Qt-free) probes four things — charts (pyqtgraph),
+  capture compression (zstandard), lap traces (pyarrow) and the bundled flag SVGs — and returns a
+  frozen `Capability` each. `MainWindow` logs all four on every launch and dialogues only when
+  something is degraded, deferred a turn like the pipeline check and ordered **before** it: a build
+  that lost pyqtgraph is worth saying before offering a multi-minute re-ingest. **No Help-page
+  surface, deliberately** — Help already hosts five actions that aren't Help content (E13).
+  **The one decision worth not re-litigating: probe depth is per capability.** A capability is
+  probed by *importing* it, because only an import catches a module that is present but won't load
+  (pyarrow's Windows DLL quirk — `find_spec` says yes while the import fails). pyqtgraph is the
+  exception, probed by `find_spec` alone, because importing it would undo the laziness that keeps
+  start-up quick — and the regression this exists for, *a bundle that never shipped it*, needs no
+  import to see. **That is precisely what C7 risks**, which is why the order was reversed.
+  **Two limits, chosen not discovered:** a module present-but-broken-at-import reads OK for
+  pyqtgraph (not silent — it raises into the log on the first lap opened, which is what decided the
+  split); and `traces` can never actually report degraded today, because a broken pyarrow kills
+  `main_window`'s import before the window exists, making it a start-up crash rather than a silent
+  degrade. That probe earns its place as a log line a tester's report carries, and stops being
+  vacuous if the `LapStore` import ever goes lazy.
+  A probe that throws is reported as a **degraded capability**, not dropped — failing loud beats a
+  self-check that quietly shortens its own report. Covered by `test/test_capabilities.py`, whose
+  logging cases are real regression tests: `assertLogs` formats each record, so a reversed `%s`
+  fails the suite instead of vanishing into logging's internal error handler. One did, on the way.
 - **C5 — `threading.excepthook`, and the crash-dialog thread bug it uncovered.** Done 2026-08-05;
   the first item of Cycle 3. The hook itself is nearly a no-op today and that is worth knowing
   rather than rediscovering: **`threading.excepthook` never fires for a `QThread`** (the

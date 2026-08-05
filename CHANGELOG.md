@@ -18,6 +18,14 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Added
+- If a build is missing something it needs — the charting library behind the telemetry graphs and
+  track map, the compression library that reads and writes captures, or the flag icons — the app
+  now tells you on startup and names exactly what won't work, instead of quietly showing you the
+  fallback and leaving you to report it as a broken feature. Everything else keeps working. The
+  answer is written to the log on **every** launch either way, healthy or not, so it's already in
+  the log file you send with a bug report.
+
 ### Fixed
 - An unexpected internal error during a background job — recording, reading captures, importing,
   or searching for moved captures — now reports itself properly instead of risking taking the app
