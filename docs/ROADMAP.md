@@ -435,6 +435,30 @@ long Windows race rather than a dedicated investigation.
   Still nothing *reads* it; if something ever does, revisit the format-v2 idea then and not before.
   See PRIORITIES → Cycle 2 and DECISIONS → Storage.
 
+## Localization (the G block)
+
+The app speaks English only. The league is Swiss, and most members would rather read German — so
+the user-facing text should eventually be available in both, with English staying the source
+language and the fallback.
+
+- **G1 — i18n infrastructure + a language setting.** The mechanism, with one language pair wired
+  end to end: `tr()` at the call sites, `QTranslator` installed at start-up, compiled `.qm` files
+  shipped as bundled assets, and somewhere for the user to choose. **The approach is already
+  decided** — Qt's own translation system rather than a Python dictionary of strings, for reasons
+  recorded in DECISIONS → Localization.
+- **G2 — German translation of the UI strings.** The bulk of the work. A **glossary comes first**:
+  some vocabulary stays English on purpose (*Session*, *Season*, *Lap* are what the game and the
+  league already say), and that list has to exist before translation starts rather than being
+  argued out one string at a time.
+- **G3 — German user guide.** Deliberately its own item: `docs/USER_GUIDE.md` is not UI text, it is
+  a document converted to PDF by CI. A German edition means a second source document, a second
+  pandoc invocation and a second artifact in the release zip — a packaging change more than a
+  translation one.
+
+Scheduling lives in PRIORITIES (P3, likely Cycle 5). The short version of *why not sooner*: four
+UI surfaces are still placeholders, and translating a UI that is still growing means translating it
+twice.
+
 ## Possible, uncertain
 - **Hosted multi-user league platform** — signup / authorization, colleagues upload their own
   results. Would be additive: reuse the version-agnostic domain + storage; the schema is already

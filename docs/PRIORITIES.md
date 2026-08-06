@@ -88,6 +88,17 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
   C5–C7. Not code: a checklist the author executes, producing doc updates only.
 - C8 Phase 4 — see the split below.
 
+**Cycle 3 ships as two releases, not one — decided 2026-08-06.** The remaining items produce two
+different kinds of artifact, and the seam is where that changes:
+
+1. **Release 1 — C7**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4 runs
+   against that published build**: C4 is validation, so it wants a real downloaded artifact rather
+   than a local `dist/` folder.
+2. **Release 2 — C8a + C8b.** Then a **second** clean-instance run, because **C8b changes what
+   "install" means**: a clean-instance test against a zip proves nothing about an installer.
+
+This is a release split, not a cycle split — the cycle is still C4/C7/C8a/C8b.
+
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
 - **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
   the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
@@ -101,11 +112,22 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
   self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
   toolchain that would replace the zip artifact verified across three builds, for a handful of
   testers whose notify-only path was confirmed working against a real Release on 2026-08-02. It
-  buys the least and risks the most.
+  buys the least and risks the most. **It keeps its own P3 row** — closing Cycle 3 does *not* close
+  the C block, and a deferred item with no row reads as a forgotten one.
 
-*Not in Cycle 3, but noted:* **A4** (Windows light/dark switch leaves text miscoloured) sits in P2
-and has shipped as a known issue in every release since v0.3.0. It is packaging-phase polish
-during the packaging cycle — the strongest candidate for promotion if the cycle has room.
+**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4**, then the E-block
+surfaces (E1/E2, E3, E5) in whatever order they earn.
+
+- A4 Windows light/dark switch leaves text miscoloured — **moved out of Cycle 3, 2026-08-06.** Not
+  for lack of importance: it has shipped as a known issue in every release since v0.3.0. It is
+  cross-surface UI refactoring in 15 files, which shares no review context with build/CI plumbing —
+  putting it beside an installer spec is worse for both. It is also *not* Windows-gated the way C4
+  is: `colorSchemeChanged` fires on Ubuntu too, so most of it is verifiable on the dev box.
+  **Its root cause was misdiagnosed in the docs until 2026-08-06** — see PACKAGING → Phase 1 known
+  issues for the corrected mechanism and the measured scope.
+
+**Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
+surfaces: translating a UI that is still growing means translating it twice.
 
 **Deliberately after Cycle 3:** E1/E2 (Sessions surface + deleted-sessions manager), E3
 (Analytics), E5 (Bug report page). See *Deferred* below for why.
@@ -133,7 +155,7 @@ re-run under WAL on 2026-08-05 and passes.
 | B2 | League capture import from a shared folder | **done 2026-08-04** | ROADMAP → Capture compression; DECISIONS → Storage |
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
-| A4 | Windows light/dark switch leaves text miscoloured | open | PACKAGING → Phase 1 known issues |
+| A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | process | CHANGELOG header comment |
@@ -152,8 +174,10 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
-| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | PACKAGING → Phase 1 known issues |
-| C8 | Phase 4: macOS/Linux, Inno Setup installer, velopack auto-updater | PACKAGING → Phased plan |
+| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **Cycle 3, next**; PACKAGING → Phase 1 known issues |
+| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
+| C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
 | D4 | True geometric centerline (needs Motion Ex / track width) | DECISIONS → UI |
@@ -164,6 +188,27 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
 | E13 | Move the capture/database actions off Help into their own surface | ROADMAP → Other surfaces |
+| G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
+| G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
+| G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
+blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
+German.
+
+**It splits into a decision and a body of work, and only the decision is urgent.** The
+infrastructure choice is cheap now and expensive to retrofit — every UI string written between now
+and then is written in one style or the other — so the approach is **settled now** (DECISIONS →
+Localization: Qt `tr()` + `QTranslator`, *not* a Python dict) and adopted for new UI code as it is
+written. The **bulk translation waits**, because Sessions (E1), the deleted-sessions manager (E2),
+Analytics (E3) and Bug report (E5) are all still placeholders: translating a UI that is still
+growing means translating it twice. Rough scale of the eventual job — ~363 candidate user-facing
+strings under `src/ui/`, which is also why it is not a hand-maintained dict.
+
+**G3 is deliberately separate from G2.** The user guide is not UI text: it is `docs/USER_GUIDE.md`
+converted to PDF by `release.yml` via pandoc/xelatex. A German guide means a second source document,
+a second pandoc invocation and a second artifact in the release zip — a packaging change, not a
+translation one.
 
 ---
 

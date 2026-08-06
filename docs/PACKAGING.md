@@ -435,11 +435,34 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
 
 ### Known issues (Phase 1 build)
 
-- **Live Windows light/dark switch** doesn't fully recolor the UI. `app._install_theme_refresh`
-  (on `QStyleHints.colorSchemeChanged`) re-polishes widgets so backgrounds follow, but **QSS-styled
-  label text keeps its old colour** — a `setStyleSheet` pins the palette-derived text colour. Fix
-  deferred (move those labels' font sizing off `setStyleSheet` onto `QFont`, or re-apply palette on
-  the signal). Workaround: **restart the app after switching the Windows theme.**
+- **Live Windows light/dark switch** doesn't fully recolor the UI (PRIORITIES → **A4**, Cycle 4).
+  `app._install_theme_refresh` (on `QStyleHints.colorSchemeChanged`) re-polishes widgets so
+  backgrounds follow, but **QSS-styled label text keeps its old colour**. Workaround:
+  **restart the app after switching the Windows theme.**
+
+  **Root cause corrected 2026-08-06 — the earlier note was wrong, and wrong in a way that would
+  have misdirected the fix.** It said a `setStyleSheet` "pins the palette-derived text colour".
+  There is no palette-derived colour anywhere: `palette(` appears **three times in the whole
+  codebase**, all three inside `ui/style.py`'s docstring explaining why we *don't* use it.
+
+  What actually happens: setting **any** stylesheet on a widget hands its painting to
+  `QStyleSheetStyle`, which resolves and caches a palette for that widget *at apply time*. A label
+  styled only `"font-size: 20px; font-weight: 600"` therefore carries the **old theme's default
+  text colour** frozen into it — despite never having asked for a colour at all — and the
+  `unpolish`/`polish` pass doesn't force that cached rule to recompute.
+
+  So the fix the old note guessed at is right, for a different reason: a label with *no* stylesheet
+  follows the palette natively. **Measured scope (2026-08-06): 27 font-only `setStyleSheet` calls
+  across 15 files** — move them to `QFont`, ideally behind a named helper in `ui/style.py`
+  (`apply_heading(label, …)`), which states the intent instead of repeating a magic string.
+
+  Two wrinkles that will bite whoever does it:
+  * **`px` and `pt` are both in use** and are not interchangeable — `setPixelSize` vs
+    `setPointSize`. Converting one to the other silently resizes text on HiDPI panels.
+  * **`MUTED_TEXT_QSS` labels stay styled.** Their `#8b949e` is a *deliberately fixed* colour that
+    reads on both grounds (see `ui/style.py` for why `palette(mid)` was tried and rejected), so
+    they are already theme-independent and must not be "fixed". Where a label carries **both** a
+    muted colour and a font size, only the font moves out; the colour rule stays.
 - **pyqtgraph bloat:** the contrib hook pulls in `pyqtgraph.examples.*` (harmless, pure `.pyc`).
   Trim via `excludes` in a later size pass before wider distribution — not worth destabilizing a
   verified build now.
