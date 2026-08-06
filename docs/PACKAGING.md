@@ -463,9 +463,61 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
     reads on both grounds (see `ui/style.py` for why `palette(mid)` was tried and rejected), so
     they are already theme-independent and must not be "fixed". Where a label carries **both** a
     muted colour and a font size, only the font moves out; the colour rule stays.
-- **pyqtgraph bloat:** the contrib hook pulls in `pyqtgraph.examples.*` (harmless, pure `.pyc`).
-  Trim via `excludes` in a later size pass before wider distribution — not worth destabilizing a
-  verified build now.
+- **pyqtgraph bloat — DONE 2026-08-06 (PRIORITIES → C7), and it was not where the weight was.**
+  The contrib hook plus our own `collect_submodules("pyqtgraph")` pulled in `pyqtgraph.examples.*`:
+  a demo application with its own `__main__` and ~40 example scripts, unreachable from here (this
+  app touches pyqtgraph through two lazy imports, `trace_plot` and `track_map`). Now filtered out
+  of `hiddenimports` *and* `collect_data_files`, with an `excludes` entry as a backstop.
+
+  **Measured: 577 MB → 576 MB, i.e. 0.17 %.** The change is right on hygiene grounds — a demo app
+  with an entry point no longer travels inside a distributed binary, and the spec states its intent
+  instead of collecting blindly — but it is not a size fix, and the CHANGELOG deliberately carries
+  no entry for it.
+
+  **Deliberately one subpackage only.** `pyqtgraph.opengl`, `.canvas`, `.flowchart`, `.console` and
+  `.multiprocess` look equally unused, but several are reachable from pyqtgraph's own `__init__` and
+  its lazy attribute machinery; trimming those is how you ship a build that works until one specific
+  widget is opened.
+
+  **How to verify a trim — the obvious check lies.** In a one-folder build with `noarchive=False`,
+  pure-Python modules go into the **PYZ**, not onto disk, so a file search finds nothing either way.
+  And `build/f1telemetry/Analysis-00.toc` records the `Analysis()` *configuration*, so it necessarily
+  still matches `pyqtgraph.examples` once the exclude exists — a guaranteed false positive. The two
+  lists that decide what ships are:
+
+  ```
+  grep -c "pyqtgraph\.examples" build/f1telemetry/PYZ-00.toc       # → 0
+  grep -c "pyqtgraph\.examples" build/f1telemetry/COLLECT-00.toc   # → 0
+  grep -c "pyqtgraph"           build/f1telemetry/PYZ-00.toc       # → 384, still all there
+  ```
+
+  Then confirm it for real: `capabilities.py`'s charts probe is `find_spec`-based and cannot prove
+  pyqtgraph *renders*, so **open a lap detail page in the built app** and check the traces and track
+  map draw. A frozen bundle can be pointed at dev data with
+  `F1TELEMETRY_DATA_DIR=<dir> ./dist/f1telemetry/f1telemetry`, which makes this a Linux-side check
+  rather than a Windows build. Note the capability lines land in `<data dir>/logs/`, **not** on the
+  console — a frozen windowed build installs no console handler.
+
+- **Where the size actually is (measured 2026-08-06, Linux one-folder, `_internal` = 555 MB).**
+  Recorded so nobody re-runs this hunt:
+
+  | | | |
+  |---|---|---|
+  | pyarrow | 146M | required |
+  | PySide6 | 128M | required |
+  | **scipy + scipy.libs** | **73M** | **not a dependency of this app** |
+  | libpython3.13.so | 35M | required |
+  | numpy.libs | 28M | required |
+  | zstandard | 23M | required |
+  | **pandas** | **18M** | **not a dependency** |
+  | **pillow.libs** | **14M** | **not a dependency** |
+
+  scipy, pandas and pillow are transitive — pyqtgraph optionally imports scipy and pillow for image
+  paths never taken here, and pyarrow drags pandas. Sweeping all 384 pyqtgraph submodules is what
+  makes those optional imports visible to PyInstaller. That is **~105 MB, 18 %**, against C7's 1 MB.
+  Filed as **PRIORITIES → C9**, deliberately *not* folded into C7: it is exactly the over-reach C7's
+  own spec comment warns about, and it needs a Windows build of its own since the composition
+  differs there (`libgtk`, the `.libs` layout).
 
 ---
 
