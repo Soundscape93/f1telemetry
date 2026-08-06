@@ -22,13 +22,27 @@ entry = os.path.join(REPO_ROOT, "packaging", "entry.py")
 # under sys_MEIPASS (see paths.resource_path /docs/PACKAGING.md "Contract Phase 1 must honor").
 flags_src = os.path.join(REPO_ROOT, "src", "ui", "assets", "flags")
 datas = [(flags_src, "f1telemetry/src/ui/assets/flags")]
-datas += collect_data_files("pyqtgraph")                # colormaps / icons pyqtgraph loads at runtime
+# colormaps / icons pyqtgraph loads at runtime. The examples ship their own data; we never
+# reach them (see _EXCLUDED_PYQTGARAPH below), so drop it rather than zip it.
+datas += [d for d in collect_data_files("pyqtgraph") 
+         if "examples" not in d[0].replace("\\", "/").split("/")]
+
+# pyqtgraph.examples is a demo app with its own __main__ and ~40 example scripts. Nothing here
+# imports it - this app touches pyqtgraph only through two lazy imports (trace_plot, track_map) -
+# so collect_submodules sweeping it in is pure weight in the bundle.
+#
+# DELIBERATELY only this one subpackage. opengl / canvas / flowchart / console / multiprocess look
+# just as unused, but several are reachable from pyqtgraph's own __init__ and its lazy attribute
+# machinery; trimming those is how you get a build that works until one specific widget is opened.
+# If pyqtgraph is ever loaded by a NEW code path, re-check this list before assuming it is safe.
+_EXCLUDED_PYQTGRAPH = "pyqtgraph.examples"
 
 # Lazy import PyInstaller can't see by static analysis (imported inside branches).
 hiddenimports = (
-    collect_submodules("pyqtgraph")
-    + collect_submodules("zstandard")
-    + ["zstandard.backend_c", "PySide6.QtSvg"]
+    [m for m in collect_submodules("pyqtgraph") 
+     if m != _EXCLUDED_PYQTGRAPH and not m.startswith(_EXCLUDED_PYQTGRAPH + ".")]
+     + collect_submodules("zstandard")
+     + ["zstandard.backend_c", "PySide6.QtSvg"]
 )
 
 # Trim heavy Qt modules we never use. If Qt fails to start on a user's machine, this is the first place to check.
@@ -40,7 +54,10 @@ excludes = [
     "PySide6.QtBluetooth", "PySide6.QtNfc", "PySide6.QtPositioning", "PySide6.QtSensors",
     "PySide6.QtSerialPort", "PySide6.QtWebSockets", "PySide6.QtCharts",
     "PySide6.QtDataVisualization", "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtSql",
-    "tkinter", "matplotlib", "IPython",
+    "tkinter", "matplotlib", "IPython", "__main__",
+    # Backstop for the filter above: a transitive import of the examples must not pull them back in.
+    # Harmless if the filter already did the job.
+    _EXCLUDED_PYQTGRAPH,
 ]
 
 a = Analysis(

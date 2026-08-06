@@ -79,7 +79,7 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
 
 - C5 `threading.excepthook` — **done 2026-08-05**
 - C6 startup capability self-check — **done 2026-08-05**
-- C7 pyqtgraph bloat trim — **after C6, not before.** PACKAGING's own risk register gives the
+- C7 pyqtgraph bloat trim — **done 2026-08-06.** Was sequenced **after C6, not before.** PACKAGING's own risk register gives the
   mitigation for "pyqtgraph/zstandard missed → the app silently ships the fallback" as "explicit
   hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
   whose failure mode is that silent degrade — so C6 is the instrument that makes C7 verifiable
@@ -174,7 +174,8 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
-| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **Cycle 3, next**; PACKAGING → Phase 1 known issues |
+| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
+| C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
@@ -238,6 +239,28 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C7 — pyqtgraph bloat trim, and what it found instead.** Done 2026-08-06; the third item of
+  Cycle 3. `pyqtgraph.examples` — a demo app with its own `__main__` and ~40 scripts, unreachable
+  from here — is filtered out of both `hiddenimports` and `collect_data_files`, with an `excludes`
+  backstop. **Deliberately one subpackage:** `opengl` / `canvas` / `flowchart` / `console` /
+  `multiprocess` are reachable from pyqtgraph's own `__init__` and its lazy attribute machinery, so
+  trimming them ships a build that works until one specific widget is opened.
+  **The honest result: 577 MB → 576 MB, 0.17 %.** It ships on hygiene, not size, and carries **no
+  CHANGELOG entry** — a release note would overstate it. The finding that mattered is where the
+  weight actually is: **scipy + libs 73 MB, pandas 18 MB, pillow 14 MB — ~105 MB (18 %) of
+  transitive dependencies this app does not use**, now filed as **C9** and recorded with the full
+  `_internal` breakdown in PACKAGING so the hunt is not re-run.
+  **Two verification traps, both worth not re-learning.** Pure-Python modules live in the **PYZ**,
+  not on disk, so a file search proves nothing; and `Analysis-00.toc` records the `Analysis()`
+  configuration, so it *necessarily* still matches once the exclude exists — a guaranteed false
+  positive that cost a round-trip here. `PYZ-00.toc` and `COLLECT-00.toc` are the lists that decide
+  what ships (0 examples, 384 pyqtgraph modules intact).
+  **C6 was the instrument, and was deliberately not trusted alone.** The built app logs
+  `capability charts: ok`, but that probe is `find_spec`-based and cannot prove pyqtgraph *renders* —
+  so a lap detail page was opened in the frozen bundle and the traces and track map confirmed. Done
+  on **Linux**, not Windows, by pointing the bundle at a scratch copy of the dev data with
+  `F1TELEMETRY_DATA_DIR`; the same run also gave the first confirmation that `resource_path`
+  resolves through `_MEIPASS` (89 flag assets found under `_internal/`).
 - **C6 — startup capability self-check.** Done 2026-08-05; the second item of Cycle 3, and the
   prerequisite for C7. `src/capabilities.py` (Qt-free) probes four things — charts (pyqtgraph),
   capture compression (zstandard), lap traces (pyarrow) and the bundled flag SVGs — and returns a
