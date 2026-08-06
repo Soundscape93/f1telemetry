@@ -18,6 +18,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged at 2 and nothing about how captures are
+read or stored moved, so existing captures, sessions and standings are unaffected.
+
 ### Added
 - If a build is missing something it needs — the charting library behind the telemetry graphs and
   track map, the compression library that reads and writes captures, or the flag icons — the app
@@ -33,6 +36,17 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   to open it from its own background thread, which Windows can turn into an outright crash. Errors
   raised in background work are also written to the log with the name of the job that raised them,
   so a log you send with a bug report says which one it was.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 ## v0.6.0 — 2026-08-05
 
