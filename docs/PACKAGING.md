@@ -326,8 +326,22 @@ the self-updater is packaging Phase 4.)*
   `pull_request.head.sha`, since the default `pull_request` checkout is the *merge* commit, whose
   subject is never `chore(release):`.
 - Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
-  partial). This is enforced twice: `bump_version.py --check` on the PR (via `ci.yml`, only for
-  labelled PRs) and `release_notes.py` in the release preflight.
+  partial). Two gates enforce this, and they do **not** check the same things:
+  - **`bump_version.py --check`** on the PR (via `ci.yml`, only for labelled PRs) reads the
+    **Unreleased** section and requires *both* the re-ingest answer and a `**Known issues**` list
+    ("None" is a valid answer). This is the cheap failure — it fires while the author is still
+    writing the change.
+  - **`release_notes.py`** in the release preflight reads the **released** section and requires the
+    re-ingest answer. This one fires *after* `tag.yml` has pushed the tag, so it is the expensive
+    failure and the reason the first gate has to work.
+
+  **Corrected 2026-08-07 (PRIORITIES → F8): the first gate did not work.** From Phase 3 until
+  v0.7.0, `check()` stripped the instruction comment before testing whether the section was *empty*
+  but not before testing for the re-ingest answer — and the comment quotes that very phrase, so the
+  test was unconditionally satisfied. The claim "enforced twice" was false: it was enforced once, at
+  the worst moment. Both tests now read the comment-stripped body. **If you add a check here, test
+  it against `content`, never `body`** — and write its regression test with the real `PLACEHOLDER`,
+  not a stub comment, which is why the suite missed this for four releases.
 - **Local checks** before merging: `python packaging/bump_version.py --check` (silence = the
   Unreleased section is release-ready) and `python packaging/check_version.py` (no argument — the two
   version files agree). The tag forms of both only make sense *after* a bump has happened, or if you
@@ -379,8 +393,22 @@ Landed modules and what they do:
   `data_root()/logs/f1telemetry.log` (2 MB × 5), plus a console handler in dev only. Called first
   in `main()`.
 - **`src/crash.py`** — `install_excepthook(log_file)`: logs any uncaught exception and shows a
-  `QMessageBox` pointing at the log. Installed after the `QApplication`. (Worker threads already
-  emit `failed`; a `threading.excepthook` is a later add.)
+  `QMessageBox` pointing at the log. Installed after the `QApplication`. **Extended by C5
+  (Cycle 3):** a second hook, `install_threading_excepthook`, because Python has two —
+  `sys.excepthook` never fires for a plain `threading.Thread`, whose failures the interpreter
+  routes to `threading.excepthook` and whose default prints to a stderr a windowed build does not
+  have. Nothing uses a bare `Thread` today (every worker is a `QThread`, which `threading.excepthook`
+  does *not* cover), so that half is a net for future work.
+  **The load-bearing half is the thread rule:** the dialog is only ever built on the GUI thread.
+  Every worker's `finally` sits outside its `except` (`IngestWorker`, `ReingestWorker`,
+  `RelocateWorker`, `ImportWorker` all dispose stores there), so an exception from `store.close()`
+  escapes `run()`, reaches `sys.excepthook` via PySide6, and used to construct a `QMessageBox` on
+  the worker thread — undefined behaviour in Qt, and able to abort the process from inside the
+  crash handler. `_report` now shows the dialog directly when it is already on the GUI thread (a
+  start-up crash precedes `app.exec()`, so a queued call would never be delivered) and otherwise
+  emits through a queued-connection `QObject` relay built on the GUI thread by
+  `install_excepthook`. Only strings cross the boundary — never the exception, whose traceback
+  would pin worker frames alive.
 - **`pyproject.toml`** (repo root) — the dependency manifest, deps pinned `==` to the validated
   versions, with `pyqtgraph`/`zstandard` listed explicitly (Phase 1 must force-include them) and
   `pyinstaller` under an optional `package` extra. Version is a static mirror of `src/version.py`
@@ -421,14 +449,89 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
 
 ### Known issues (Phase 1 build)
 
-- **Live Windows light/dark switch** doesn't fully recolor the UI. `app._install_theme_refresh`
-  (on `QStyleHints.colorSchemeChanged`) re-polishes widgets so backgrounds follow, but **QSS-styled
-  label text keeps its old colour** — a `setStyleSheet` pins the palette-derived text colour. Fix
-  deferred (move those labels' font sizing off `setStyleSheet` onto `QFont`, or re-apply palette on
-  the signal). Workaround: **restart the app after switching the Windows theme.**
-- **pyqtgraph bloat:** the contrib hook pulls in `pyqtgraph.examples.*` (harmless, pure `.pyc`).
-  Trim via `excludes` in a later size pass before wider distribution — not worth destabilizing a
-  verified build now.
+- **Live Windows light/dark switch** doesn't fully recolor the UI (PRIORITIES → **A4**, Cycle 4).
+  `app._install_theme_refresh` (on `QStyleHints.colorSchemeChanged`) re-polishes widgets so
+  backgrounds follow, but **QSS-styled label text keeps its old colour**. Workaround:
+  **restart the app after switching the Windows theme.**
+
+  **Root cause corrected 2026-08-06 — the earlier note was wrong, and wrong in a way that would
+  have misdirected the fix.** It said a `setStyleSheet` "pins the palette-derived text colour".
+  There is no palette-derived colour anywhere: `palette(` appears **three times in the whole
+  codebase**, all three inside `ui/style.py`'s docstring explaining why we *don't* use it.
+
+  What actually happens: setting **any** stylesheet on a widget hands its painting to
+  `QStyleSheetStyle`, which resolves and caches a palette for that widget *at apply time*. A label
+  styled only `"font-size: 20px; font-weight: 600"` therefore carries the **old theme's default
+  text colour** frozen into it — despite never having asked for a colour at all — and the
+  `unpolish`/`polish` pass doesn't force that cached rule to recompute.
+
+  So the fix the old note guessed at is right, for a different reason: a label with *no* stylesheet
+  follows the palette natively. **Measured scope (2026-08-06): 27 font-only `setStyleSheet` calls
+  across 15 files** — move them to `QFont`, ideally behind a named helper in `ui/style.py`
+  (`apply_heading(label, …)`), which states the intent instead of repeating a magic string.
+
+  Two wrinkles that will bite whoever does it:
+  * **`px` and `pt` are both in use** and are not interchangeable — `setPixelSize` vs
+    `setPointSize`. Converting one to the other silently resizes text on HiDPI panels.
+  * **`MUTED_TEXT_QSS` labels stay styled.** Their `#8b949e` is a *deliberately fixed* colour that
+    reads on both grounds (see `ui/style.py` for why `palette(mid)` was tried and rejected), so
+    they are already theme-independent and must not be "fixed". Where a label carries **both** a
+    muted colour and a font size, only the font moves out; the colour rule stays.
+- **pyqtgraph bloat — DONE 2026-08-06 (PRIORITIES → C7), and it was not where the weight was.**
+  The contrib hook plus our own `collect_submodules("pyqtgraph")` pulled in `pyqtgraph.examples.*`:
+  a demo application with its own `__main__` and ~40 example scripts, unreachable from here (this
+  app touches pyqtgraph through two lazy imports, `trace_plot` and `track_map`). Now filtered out
+  of `hiddenimports` *and* `collect_data_files`, with an `excludes` entry as a backstop.
+
+  **Measured: 577 MB → 576 MB, i.e. 0.17 %.** The change is right on hygiene grounds — a demo app
+  with an entry point no longer travels inside a distributed binary, and the spec states its intent
+  instead of collecting blindly — but it is not a size fix, and the CHANGELOG deliberately carries
+  no entry for it.
+
+  **Deliberately one subpackage only.** `pyqtgraph.opengl`, `.canvas`, `.flowchart`, `.console` and
+  `.multiprocess` look equally unused, but several are reachable from pyqtgraph's own `__init__` and
+  its lazy attribute machinery; trimming those is how you ship a build that works until one specific
+  widget is opened.
+
+  **How to verify a trim — the obvious check lies.** In a one-folder build with `noarchive=False`,
+  pure-Python modules go into the **PYZ**, not onto disk, so a file search finds nothing either way.
+  And `build/f1telemetry/Analysis-00.toc` records the `Analysis()` *configuration*, so it necessarily
+  still matches `pyqtgraph.examples` once the exclude exists — a guaranteed false positive. The two
+  lists that decide what ships are:
+
+  ```
+  grep -c "pyqtgraph\.examples" build/f1telemetry/PYZ-00.toc       # → 0
+  grep -c "pyqtgraph\.examples" build/f1telemetry/COLLECT-00.toc   # → 0
+  grep -c "pyqtgraph"           build/f1telemetry/PYZ-00.toc       # → 384, still all there
+  ```
+
+  Then confirm it for real: `capabilities.py`'s charts probe is `find_spec`-based and cannot prove
+  pyqtgraph *renders*, so **open a lap detail page in the built app** and check the traces and track
+  map draw. A frozen bundle can be pointed at dev data with
+  `F1TELEMETRY_DATA_DIR=<dir> ./dist/f1telemetry/f1telemetry`, which makes this a Linux-side check
+  rather than a Windows build. Note the capability lines land in `<data dir>/logs/`, **not** on the
+  console — a frozen windowed build installs no console handler.
+
+- **Where the size actually is (measured 2026-08-06, Linux one-folder, `_internal` = 555 MB).**
+  Recorded so nobody re-runs this hunt:
+
+  | | | |
+  |---|---|---|
+  | pyarrow | 146M | required |
+  | PySide6 | 128M | required |
+  | **scipy + scipy.libs** | **73M** | **not a dependency of this app** |
+  | libpython3.13.so | 35M | required |
+  | numpy.libs | 28M | required |
+  | zstandard | 23M | required |
+  | **pandas** | **18M** | **not a dependency** |
+  | **pillow.libs** | **14M** | **not a dependency** |
+
+  scipy, pandas and pillow are transitive — pyqtgraph optionally imports scipy and pillow for image
+  paths never taken here, and pyarrow drags pandas. Sweeping all 384 pyqtgraph submodules is what
+  makes those optional imports visible to PyInstaller. That is **~105 MB, 18 %**, against C7's 1 MB.
+  Filed as **PRIORITIES → C9**, deliberately *not* folded into C7: it is exactly the over-reach C7's
+  own spec comment warns about, and it needs a Windows build of its own since the composition
+  differs there (`libgtk`, the `.libs` layout).
 
 ---
 
@@ -628,11 +731,10 @@ Run on the author's Windows 11 boot; ideally on a clean Windows instance (see be
 - [ ] **Re-ingest** — a capture moved out of `captures/` is reported as missing, and the stamp is
       still written (the prompt must not recur forever).
 - [ ] Kill mid-record → app recovers on next launch.
-- [ ] Open the app **twice** → SQLite doesn't wedge. *Re-test wanted.* It passed on both Windows
-      instances (2026-08-02, Record pressed, no game running), but that run predates WAL, so the
-      result meant "the contention never happened", not "WAL handled it". C2 has since enabled WAL
-      (`storage/engine.py`), so this is worth running again — this time it actually exercises the
-      mechanism, ideally with one instance mid-re-ingest while the other browses.
+- [x] Open the app **twice** → SQLite doesn't wedge. **Re-tested under WAL, 2026-08-05 — passes.**
+      The first run (2026-08-02, Record pressed, no game running) predated C2, so its result only
+      meant "the contention never happened", not "WAL handled it". This run is against
+      `storage/engine.py`'s WAL + `busy_timeout`, so the mechanism is actually exercised.
 - [ ] Help → **Back up database…** writes a `.db` beside where the user chose, the status line
       reports its size, and the copy opens as a working database. Worth doing **while a re-ingest
       runs** — that is the case C2/C3 exist for.
@@ -699,9 +801,45 @@ first:
 - **Qt platform plugin missing** → app won't start. Fallback: verify on a clean machine; PyInstaller
   Qt hooks normally cover it.
 - **pyqtgraph / zstandard missed** (lazy imports) → app silently ships the fallback. Fallback:
-  explicit hidden imports + a startup self-check that warns if a "real" feature degraded.
+  explicit hidden imports + a startup self-check that warns if a "real" feature degraded —
+  **the self-check is now built (C6, Cycle 3): `src/capabilities.py`.**
 - **pyarrow bloat / Windows DLL-load quirks** (~100 MB+). Fallback: verify Parquet read/write early;
-  worst case a startup capability probe.
+  worst case a startup capability probe — **also covered by `src/capabilities.py`**, with the
+  caveat recorded below.
+
+### The startup capability self-check (C6)
+
+`src/capabilities.py` is Qt-free and only *reports*; what to do about a degraded build is the
+caller's call. `MainWindow` runs it one event-loop turn after the window paints — **before** the
+pipeline-version check, since a build that lost pyqtgraph is worth mentioning before offering a
+multi-minute re-ingest — logs one line per capability on **every** launch, and shows a single
+warning dialog naming the consequences only when something is degraded. Deliberately **no Help-page
+surface**: Help already carries five actions that aren't Help content (PRIORITIES → E13).
+
+Four capabilities are probed: charts (pyqtgraph), capture compression (zstandard), lap traces
+(pyarrow) and the bundled flag SVGs.
+
+**Probe depth is per capability, and that is the design.** A capability is probed by *importing*
+it, because an import is the only thing that catches a module which is present but will not load —
+pyarrow's Windows DLL quirk is the named example, and `find_spec` says yes while the import still
+fails. The single exception is **pyqtgraph**, probed with `find_spec` alone: importing it here
+would undo the laziness that keeps start-up quick, and the regression this module exists for — *a
+bundle that never shipped it* — is visible without importing. **That is what makes C6 the
+prerequisite for C7**, whose entire risk is an `excludes` edit silently dropping pyqtgraph.
+
+Two limits, chosen rather than overlooked:
+
+1. A module *present but broken at import* reads OK for pyqtgraph. Not silent, though — it raises
+   into the log the first time a lap is opened, and that difference is what decided the split.
+2. `traces` can never actually report degraded today: a broken pyarrow kills `main_window`'s module
+   import (`→ storage.laps → trace_files`) before the window exists, so it is a start-up crash
+   caught by `crash.py`, not a silent degrade. The probe earns its place as a log line a tester's
+   report can carry, and stops being vacuous the day that import becomes lazy.
+
+A probe that throws is reported as a **degraded capability**, not dropped — a self-check that can
+take start-up down is worse than no self-check, but one that quietly shortens its own report is
+worse still. `check_capabilities(probes=…)` is injectable so the aggregation is testable without a
+broken environment. Covered by `test/test_capabilities.py`.
 - **Unsigned Windows exe / SmartScreen** "unknown publisher." Fallback: one-folder (fewer flags) +
   documented "More info → Run anyway"; code-signing cert only if it scares testers.
 - **macOS Gatekeeper** (unsigned). Fallback: documented right-click→Open; notarize later if ever.

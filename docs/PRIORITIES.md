@@ -74,9 +74,84 @@ on-disk format change for a field with no consumer.
 reach, the installer, the real auto-updater, and the remaining build-robustness items. Promoted
 above the big UI surfaces deliberately — testers are real, new surfaces are not yet needed.
 
-- C8 Phase 4 (macOS/Linux artifacts, Inno Setup installer + firewall allow-rule, velopack)
-- C5 `threading.excepthook`, C6 startup capability self-check, C7 pyqtgraph bloat trim
-- C4 clean-instance test (Windows Sandbox / second user account)
+*Order confirmed 2026-08-05, with one change from the list as first written.* The listed order put
+C8 — the largest and riskiest — first. It runs **last** instead, and C6 moves ahead of C7:
+
+- C5 `threading.excepthook` — **done 2026-08-05**
+- C6 startup capability self-check — **done 2026-08-05**
+- C7 pyqtgraph bloat trim — **done 2026-08-06.** Was sequenced **after C6, not before.** PACKAGING's own risk register gives the
+  mitigation for "pyqtgraph/zstandard missed → the app silently ships the fallback" as "explicit
+  hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
+  whose failure mode is that silent degrade — so C6 is the instrument that makes C7 verifiable
+  rather than hopeful. Reversed, the trim is done blind.
+- C4 clean-instance test (Windows Sandbox / second user account) — run against a build carrying
+  C5–C7. Not code: a checklist the author executes, producing doc updates only.
+- C8 Phase 4 — see the split below.
+
+**Cycle 3 ships as two releases, not one — decided 2026-08-06.** The remaining items produce two
+different kinds of artifact, and the seam is where that changes:
+
+1. **Release 1 — C7 + F8**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4
+   runs against that published build**: C4 is validation, so it wants a real downloaded artifact
+   rather than a local `dist/` folder.
+2. **Release 2 — C8a + C8b.** Then a **second** clean-instance run, because **C8b changes what
+   "install" means**: a clean-instance test against a zip proves nothing about an installer.
+
+This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8**, added
+2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
+Release 1 on 2026-08-07**: a GitHub Actions outage meant the release PR needed a fresh commit to
+re-run its checks anyway, and F8 is precisely a fix to those checks.
+
+**F8 — the `--check` gate can never fail.** Found while preparing the v0.7.0 release PR.
+`bump_version.check` strips the instruction comment before testing whether the Unreleased section is
+*empty*, but **not** before testing whether it states the re-ingest answer — and that comment
+contains the literal string "Re-ingest needed: yes/no". So `_REINGEST_HINT in body.lower()` was
+always true and the gate had never rejected anything since Phase 3. `release_unreleased` *does*
+strip comments when it builds the release section, so a section with no re-ingest line passed the PR
+gate and then failed `release_notes.py` in the release preflight — **after `tag.yml` had pushed the
+tag**, which is the recovery path PACKAGING documents rather than the cheap PR-time failure it was
+designed to be. The v0.7.0 Unreleased section genuinely had no re-ingest line, and `--check` passed.
+
+**Why the suite never caught it:** `test_bump_version.py`'s fixture used a *stub* comment
+(`<!-- instructions -->`) rather than the real `PLACEHOLDER`, so no test ever exercised the case the
+bug lives in. The regression test uses `PLACEHOLDER` itself — **never a stub**.
+
+**F8 is widened to close F6 as code.** The same `check()` now also requires a `**Known issues**`
+list, with "None" an explicit valid answer (v0.4.0 and v0.4.1 legitimately had nothing to report, and
+a gate with no escape becomes one people work around). F6 had been a P2 *process* item since the plan
+was written and was missed on **v0.4.1 and v0.6.0** — a step that depends on remembering, twice not
+remembered. `release_notes.py` was checked and is **not** affected: it reads a released section,
+whose comments `release_unreleased` has already stripped.
+
+**C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
+- **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
+  the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
+  consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
+  and an unsigned build walking into Gatekeeper.
+- **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
+  PACKAGING's #3 "easy to forget". **Open question to settle before code:** the allow-rule needs
+  elevation, while the clean-machine checklist asserts "launch as a non-admin user" — so it is
+  either a per-user install with no rule, or an elevated install with one.
+- **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
+  self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
+  toolchain that would replace the zip artifact verified across three builds, for a handful of
+  testers whose notify-only path was confirmed working against a real Release on 2026-08-02. It
+  buys the least and risks the most. **It keeps its own P3 row** — closing Cycle 3 does *not* close
+  the C block, and a deferred item with no row reads as a forgotten one.
+
+**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4**, then the E-block
+surfaces (E1/E2, E3, E5) in whatever order they earn.
+
+- A4 Windows light/dark switch leaves text miscoloured — **moved out of Cycle 3, 2026-08-06.** Not
+  for lack of importance: it has shipped as a known issue in every release since v0.3.0. It is
+  cross-surface UI refactoring in 15 files, which shares no review context with build/CI plumbing —
+  putting it beside an installer spec is worse for both. It is also *not* Windows-gated the way C4
+  is: `colorSchemeChanged` fires on Ubuntu too, so most of it is verifiable on the dev box.
+  **Its root cause was misdiagnosed in the docs until 2026-08-06** — see PACKAGING → Phase 1 known
+  issues for the corrected mechanism and the measured scope.
+
+**Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
+surfaces: translating a UI that is still growing means translating it twice.
 
 **Deliberately after Cycle 3:** E1/E2 (Sessions surface + deleted-sessions manager), E3
 (Analytics), E5 (Bug report page). See *Deferred* below for why.
@@ -93,9 +168,9 @@ above the big UI surfaces deliberately — testers are real, new surfaces are no
 | C2 | Enable WAL mode | **done 2026-08-02** | PACKAGING → Data layout & the database |
 | C3 | "Back up database…" via `VACUUM INTO` | **done 2026-08-02** | PACKAGING → Data layout & the database |
 
-Nothing is left in P1. See *Recently closed* for what each item settled — including the fact that
-the "open the app twice" checklist item passed *before* WAL existed, so it wants a re-test that
-actually exercises it.
+Nothing is left in P1. See *Recently closed* for what each item settled. The one loose thread it
+left — the "open the app twice" check having passed *before* WAL existed — is now **closed**: it was
+re-run under WAL on 2026-08-05 and passes.
 
 ## P2 — after P1
 
@@ -104,10 +179,11 @@ actually exercises it.
 | B2 | League capture import from a shared folder | **done 2026-08-04** | ROADMAP → Capture compression; DECISIONS → Storage |
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
-| A4 | Windows light/dark switch leaves text miscoloured | open | PACKAGING → Phase 1 known issues |
+| A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
-| F6 | Carry the CHANGELOG known-issues list forward every release | process | CHANGELOG header comment |
+| F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
+| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **Cycle 3, Release 1** — in flight | see the Cycle 3 plan above |
 
 **E7 is resolved as a question, not as code.** The ranges in `setup_panel._SETUP_SPEC` are
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
@@ -121,10 +197,13 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
-| C5 | `threading.excepthook` for worker threads | PACKAGING → Phase 0 |
-| C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | PACKAGING → Risks |
-| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | PACKAGING → Phase 1 known issues |
-| C8 | Phase 4: macOS/Linux, Inno Setup installer, velopack auto-updater | PACKAGING → Phased plan |
+| C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
+| C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
+| C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
+| C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
+| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
+| C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
 | D4 | True geometric centerline (needs Motion Ex / track width) | DECISIONS → UI |
@@ -135,6 +214,27 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
 | E13 | Move the capture/database actions off Help into their own surface | ROADMAP → Other surfaces |
+| G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
+| G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
+| G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
+blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
+German.
+
+**It splits into a decision and a body of work, and only the decision is urgent.** The
+infrastructure choice is cheap now and expensive to retrofit — every UI string written between now
+and then is written in one style or the other — so the approach is **settled now** (DECISIONS →
+Localization: Qt `tr()` + `QTranslator`, *not* a Python dict) and adopted for new UI code as it is
+written. The **bulk translation waits**, because Sessions (E1), the deleted-sessions manager (E2),
+Analytics (E3) and Bug report (E5) are all still placeholders: translating a UI that is still
+growing means translating it twice. Rough scale of the eventual job — ~363 candidate user-facing
+strings under `src/ui/`, which is also why it is not a hand-maintained dict.
+
+**G3 is deliberately separate from G2.** The user guide is not UI text: it is `docs/USER_GUIDE.md`
+converted to PDF by `release.yml` via pandoc/xelatex. A German guide means a second source document,
+a second pandoc invocation and a second artifact in the release zip — a packaging change, not a
+translation one.
 
 ---
 
@@ -147,12 +247,15 @@ up opportunistically rather than scheduled.
   `GRAND_PRIX` (the 2026 league runs in Grand Prix multiplayer), but the league's *normal* state
   — drivers captured as `"Player"` with telemetry restricted, grouped by race number via
   `roster.member_key` — has never been tested on a real capture. **Plan:** the author sets their
-  own online name/ID to restricted at the **next race (~mid-August 2026)**. Deliberately *not*
-  asking other members to change their settings, since they'd risk leaving them restricted
-  afterwards. Season-critical if wrong (standings), so verify before trusting a full season's
-  table.
+  own online name/ID to restricted at the next race, **scheduled for ~2026-08-12** (confirmed
+  2026-08-05). Deliberately *not* asking other members to change their settings, since they'd risk
+  leaving them restricted afterwards. Season-critical if wrong (standings), so verify before
+  trusting a full season's table. **When it runs, capture the session and check it against
+  `LeagueRoster.session_keys` before assuming the standings are right** — a wrong grouping shows up
+  as two members merged into one row, or one member split across two.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
-  rendered map against the in-game track map when recording the next sessions. Note that absolute
+  rendered map against the in-game track map when recording the next sessions — which is the same
+  ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
@@ -161,6 +264,74 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C7 — pyqtgraph bloat trim, and what it found instead.** Done 2026-08-06; the third item of
+  Cycle 3. `pyqtgraph.examples` — a demo app with its own `__main__` and ~40 scripts, unreachable
+  from here — is filtered out of both `hiddenimports` and `collect_data_files`, with an `excludes`
+  backstop. **Deliberately one subpackage:** `opengl` / `canvas` / `flowchart` / `console` /
+  `multiprocess` are reachable from pyqtgraph's own `__init__` and its lazy attribute machinery, so
+  trimming them ships a build that works until one specific widget is opened.
+  **The honest result: 577 MB → 576 MB, 0.17 %.** It ships on hygiene, not size, and carries **no
+  CHANGELOG entry** — a release note would overstate it. The finding that mattered is where the
+  weight actually is: **scipy + libs 73 MB, pandas 18 MB, pillow 14 MB — ~105 MB (18 %) of
+  transitive dependencies this app does not use**, now filed as **C9** and recorded with the full
+  `_internal` breakdown in PACKAGING so the hunt is not re-run.
+  **Two verification traps, both worth not re-learning.** Pure-Python modules live in the **PYZ**,
+  not on disk, so a file search proves nothing; and `Analysis-00.toc` records the `Analysis()`
+  configuration, so it *necessarily* still matches once the exclude exists — a guaranteed false
+  positive that cost a round-trip here. `PYZ-00.toc` and `COLLECT-00.toc` are the lists that decide
+  what ships (0 examples, 384 pyqtgraph modules intact).
+  **C6 was the instrument, and was deliberately not trusted alone.** The built app logs
+  `capability charts: ok`, but that probe is `find_spec`-based and cannot prove pyqtgraph *renders* —
+  so a lap detail page was opened in the frozen bundle and the traces and track map confirmed. Done
+  on **Linux**, not Windows, by pointing the bundle at a scratch copy of the dev data with
+  `F1TELEMETRY_DATA_DIR`; the same run also gave the first confirmation that `resource_path`
+  resolves through `_MEIPASS` (89 flag assets found under `_internal/`).
+- **C6 — startup capability self-check.** Done 2026-08-05; the second item of Cycle 3, and the
+  prerequisite for C7. `src/capabilities.py` (Qt-free) probes four things — charts (pyqtgraph),
+  capture compression (zstandard), lap traces (pyarrow) and the bundled flag SVGs — and returns a
+  frozen `Capability` each. `MainWindow` logs all four on every launch and dialogues only when
+  something is degraded, deferred a turn like the pipeline check and ordered **before** it: a build
+  that lost pyqtgraph is worth saying before offering a multi-minute re-ingest. **No Help-page
+  surface, deliberately** — Help already hosts five actions that aren't Help content (E13).
+  **The one decision worth not re-litigating: probe depth is per capability.** A capability is
+  probed by *importing* it, because only an import catches a module that is present but won't load
+  (pyarrow's Windows DLL quirk — `find_spec` says yes while the import fails). pyqtgraph is the
+  exception, probed by `find_spec` alone, because importing it would undo the laziness that keeps
+  start-up quick — and the regression this exists for, *a bundle that never shipped it*, needs no
+  import to see. **That is precisely what C7 risks**, which is why the order was reversed.
+  **Two limits, chosen not discovered:** a module present-but-broken-at-import reads OK for
+  pyqtgraph (not silent — it raises into the log on the first lap opened, which is what decided the
+  split); and `traces` can never actually report degraded today, because a broken pyarrow kills
+  `main_window`'s import before the window exists, making it a start-up crash rather than a silent
+  degrade. That probe earns its place as a log line a tester's report carries, and stops being
+  vacuous if the `LapStore` import ever goes lazy.
+  A probe that throws is reported as a **degraded capability**, not dropped — failing loud beats a
+  self-check that quietly shortens its own report. Covered by `test/test_capabilities.py`, whose
+  logging cases are real regression tests: `assertLogs` formats each record, so a reversed `%s`
+  fails the suite instead of vanishing into logging's internal error handler. One did, on the way.
+- **C5 — `threading.excepthook`, and the crash-dialog thread bug it uncovered.** Done 2026-08-05;
+  the first item of Cycle 3. The hook itself is nearly a no-op today and that is worth knowing
+  rather than rediscovering: **`threading.excepthook` never fires for a `QThread`** (the
+  interpreter calls it from `Thread._bootstrap_inner`, which QThread does not go through), and
+  every worker here is a QThread. It is a net for future bare-`Thread` work and for third-party
+  threads.
+  **The defect found while scoping it is the substance.** Every worker's `finally` sits *outside*
+  its `except` — `IngestWorker`, `ReingestWorker`, `RelocateWorker` and `ImportWorker` all dispose
+  stores there — so an exception from `store.close()` escapes `run()` entirely, reaches
+  `sys.excepthook` via PySide6, and had `crash._show_dialog` constructing a `QMessageBox` **on the
+  worker thread**. Building a QWidget off the GUI thread is undefined behaviour in Qt and can abort
+  the process: the crash handler was able to convert a survivable error into a hard crash.
+  **Three decisions worth not re-litigating.** `_report` checks the thread and shows the dialog
+  *directly* when already on the GUI thread — a start-up crash happens before `app.exec()`, so a
+  uniformly-queued call would never be delivered. Off-thread it emits through a queued-connection
+  `QObject` relay, built by `install_excepthook` on the GUI thread so the object *lives* there.
+  And **only strings cross the boundary**, never the exception — its traceback would pin worker
+  frames alive across threads.
+  Covered by `test/test_crash.py` (Qt-free): both hooks log and chain to the previous hook,
+  `KeyboardInterrupt` / `SystemExit` pass through unlogged, and `_report` builds no dialog when
+  there is no GUI thread. **Verified by hand through `UpdateCheckWorker`** (Help → Check for
+  updates), whose `result_ready.emit` is already outside its try/except — no capture, database or
+  recording needed to make an exception escape a worker thread.
 - **B2 / B3 — league capture import, and the one field `recorded_by` became.** Done 2026-08-04;
   the last of Cycle 2. *Help → Import captures…* walks a chosen folder, copies anything new into
   the local captures folder and ingests it. Read and write are split like the prune, so the count
@@ -276,9 +447,10 @@ up opportunistically rather than scheduled.
   an ingest — one read transaction that neither blocks the writer nor tears, which is the entire
   reason C3 pairs with C2. It is **not** the "Open database" action the project rules out: it
   writes a copy to a path the user chose and never exposes the live file.
-  **Leaves behind:** the Phase-1 "open the app twice" checklist item passed *before* WAL existed,
-  so its result means "the contention never happened", not "WAL handled it". PACKAGING now asks for
-  a re-test.
+  **The loose end it left is closed:** the Phase-1 "open the app twice" checklist item had passed
+  *before* WAL existed, so its result meant "the contention never happened", not "WAL handled it".
+  Re-run under WAL on **2026-08-05 — passes**, so the mechanism itself is now proven rather than
+  merely un-triggered. PACKAGING's checklist item is ticked.
 - **A1 — canonical track-map cache invalidation.** Done 2026-08-02.
   `TrackLayoutProvider.invalidate()` clears the whole cache (per-key would be wrong: an ingest can
   touch any weekend, a re-ingest touches all of them), reached through
@@ -317,7 +489,8 @@ up opportunistically rather than scheduled.
   `protocol/reference.py` (97 entries). The "partial, ~11 entries" claim was stale in three files
   and is corrected.
 - **The "open the app twice" check.** Run on both Windows instances with Record pressed and no
-  game running — nothing wedged. See C2 above for what this does *not* prove.
+  game running — nothing wedged. That run predated WAL, so it proved only that the contention never
+  happened; **re-run under WAL on 2026-08-05 and passes**, which does prove the mechanism. Closed.
 - **A2 / F1 / F2 / F4 and the stale-doc sweep.** This commit.
 
 ## Deferred, with reasons

@@ -667,6 +667,54 @@ what would trigger revisiting it.
   Car Status) and reads it in `normalize_tyre_context` / `normalize_car_damage` at the line. Pre-2c rows
   load with zero-temp defaults; a re-ingest populates them.
 
+## Localization
+
+*Decided 2026-08-06, before any string was touched. The work itself is PRIORITIES → G block,
+scheduled for Cycle 5; the approach is settled now because it is cheap to choose and expensive to
+retrofit — every UI string written between now and then is written in one style or the other.*
+
+**Why at all:** the league is Swiss and most members would rather read German. English stays the
+source language and the fallback.
+
+### Qt's `tr()` + `QTranslator`, not a Python dictionary of strings
+
+A Python module mapping keys to translated strings was considered first — no build step, plain
+Python to edit, trivially testable — and **rejected**. The deciding fact is **standard dialogs**.
+
+This app is built on `QMessageBox`: import, relocate, prune, backup, re-ingest, the crash dialog,
+the capability warning. Their buttons — OK / Cancel / Yes / No / Save / Open — are drawn by Qt
+itself, and **Qt ships translations for them** (`qtbase_de.qm`). Install that through
+`QTranslator` and they are German for free. A Python dict cannot reach them: you would get German
+body text beside English buttons in *every dialog in the app*, which is precisely the
+half-translated look that reads as unfinished, and the only workaround is replacing every standard
+button by hand.
+
+Two further reasons, both concrete here rather than general:
+
+- **Plural forms.** This app counts constantly — "N of M sessions", "N captures found", "capture i
+  of n". `tr("%n lap(s)", "", n)` handles that; a dict needs a hand-rolled plural rule per language.
+- **Extraction.** `pyside6-lupdate` finds every `tr()` call, so a string cannot be silently
+  forgotten. At ~363 candidate user-facing strings under `src/ui/`, "remember to add it to the
+  dict" is not a workable rule.
+
+**Accepted costs, chosen not discovered:** `pyside6-lupdate` / `lrelease` join the build; the
+`.qm` files ship as bundled assets through `resource_path` (the same pattern as the flag SVGs, and
+`capabilities.py` already gives the probe pattern for confirming a bundled asset actually shipped);
+and translations are edited as `.ts` XML in Qt Linguist rather than as a Python file in the editor.
+
+### A glossary is required before translation starts
+
+Some terms stay English on purpose — *Session*, *Season*, *Lap* are the vocabulary the game and the
+league already use in English. **That list must be written down before G2 begins.** Left implicit it
+gets re-litigated string by string and lands inconsistently, which is worse than either choice made
+uniformly.
+
+### The locale is `de-CH`, not `de`
+
+Swiss Standard German **does not use ß** — always `ss` (*Strasse*, not *Straße*). Tagging the
+translation `de` and fixing it later means re-reading every translated string, so the tag is chosen
+up front. `de-CH` falls back to `de` for anything unsupplied, so nothing is lost by being specific.
+
 ## Conventions
 - **Module-level constants use a single leading underscore.** A double underscore name-mangles
   inside class bodies and has caused a `NameError`. Reserve `__` for genuinely mangled class

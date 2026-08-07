@@ -76,7 +76,8 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
     docs/                       # PRIORITIES (what to work on next), ROADMAP, ARCHITECTURE,
                                 #   DECISIONS, TELEMETRY_NOTES, PACKAGING, USER_GUIDE
     src/
-      version.py, paths.py, logging_setup.py, crash.py, update_check.py  # packaging + update check
+      version.py, paths.py, logging_setup.py, crash.py, capabilities.py,  # packaging, startup
+        update_check.py                                                   #   self-check + updates
       ingest/    recording.py (.f1cap read/write), recorder.py, sources.py,
                  archive.py (gzip/zstd codec dispatch + HashingReader), inspect.py (CLI)
       protocol/  base.py, header.py, enums.py, reference.py, registry.py, parser.py,

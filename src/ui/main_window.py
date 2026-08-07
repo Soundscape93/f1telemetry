@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from f1telemetry.src.capabilities import log_capabilities
+
 from .workers import ImportWorker, IngestWorker, RecorderWorker, ReingestWorker, RelocateWorker
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
@@ -102,9 +104,13 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self._build_central())
 
-        # Deferred one event-loop turn so the window is painted before any dialog appears - and
-        # so it runs after every store's constructor has done create_all + ensure_schema (the
-        # silent additive migration must precede the pipeline-version comparison).
+        # Two deferred checks, in this order: what this build can *do*, then whether its stored
+        # data needs rebuilding. A build that lost pyqtgraph is worth saying before offering a
+        # multi-minute re-ingest. Both wait one event-loop turn so the window is painted before
+        # any dialog appears - and the pipeline one must additionally run after every store's
+        # constructor has done create_all + ensure_schema (the silent additive migration must
+        # precede the pipeline-version comparison).
+        QTimer.singleShot(0, self._check_capabilities)
         QTimer.singleShot(0, self._check_pipeline_version)
 
     # --- layout ------------------------------------------------------------
@@ -304,6 +310,35 @@ class MainWindow(QMainWindow):
             self._seasons_view.refresh()
         elif current is self._laps_view:
             self._laps_view.refresh()
+
+    def _check_capabilities(self) -> None:
+        """Log what this build can do, and say so once when a piece is missing.
+        
+        A packaged build can silently lose a lazily-imported dependency or a bundled asset
+        (docs/PACKAGING.md "Risks & fallbacks"); the user then meets the fallback with no
+        explanation and reports it as a bug in the feature. Logged every launch, dialogued only
+        wehen something is actually degraded: the log line is what a tester report needs, the 
+        dialog is what stops a silent downgrade going unnoticed.
+        """
+        from ..capabilities import check_capabilities, degraded, log_capabilities
+
+        capabilities = check_capabilities()
+        log_capabilities(capabilities)
+        missing = degraded(capabilities)
+        if not missing:
+            return
+
+        details = "\n\n".join(f"{c.label}: {c.consequence}" for c in missing)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Some features are unavailable")
+        box.setText("This build is missing part of what it needs, so some features won't work.")
+        box.setInformativeText(
+            f"{details}\n\nEverything else works normally. Please report this along with the "
+            "newest file from your logs folder (Help -> Open logs folder)."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     # --- pipeline version / guieded re-ingest ------------------------------------------------------------
 

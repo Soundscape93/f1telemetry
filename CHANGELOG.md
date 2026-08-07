@@ -16,7 +16,40 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 <!-- One bullet per user-visible change, plus the mandatory line
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
+     **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.7.0 — 2026-08-07
+
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged at 2 and nothing about how captures are
+read or stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- If a build is missing something it needs — the charting library behind the telemetry graphs and
+  track map, the compression library that reads and writes captures, or the flag icons — the app
+  now tells you on startup and names exactly what won't work, instead of quietly showing you the
+  fallback and leaving you to report it as a broken feature. Everything else keeps working. The
+  answer is written to the log on **every** launch either way, healthy or not, so it's already in
+  the log file you send with a bug report.
+
+### Fixed
+- An unexpected internal error during a background job — recording, reading captures, importing,
+  or searching for moved captures — now reports itself properly instead of risking taking the app
+  down with it. The error dialog is always opened from the main window; previously a job could try
+  to open it from its own background thread, which Windows can turn into an outright crash. Errors
+  raised in background work are also written to the log with the name of the job that raised them,
+  so a log you send with a bug report says which one it was.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 ## v0.6.0 — 2026-08-05
 
