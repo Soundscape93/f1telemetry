@@ -91,13 +91,37 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
 **Cycle 3 ships as two releases, not one — decided 2026-08-06.** The remaining items produce two
 different kinds of artifact, and the seam is where that changes:
 
-1. **Release 1 — C7**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4 runs
-   against that published build**: C4 is validation, so it wants a real downloaded artifact rather
-   than a local `dist/` folder.
+1. **Release 1 — C7 + F8**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4
+   runs against that published build**: C4 is validation, so it wants a real downloaded artifact
+   rather than a local `dist/` folder.
 2. **Release 2 — C8a + C8b.** Then a **second** clean-instance run, because **C8b changes what
    "install" means**: a clean-instance test against a zip proves nothing about an installer.
 
-This is a release split, not a cycle split — the cycle is still C4/C7/C8a/C8b.
+This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8**, added
+2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
+Release 1 on 2026-08-07**: a GitHub Actions outage meant the release PR needed a fresh commit to
+re-run its checks anyway, and F8 is precisely a fix to those checks.
+
+**F8 — the `--check` gate can never fail.** Found while preparing the v0.7.0 release PR.
+`bump_version.check` strips the instruction comment before testing whether the Unreleased section is
+*empty*, but **not** before testing whether it states the re-ingest answer — and that comment
+contains the literal string "Re-ingest needed: yes/no". So `_REINGEST_HINT in body.lower()` was
+always true and the gate had never rejected anything since Phase 3. `release_unreleased` *does*
+strip comments when it builds the release section, so a section with no re-ingest line passed the PR
+gate and then failed `release_notes.py` in the release preflight — **after `tag.yml` had pushed the
+tag**, which is the recovery path PACKAGING documents rather than the cheap PR-time failure it was
+designed to be. The v0.7.0 Unreleased section genuinely had no re-ingest line, and `--check` passed.
+
+**Why the suite never caught it:** `test_bump_version.py`'s fixture used a *stub* comment
+(`<!-- instructions -->`) rather than the real `PLACEHOLDER`, so no test ever exercised the case the
+bug lives in. The regression test uses `PLACEHOLDER` itself — **never a stub**.
+
+**F8 is widened to close F6 as code.** The same `check()` now also requires a `**Known issues**`
+list, with "None" an explicit valid answer (v0.4.0 and v0.4.1 legitimately had nothing to report, and
+a gate with no escape becomes one people work around). F6 had been a P2 *process* item since the plan
+was written and was missed on **v0.4.1 and v0.6.0** — a step that depends on remembering, twice not
+remembered. `release_notes.py` was checked and is **not** affected: it reads a released section,
+whose comments `release_unreleased` has already stripped.
 
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
 - **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
@@ -158,7 +182,8 @@ re-run under WAL on 2026-08-05 and passes.
 | A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
-| F6 | Carry the CHANGELOG known-issues list forward every release | process | CHANGELOG header comment |
+| F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
+| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **Cycle 3, Release 1** — in flight | see the Cycle 3 plan above |
 
 **E7 is resolved as a question, not as code.** The ranges in `setup_panel._SETUP_SPEC` are
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range

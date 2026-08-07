@@ -33,9 +33,11 @@ UNRELEASED_HEADING = "## Unreleased"
 PLACEHOLDER = (
     "<!-- One bullet per user-visible change, plus the mandatory line\n"
     "     **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.\n"
+    "     **Known issues** - carry the list forward; `None` is a valid answer.\n"
     "     Merging a PR labelled major/minor/patch turns this section into a release. -->"
 )
 _REINGEST_HINT = "re-ingest"
+_KNOWN_ISSUES_HINT = "**known issues**"
 
 
 def next_version(current: str, level: str) -> str:
@@ -67,16 +69,33 @@ def check(text: str) -> list[str]:
 
     Enforced on the pull request (ci.yml) rather than only at release time, so the author finds
     out while they are still writing the change, not after the merge.
+
+    **Every test reads the comment-stripped body, and that is the whole point.** The instruction
+    placeholder quotes the exact phrases these checks look for, so testing the raw body makes a
+    check unfailable. That is what happened to the re-ingest gate from Phase 3 until v0.7.0: the
+    emptiness test stripped comments, the re-ingest test did not, and the placeholder's own
+    "**Re-ingest needed: yes/no**" satisfied it every time. `release_unreleased` *does* strip
+    comments, so a section with no re-ingest line passed here and then failed `release_notes.py`
+    in the release preflight - after `tag.yml` had already pushed the tag. Add a check here only
+    against `content`, never against `body`.
+
+    All problems are returned, not just the first, so both can be fixed in one pass.
     """
     if UNRELEASED_HEADING not in text:
         return [f"CHANGELOG.md has no '{UNRELEASED_HEADING}' section."]
-    body = unreleased_body(text)
-    if not _strip_comments(body).strip():
-        return ["The Unreleased section is empty - describe this change for users & testers."]
-    if _REINGEST_HINT not in body.lower():
-        return ["The Unreleased section must state '**Re-ingest needed: yes/no**' "
-                 "(yes whenever PIPELINE_VERSION moved)."]
-    return []
+    content = _strip_comments(unreleased_body(text))
+    if not content.strip():
+        return ["The Unreleased section is empty, describe this change for users & testers."]
+
+    problems = []
+    if _REINGEST_HINT not in content.lower():
+        problems.append("The Unreleased section must state '**Re-ingest needed: yes/no**' "
+                        "(yes whenever PIPELINE_VERSION moved).")
+    if _KNOWN_ISSUES_HINT not in content.lower():
+        problems.append("The Unreleased section must carry a '**Known issues**' list - the app is "
+                        "partial, so testers need to know what is already known in order to report "
+                        "what is new. Nothing to report is still an answer: write 'None'.")
+    return problems
 
 
 def release_unreleased(text: str, version: str, today: dt.date) -> str:

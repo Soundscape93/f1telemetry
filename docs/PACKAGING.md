@@ -326,8 +326,22 @@ the self-updater is packaging Phase 4.)*
   `pull_request.head.sha`, since the default `pull_request` checkout is the *merge* commit, whose
   subject is never `chore(release):`.
 - Notes for friends must state **"re-ingest needed? yes/no"** and list known issues (the app is
-  partial). This is enforced twice: `bump_version.py --check` on the PR (via `ci.yml`, only for
-  labelled PRs) and `release_notes.py` in the release preflight.
+  partial). Two gates enforce this, and they do **not** check the same things:
+  - **`bump_version.py --check`** on the PR (via `ci.yml`, only for labelled PRs) reads the
+    **Unreleased** section and requires *both* the re-ingest answer and a `**Known issues**` list
+    ("None" is a valid answer). This is the cheap failure — it fires while the author is still
+    writing the change.
+  - **`release_notes.py`** in the release preflight reads the **released** section and requires the
+    re-ingest answer. This one fires *after* `tag.yml` has pushed the tag, so it is the expensive
+    failure and the reason the first gate has to work.
+
+  **Corrected 2026-08-07 (PRIORITIES → F8): the first gate did not work.** From Phase 3 until
+  v0.7.0, `check()` stripped the instruction comment before testing whether the section was *empty*
+  but not before testing for the re-ingest answer — and the comment quotes that very phrase, so the
+  test was unconditionally satisfied. The claim "enforced twice" was false: it was enforced once, at
+  the worst moment. Both tests now read the comment-stripped body. **If you add a check here, test
+  it against `content`, never `body`** — and write its regression test with the real `PLACEHOLDER`,
+  not a stub comment, which is why the suite missed this for four releases.
 - **Local checks** before merging: `python packaging/bump_version.py --check` (silence = the
   Unreleased section is release-ready) and `python packaging/check_version.py` (no argument — the two
   version files agree). The tag forms of both only make sense *after* a bump has happened, or if you

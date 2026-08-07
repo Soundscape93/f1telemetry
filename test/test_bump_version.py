@@ -32,6 +32,10 @@ _READY = """# Changelog
 
 **Re-ingest needed: no**
 
+**Known issues**
+
+- None.
+
 ## v0.1.0 — 2026-01-01
 
 - The first one.
@@ -58,11 +62,42 @@ class CheckTest(unittest.TestCase):
         text = f"# Changelog\n\n## Unreleased\n\n{bump_version.PLACEHOLDER}\n"
         self.assertTrue(bump_version.check(text))
 
-    def test_missing_reingest_line_is_rejected(self):
-        text = "# Changelog\n\n## Unreleased\n\n- Something changed.\n"
+    def test_the_real_placeholder_does_not_satisfy_the_checks(self):
+        """The regression test for F8, and the reason it went unnoticed for four releases.
+
+        Every check reads the comment-stripped body, because PLACEHOLDER quotes the very phrases
+        they look for. The old suite missed this because its fixture used a stub comment
+        (``<!-- instructions -->``) rather than the real placeholder, so nothing ever exercised
+        the case. Use PLACEHOLDER here, never a stub.
+        """
+        text = (f"# Changelog\n\n## Unreleased\n\n{bump_version.PLACEHOLDER}\n\n"
+                "- Something visible changed.\n")
         problems = bump_version.check(text)
-        self.assertTrue(problems)
+        self.assertEqual(2, len(problems), f"both gates must fire, got: {problems}")
+
+    def test_missing_reingest_line_is_rejected(self):
+        text = ("# Changelog\n\n## Unreleased\n\n- Something changed.\n\n"
+                "**Known issues**\n\n- None.\n")
+        problems = bump_version.check(text)
+        self.assertEqual(1, len(problems))
         self.assertIn("Re-ingest", problems[0])
+
+    def test_missing_known_issues_list_is_rejected(self):
+        text = "# Changelog\n\n## Unreleased\n\n- Something changed.\n\n**Re-ingest needed: no**\n"
+        problems = bump_version.check(text)
+        self.assertEqual(1, len(problems))
+        self.assertIn("Known issues", problems[0])
+
+    def test_none_is_a_valid_known_issues_answer(self):
+        """A release with nothing new to report must not be blocked - v0.4.0 and v0.4.1 were
+        legitimately in that position. Otherwise the gate becomes something to work around."""
+        text = ("# Changelog\n\n## Unreleased\n\n- Something changed.\n\n"
+                "**Re-ingest needed: no**\n\n**Known issues**\n\n- None.\n")
+        self.assertEqual([], bump_version.check(text))
+
+    def test_the_live_changelog_passes(self):
+        """The gate must not reject the file it is about to gate."""
+        self.assertEqual([], bump_version.check(bump_version.CHANGELOG.read_text(encoding="utf-8")))
 
 
 class ReleaseUnreleasedTest(unittest.TestCase):
