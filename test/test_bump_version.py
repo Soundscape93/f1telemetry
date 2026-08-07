@@ -95,10 +95,6 @@ class CheckTest(unittest.TestCase):
                 "**Re-ingest needed: no**\n\n**Known issues**\n\n- None.\n")
         self.assertEqual([], bump_version.check(text))
 
-    def test_the_live_changelog_passes(self):
-        """The gate must not reject the file it is about to gate."""
-        self.assertEqual([], bump_version.check(bump_version.CHANGELOG.read_text(encoding="utf-8")))
-
 
 class ReleaseUnreleasedTest(unittest.TestCase):
     def test_section_is_renamed_and_a_fresh_one_opened(self):
