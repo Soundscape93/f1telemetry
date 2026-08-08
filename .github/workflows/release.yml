@@ -233,7 +233,7 @@ jobs:
         working-directory: f1telemetry/dist/f1telemetry
         run: |
           for item in f1telemetry _internal USER_GUIDE.pdf roster_template.csv LICENSE NOTICE.md; do
-            { -e "$item" ] || (echo "missing from the bundle: $item"; exit 1); }
+            [ -e "$item" ] || { echo "missing from the bundle: $item"; exit 1; }
           done
 
       # -C dist so t he archive holds f1telemetry/... rather than the full path.
