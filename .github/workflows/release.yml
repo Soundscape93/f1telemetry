@@ -208,7 +208,7 @@ jobs:
           # as a directory in the output path - same sanitising both archive steps already do.
           $safe = $env:TAG -replace '/', '-'
           & $iscc /Qp `
-            "/DMyAppVersion=$version" `
+            "/DAppVersion=$version" `
             "/DBundleDir=$((Resolve-Path dist\f1telemetry).Path)" `
             "/DOutputDir=$((Resolve-Path dist).Path)" `
             "/DOutputBaseFilename=f1telemetry-${safe}-windows-x64-setup" `
@@ -219,11 +219,11 @@ jobs:
         working-directory: f1telemetry/dist
         shell: pwsh
         run: |
-          $setup = Get-ChildItelm -Filter "*-setup.exe"
+          $setup = @(Get-ChildItem -Filter "*-setup.exe")
           if ($setup.Count -ne 1) { throw "expected exactly one installer, found $($setup.Count)" }
-          # A truncated of empty ISCC output would otherwise sail trough as a valid Release asset.
-          if ($setup.Length -lt 50MB) { throw "installer is only $($setup[0].Length) bytes - the bundle is ~250 MB, so this did not package it" }
-          Write-Host "installer is $($setup[0].Name) ($([math]::round($setup[0].Length / 1MB)) MB)"
+          # A truncated or empty ISCC output would otherwise sail through as a valid Release asset.
+          if ($setup[0].Length -lt 50MB) { throw "installer is only $($setup[0].Length) bytes - the bundle is ~250 MB, so this did not package it" }
+          Write-Host "installer is $($setup[0].Name) ($([math]::Round($setup[0].Length / 1MB)) MB)"
 
       # 7-Zip is preinstalled on the runner and is minutes faster than Compress-Archive on a
       # bundle this size (thousands of files, ~250 MB).

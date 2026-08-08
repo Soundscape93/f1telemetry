@@ -17,7 +17,7 @@ from f1telemetry.src.ingest.sources import LiveUDPSource
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ISS = _REPO_ROOT / "packaging" / "installer" / "f1telemetry.iss"
 _SPEC = _REPO_ROOT / "packaging" / "f1telemetry.spec"
-
+_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release.yml"
 
 def _define(text: str, name: str) -> str:
     """The value of an Inno ``#define NAME "value"`` line."""
@@ -69,6 +69,26 @@ class InstallerScriptTest(unittest.TestCase):
         """The invariant C8b must not break: a postinstall launch would run the app as ADMIN and
         create the data root in the wrong user profile."""
         self.assertNotIn("postinstall", self.text)
+
+
+class InstallerWorkflowTest(unittest.TestCase):
+    """The .iss and release.yml agree about define names, or the build fails 10 CI-minutes in."""
+
+    def test_every_required_define_is_passed_by_the_workflow(self):
+        iss = _ISS.read_text(encoding="utf-8")
+        workflow = _WORKFLOW.read_text(encoding="utf-8")
+
+        # A define is *required* when its #ifndef block raises #error rather than defaulting.
+        required = {
+            name for name, body in re.findall(
+                r"^#ifndef\s+(\w+)\s*\n(.*?)^#endif", iss, re.MULTILINE | re.DOTALL)
+            if "#error" in body
+        }
+        self.assertTrue(required, "no required defines found - did the guard block change shape?")
+
+        passed = set(re.findall(r"/D(\w+)=", workflow))
+        self.assertEqual(required - passed, set(),
+                         f"release.yml never passes: {sorted(required - passed)}")
 
 
 if __name__ == "__main__":
