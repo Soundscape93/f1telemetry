@@ -169,16 +169,85 @@ jobs:
       - name: Zip the build
         working-directory: f1telemetry/dist
         shell: pwsh
-        run: 7z a -tzip "f1telemetry-${env:TAG}-windows-x64.zip" f1telemetry
+        run: |
+          $safe = $env:TAG -replace '/', '-'
+          7z a -tzip "f1telemetry-${safe}-windows-x64.zip" f1telemetry
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-zip
           path: f1telemetry/dist/*.zip
+  
+  # Best-effort Linux artifact (PRIORITIES C8a). Deliberately a tarball, not an AppImage:
+  # A .tar.gz rather than a zip because zip does not preservere the executable bit, so a zip
+  # would need a chmod +x before the binary would run at all.
+  # KNOWN LIMIT: do not file as a bug: a PyInstaller bundle links against the glibc of the machine
+  # that built it, so this artifact needs a distro at least as new as the runner's Ubuntu. Building
+  # for older distros means an older container, which is not worth it for a best-effort artifact.
+  linux-build:
+    runs-on: ubuntu-latest
+    needs: [preflight, guide-pdf]
+    steps:
+      - name: Check out into a folder named f1telemetry
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: f1telemetry
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      
+      - name: Install the app + PyInstaller
+        working-directory: f1telemetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[package]"
+          # Qt needs these to link at build time; the runner image does ntot carry them all.
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1
+      
+      - name: Build the one-folder bundle
+        working-directory: f1telemetry
+        run: pyinstaller packaging/f1telemetry.spec --noconfirm
+
+      # Beside the binary, NOT inside _internal/ - paths.app_dir() resolves here, and the Help 
+      # page's "Open user guide" / "Licences & notices" actions read from it.cancel-timeout-minutes: 
+      - name: Add the user guide beside the binary
+        uses: actions/download-artifact@v4
+        with:
+          name: user-guide-pdf
+          path: f1telemetry/dist/f1telemetry
+
+      - name: Add the roster template, licence and notices beside the binary
+        working-directory: f1telemetry
+        run: cp docs/roster_template.csv LICENSE NOTICE.md dist/f1telemetry/
+      
+      # same set the the Windows job checks. LICENSE + NOTICE.md are an LGPL v3 obligation for the bundled
+      # Qt, so a missing one must fail the build rather than ship quietly.
+      - name: Sanity-check the bundle
+        working-directory: f1telemetry/dist/f1telemetry
+        run: |
+          for item in f1telemetry _internal USER_GUIDE.pdf roster_template.csv LICENSE NOTICE.md; do
+            [ e "$item" ] || (echo "missing from the bundle: $item" && exit 1)
+          done
+
+      # -C dist so t he archive holds f1telemetry/... rather than the full path.cancel-timeout-minutes: 
+      - name: Tar the build
+        working-directory: f1telemetry
+        run: |
+          # On a no-tag workflow_dispatch, TAG is the branch name - and branch names contain
+          # slashes, which would be read as a directory in the output path. Only bites on dispatch
+          # test runs; a real release passes a v-tag with no slash.
+          safe="${TAG//\//-}"
+          tar -czf "dist/f1telemetry-${safe}-linux-x64.tar.gz" -C dist f1telemetry
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: f1telemetry/dist/*.tar.gz
 
   release:
     runs-on: ubuntu-latest
-    needs: [guide-pdf, windows-build]
+    needs: [guide-pdf, windows-build, linux-build]
     if: inputs.tag != '' || github.ref_type == 'tag'
     permissions:
       contents: write            # creating the Release
@@ -198,4 +267,5 @@ jobs:
             --title "F1 Telemetry $TAG" \
             --notes-file artifacts/release-notes/notes.md \
             artifacts/windows-zip/*.zip \
+            artifacts/linux-tarball/*.tar.gz \
             artifacts/user-guide-pdf/USER_GUIDE.pdf
