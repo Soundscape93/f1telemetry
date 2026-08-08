@@ -217,6 +217,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | ID | Item | Detail in |
 |---|---|---|
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
+| A6 | Recorder observability: first-datagram source IP:port, periodic counts, total at stop | **new 2026-08-08**; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
@@ -239,6 +240,16 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
 | G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**A6, added 2026-08-08, and what earned it.** Between `listening on 0.0.0.0:20777` and a finished
+capture, the recorder says **nothing** — so "it isn't recording" cannot be told apart from "nothing
+is being sent" without reaching for `pktmon`, which is exactly what C8b's clean-machine run had to
+do to disprove a firewall theory that was never true. Wanted: the **source IP:port of the first
+datagram** (proves delivery *and* names the sending device), a **periodic count** while recording,
+and a **total at stop**; optionally parse failures counted separately from receives, so "arriving
+but not understood" is distinguishable from "not arriving". Deliberately **not** folded into C8b —
+recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
+both are about what the recording path does and does not report.
 
 **The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
 blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
@@ -327,6 +338,19 @@ up opportunistically rather than scheduled.
   classified as *Public* receives nothing with no error. And there is **no "launch now" checkbox** —
   the installer is elevated, so a post-install launch would hand the app an admin token and create
   the data root in the wrong profile on its very first run, disproving the invariant immediately.
+  **One defect the clean-machine run found, fixed here rather than documented around:** uninstalling
+  with the app **open** deleted the documents beside the exe but left `f1telemetry.exe` and
+  `_internal` behind — a half-removed install, because Windows will not remove a running executable
+  or its loaded DLLs. `CloseApplications=yes` covers Setup but not the uninstaller, which is itself
+  holding `{app}`. An `InitializeUninstall` guard now refuses with Retry/Cancel; **that hook is the
+  point — returning `False` aborts before anything is removed**, so cancelling leaves the install
+  exactly as it was.
+  **And one that was chased and disproved:** the installed build appeared not to record while the
+  zip did. The rule is provably correct (`verbose` shows the right program, port and profiles), the
+  bind logs, there is one listener and no Block rule, and a controlled re-run recorded fine — the
+  first failure was **test state**, the game not sending. Two traps recorded in PACKAGING so they
+  are not re-walked: **`pktmon` is an observer and cannot fix a firewall**, and **`Domain,Private` is
+  a superset of `Private`, not a mismatch**. Nothing was changed as a result; it produced **A6**.
   **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
   `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
   `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule

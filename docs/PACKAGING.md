@@ -547,6 +547,20 @@ is compiled by `release.yml`'s `windows-build` job and published as
   escape hatch that de-risked C8a and F9. Ordering it after the sanity-check means the installer can
   only ever package a bundle already proven to carry the guide, notices, licence and template.
 
+**A seventh, found by the clean-machine run: the uninstaller refuses to run while the app is open.**
+Uninstalling with F1 Telemetry running deleted the documents beside the exe but left
+`f1telemetry.exe` and `_internal` behind — Windows will not remove a running executable or its
+loaded DLLs — producing a **half-removed install**, which is worse than either outcome on its own.
+`CloseApplications=yes` covers *Setup* but does not save the *uninstaller*, which is itself holding
+`{app}`. Fixed rather than documented around, with an `InitializeUninstall` guard offering
+Retry/Cancel. **That hook is the whole point: returning `False` aborts before anything is removed**,
+so a refusal leaves the installation exactly as it was. Detection is `tasklist` piped through
+`find` — legible, no mutex needed in the app, no DLL import, and `find`'s exit code *is* the answer.
+The uninstaller runs elevated, which matters: it therefore also sees an instance left open by a
+**different user**, which is exactly the case a per-machine admin install makes likely. A failure of
+`Exec` itself deliberately reports "not running", because a broken detector must never become a
+program that cannot be uninstalled.
+
 **A sixth decision the scope had not listed: the firewall profile.** `profile=private,domain`,
 **not public.** This is a home-LAN listener whose parser reads untrusted datagrams, and it mirrors
 what the Windows prompt itself ticks by default. **The consequence is a silent failure and must stay
@@ -559,6 +573,24 @@ would normally offer. The installer runs elevated, so a post-install launch woul
 **admin token** — creating the data root in the wrong user profile on exactly the standard-user
 machine this design targets, and disproving the runtime invariant on its very first run. The
 Start-menu entry is the way in.
+
+**The installed app "not recording" was chased to a conclusion and disproved — do not re-open it as
+an installer defect.** The first clean-machine run showed the installed build receiving no telemetry
+while the zip build did, which looks exactly like a bad firewall rule. It is not. Positively
+established, in this order: `show rule … verbose` reports `Program: C:\Program Files\F1
+Telemetry\f1telemetry.exe`, UDP, `LocalPort 20777`, `Domain,Private`, `Enabled: Yes`; the bind
+succeeds (`listening on 0.0.0.0:20777` in the log); `Get-NetUDPEndpoint` shows **exactly one**
+listener and it is the installed exe; **no Block rule exists** (block outranks allow, so this had to
+be checked rather than assumed); and the WLAN profile is Private. A controlled re-run — prove
+packets are flowing with `pktmon` while the app is idle, **stop** the capture, then press Record —
+**recorded correctly**. The original failure was **test state**: the game was not sending during
+that window. Two traps worth not re-walking: **`pktmon` cannot fix a firewall**, being an ETW
+observer with no path to WFP policy, so "it started working when I ran pktmon" is correlation; and
+**`Domain,Private` is a superset of `Private`, not a mismatch** — profiles are the set a rule applies
+to, so narrowing it fixes nothing and would only break a domain-joined machine later. Nothing was
+changed as a result. What the episode *did* expose is that the app says nothing between
+`listening on…` and a finished capture, which is why the diagnosis needed `pktmon` at all — filed as
+PRIORITIES → **A6**, and deliberately not folded into C8b, being recorder-layer work.
 
 **Guarded by `test/test_installer_script.py`.** An `.iss` cannot be unit-tested meaningfully, but
 the rule hard-codes a port and an exe name that Python owns, and the failure when they drift is the
@@ -907,9 +939,13 @@ W11 boot); see the 4th build entry for what was covered where and what was not.
 - [ ] **Upgrade in place:** run the installer over an existing install → still **one** firewall rule
       and **one** entry in Apps & features. Repeat with the app **running** → Restart Manager offers
       to close it and the install completes.
-- [ ] **Uninstall:** program files and firewall rule both gone (`show rule` reports no match), and
-      `%LOCALAPPDATA%\f1telemetry` **still present with captures intact** — this is deliberate, not
-      a miss.
+- [ ] **Uninstall, app closed:** program files and firewall rule both gone (`show rule` reports no
+      match), and `%LOCALAPPDATA%\f1telemetry` **still present with captures intact** — this is
+      deliberate, not a miss.
+- [ ] **Uninstall, app open → Cancel:** the guard's dialog appears, and cancelling leaves the
+      installation **completely intact** — relaunch it to confirm. This is the item the original
+      behaviour got wrong, so it is the one worth actually performing rather than assuming.
+- [ ] **Uninstall, app open → close it → Retry:** the uninstall then completes normally.
 - [ ] **The zip still works standalone** (it is the no-elevation fallback, so it must not rot):
       unzip, run, and the first-record firewall *prompt* appears as before.
 - [ ] Launched on a **clean Windows instance** — see "Testing on a clean instance" below. (The old

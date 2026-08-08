@@ -41,7 +41,8 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   install**, which is what writing that rule needs; **running the app never does**, and it still
   keeps all your data under your own user account. Upgrading installs over the top — close the app
   first, or let the installer ask. Uninstalling removes the program and the firewall rule and
-  **leaves your captures and database completely untouched**. The zip build stays exactly as it
+  **leaves your captures and database completely untouched** — close the app first, and the
+  uninstaller will ask you to if you forget. The zip build stays exactly as it
   was, for anyone who can't or would rather not elevate. One caveat: the rule covers *private*
   networks, so if Windows has your home network set to Public, set it to Private or no packets
   will arrive.

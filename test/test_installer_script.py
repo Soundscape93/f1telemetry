@@ -70,6 +70,18 @@ class InstallerScriptTest(unittest.TestCase):
         create the data root in the wrong user profile."""
         self.assertNotIn("postinstall", self.text)
 
+    def test_the_uninstaller_refuses_to_run_while_the_app_is_open(self):
+        """Uninstalling with the app open deleted the docs but left the exe and _internal behind -
+        a half-removed install. InitializeUninstall aborts BEFORE anything is removed."""
+        self.assertIn("[Code]", self.text)
+        self.assertIn("function InitializeUninstall(): Boolean;", self.text)
+
+    def test_the_running_app_check_uses_the_exe_name_define(self):
+        """Hard-coding the name here would silently stop detecting the app if the exe is renamed -
+        the same drift the port and spec guards exist for."""
+        code = self.text[self.text.index("[Code]"):]
+        self.assertIn("{#ExeName}", code)
+
 
 class InstallerWorkflowTest(unittest.TestCase):
     """The .iss and release.yml agree about define names, or the build fails 10 CI-minutes in."""
@@ -105,15 +117,18 @@ class InstallerScriptSyntaxTest(unittest.TestCase):
         offenders = []
         for number, raw in enumerate(_ISS.read_text(encoding="utf-8").splitlines(), 1):
             stripped = raw.strip()
+            # [Code] is Pascal, not Inno's key/value grammar - the lint stops there rather than
+            # flagging every `begin` and `end;`.
+            if stripped.lower().startswith("[code]"):
+                break
             if not stripped:
                 continuation = False
                 continue
             if not continuation and not self._VALID.match(stripped):
                 offenders.append(f"line {number}: {stripped[:60]!r}")
-            # Inno continues an entry onto the next line with a trailing backslash; those lines
-            # are fragments and are exempt.
             continuation = raw.rstrip().endswith("\\")
         self.assertEqual(offenders, [], "unparseable line(s) in the .iss:\n  " + "\n  ".join(offenders))
+
 
 
 if __name__ == "__main__":

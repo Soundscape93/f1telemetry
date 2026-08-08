@@ -157,3 +157,59 @@ Filename: "{sys}\netsh.exe"; \
 ;      resolve the admins' %LOCALAPPDATA%, find nothing, and report success while deleting nothing.
 ;      A checkbox that lies is worse than no checkbox at all.
 ; Users remove it by hand; Help -> Open Data Folder puts them in the right place.
+
+
+[Code]
+{ ------------------------------------------------------------------------------------------------
+  REFUSE TO UNINSTALL WHILE THE APP IS RUNNING.
+
+  Found by the C8b clean-machine run: uninstalling with F1 Telemetry open deleted the documents
+  beside the exe but left f1telemetry.exe and _internal behind - Windows will not remove a running
+  executable or its loaded DLLs. The result is a half-removed install with no obvious way back,
+  which is worse than either outcome on its own. CloseApplications=yes covers Setup; it does not
+  save the uninstaller, which is itself holding {app}.
+
+  InitializeUninstall is the right hook precisely because returning False aborts BEFORE anything is
+  removed, so a refusal leaves the installation exactly as it was.
+
+  Detection is tasklist piped through find, for the same reason the firewall rule uses netsh: it is
+  legible, needs no mutex in the app, and needs no DLL import. `find` exits 1 when it matches
+  nothing, so the exit code IS the answer. The uninstaller runs elevated, and that matters here -
+  elevated tasklist also sees an instance left open by a DIFFERENT user, which is exactly the case
+  a per-machine admin install makes likely.
+  ------------------------------------------------------------------------------------------------ }
+function AppIsRunning(): Boolean;
+var
+    ResultCode: Integer;
+begin
+    Result := False;
+    if Exec(ExpandConstant('{cmd}'),
+        '/C tasklist /FI "IMAGENAME eq {#ExeName}" /NH | find /I "{#ExeName}"',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := (ResultCode = 0);
+    { If Exec itself fails we deliberately report "not running" and let the uninstall proceed. A
+      broken detector must not run into a program that cannot be uninstalled at all. }
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+    Result := True;
+    while AppIsRunning() do
+    begin
+        { A silent uninstall has nobody to answer a dialog, so refues rather than hang or half-remove. }
+        if UninstallSilent then
+        begin
+            Result := False;
+            Exit;
+        end;
+        if MsgBox('F1 Telemetry is still running.' + #13#10#13#10 +
+              'Close it, then click Retry. Or click Cancel to leave it installed.' + #13#10#13#10 +
+              'Uninstalling while it is open would leave part of the program behind, because ' +
+              'Windows cannot remove files that are in use.',
+              mbError, MB_RETRYCANCEL) = IDCANCEL then
+        begin
+            Result := False;
+            Exit;
+        end;
+    end;
+end;
