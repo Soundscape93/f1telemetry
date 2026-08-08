@@ -128,12 +128,12 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#ExeName}"; Tasks: desktopic
 ; the home network classified as Public, this rule does not apply and no packets arrive.
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall delete rule name=""{#FirewallRule}"""; \
-    Flags: runhidden waituntilterminated \
+    Flags: runhidden waituntilterminated; \
     StatusMsg: "Replacing any previous firewall rule ..."
 
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall add rule name=""{#FirewallRule}"" dir=in action=allow program=""{app}\{#ExeName}"" protocol=UDP localport={#TelemetryPort} profile=private,domain enable=yes"; \
-    Flags: runhidden waituntilterminated \
+    Flags: runhidden waituntilterminated; \
     StatusMsg: "Allowing telemetry trough Windows Firewall (UDP {#TelemetryPort}) ..."
 
 ; NOTE: there is deliberately NO "launch the app now" checkbox. The installer runs elevated, so a post 
@@ -146,7 +146,7 @@ Filename: "{sys}\netsh.exe"; \
 ; A rule naming a deleted exe is litter. Runs before the files go.
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall delete rule name=""{#FirewallRule}"""; \
-    Flags: runhidden waituntilterminated \
+    Flags: runhidden waituntilterminated; \
     RunOnceId: "DeleteFirewallRule"
 
 ; NOTHING removes %LOCALAPPDATA%\f1telemetry, and there is deliberatel no opt-in checkbox fo it
