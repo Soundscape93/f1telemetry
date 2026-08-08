@@ -37,10 +37,26 @@ datas += [d for d in collect_data_files("pyqtgraph")
 # If pyqtgraph is ever loaded by a NEW code path, re-check this list before assuming it is safe.
 _EXCLUDED_PYQTGRAPH = "pyqtgraph.examples"
 
+
+def _wanted_pyqtgraph(name):
+    """Keep every pyqtgraph submodule except the examples package.
+
+    Passed to collect_submodules() as its `filter`, NOT applied to the result, and the difference is
+    load-bearing: collect_submodules *imports* a package in order to enumerate it, and a package
+    the filter rejects is never recursed into - so it is never imported. Filtering afterwards
+    still pays the import.
+
+    That import is fatal on Linux CI. pyqtgraph.examples builds Qt objects at import time, so the
+    isolated collection subprocess reaches for the xcb platform plugin, finds no display, and
+    ABORTS (SIGABRT, exit -6). `on_error` cannot catch that - it handles exceptions, not a child
+    that died - so not importing it is the only fix. Windows never hit this because its platform
+    plugin initialises without a display server.
+    """
+    return name != _EXCLUDED_PYQTGRAPH and not name.startswith(_EXCLUDED_PYQTGRAPH + ".")
+
 # Lazy import PyInstaller can't see by static analysis (imported inside branches).
 hiddenimports = (
-    [m for m in collect_submodules("pyqtgraph") 
-     if m != _EXCLUDED_PYQTGRAPH and not m.startswith(_EXCLUDED_PYQTGRAPH + ".")]
+    collect_submodules("pyqtgraph", filter=_wanted_pyqtgraph)
      + collect_submodules("zstandard")
      + ["zstandard.backend_c", "PySide6.QtSvg"]
 )

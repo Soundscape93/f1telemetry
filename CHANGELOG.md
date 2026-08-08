@@ -19,6 +19,28 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
+or stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- **A Linux build is now published with each release**, alongside the Windows one — a
+  `.tar.gz` you unpack and run, with the user guide, roster template, licence and notices beside
+  the program just as on Windows. It is **best-effort**: Windows remains the supported platform,
+  and the Linux build needs a reasonably recent distribution, because it is built against the
+  system libraries of the machine that builds it. If it won't start on an older install, that is
+  the expected limit rather than a fault.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.7.0 — 2026-08-07
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged at 2 and nothing about how captures are

@@ -375,7 +375,71 @@ the self-updater is packaging Phase 4.)*
   guide / folder actions. See "Phase 3 — done" below.
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
   home for the Windows Firewall allow-rule so testers never see the prompt), later a real
-  auto-updater (velopack).
+  auto-updater (velopack). **Scoped down and scheduled as PRIORITIES → C8a / C8b / C8c**: Linux
+  only (macOS dropped), the installer in, velopack deferred.
+
+### The Linux artifact (C8a)
+
+A `linux-build` job in `release.yml` mirroring `windows-build` on `ubuntu-latest`, publishing
+`f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
+sanity-check (`LICENSE` + `NOTICE.md` are an LGPL v3 obligation, so a missing one fails the build).
+
+- **A tarball, not an AppImage** — "a tarball first" was already the plan; AppImage needs
+  `linuxdeploy` plus a Qt plugin and is its own debugging surface.
+- **`.tar.gz`, not zip** — zip does not preserve the executable bit, so the binary would need a
+  `chmod +x` before it would run at all.
+- **Known limit, not a defect:** a PyInstaller bundle links against the **glibc of the machine that
+  built it**, so this artifact needs a distro at least as new as the runner's Ubuntu. Building for
+  older distros means building in an older container, which is not worth it for a best-effort
+  artifact.
+- **The tag is sanitised into the archive name.** On a no-tag `workflow_dispatch` the tag defaults
+  to the branch name, and a slashed branch (`ci/linux-release-artifact`) would be read as a
+  directory in the output path. Latent in `windows-build` since Phase 3, reachable only by dispatch.
+
+**The trap this job walked into first, worth not re-learning.** The initial run died in *collection*,
+before any bundling: `collect_submodules("pyqtgraph")` **imports** each package to enumerate it, and
+`pyqtgraph.examples` builds Qt objects at import time — so PyInstaller's isolated subprocess reached
+for the `xcb` platform plugin, found no display, and **aborted (SIGABRT, exit -6)**. C7's exclusion
+was a filter applied to the *result*, so the import had already happened. `on_error` cannot help:
+it handles exceptions, not a child process that died.
+
+The fix is `collect_submodules("pyqtgraph", filter=…)` — a package the filter rejects is never
+recursed into, so it is never imported. **If you ever exclude a submodule from a `collect_*` call,
+filter during collection, not afterwards.** The build step also sets `QT_QPA_PLATFORM=offscreen`, as
+`ci.yml` does for the suite, to cover the next submodule that decides to touch Qt at import time.
+Windows never hit any of this: its platform plugin initialises without a display server, which is
+why a Linux artifact was the first thing to find it.
+
+### The installer is an admin install — decided 2026-08-07 (C8b)
+
+The Windows Firewall allow-rule needs administrator rights, and the clean-machine checklist asserts
+"launch as a **non-admin** user". Those pull in opposite directions, so the tension was resolved
+explicitly rather than discovered during implementation. Three options were weighed:
+
+| | Firewall rule | Non-admin install | Verdict |
+|---|---|---|---|
+| (a) per-user install, no rule | ✗ | ✓ | drops the item's main justification |
+| **(b) admin install with the rule** | **✓** | **✗** | **chosen** |
+| (c) per-user install + optional elevated task | ✓ | ✓ | most moving parts |
+
+**(b) chosen.** Nearly every ordinary Windows install prompts for elevation anyway; on Windows 11 an
+admin account is elevated by UAC for the install and drops straight back afterwards, and a standard
+account gets the UAC credential screen. For this tester group that is normal, expected behaviour.
+
+**(c) was rejected deliberately, not overlooked.** Inno can elevate a single task, so it would give
+both properties — but it is the most complex of the three, and the failure mode lands on a tester
+machine that cannot easily be debugged remotely. Simplicity wins where support access is the
+scarce resource.
+
+**The invariant that must survive this:** *the app itself still requires no administrator rights at
+runtime.* Elevation is for the installer only — writing the firewall rule and the Start-menu entry.
+Everything the running app writes stays under `%LOCALAPPDATA%` (`data_root()`), and nothing is ever
+written beside the exe. **The checklist item changes meaning rather than disappearing:** it becomes
+"install as admin, then *run* as a standard user and confirm nothing needs elevation". If a build
+ever needs admin to run, that is a bug, not a consequence of this decision.
+
+The admin requirement must be **documented** — in the user guide's install section, in the release
+notes for the first build that ships an installer, and on the Release page itself.
 
 ---
 
@@ -692,6 +756,11 @@ tagged commit.
 
 Run on the author's Windows 11 boot; ideally on a clean Windows instance (see below).
 
+**This is a template, re-run per release — the boxes stay unticked on purpose.** Per-build results
+belong in *Build history* below, so the next release starts from a clean list instead of having to
+untick the previous one. **Last full run: v0.7.0 on 2026-08-07 — passed** (Windows Sandbox + the
+W11 boot); see the 4th build entry for what was covered where and what was not.
+
 - [ ] Launch by **double-click** from a folder that is *not* the repo (proves CWD independence).
 - [ ] Launch as a **non-admin** user; nothing tries to write beside the exe.
 - [ ] Launched on a **clean Windows instance** — see "Testing on a clean instance" below. (The old
@@ -790,9 +859,42 @@ first:
   against a real published Release (the API used to answer 404) and *Open user guide* resolving
   through `app_dir()` rather than `_MEIPASS`. The author intends to re-run this checklist for most
   future releases.
-- **Still not covered by any build so far:** the **clean-instance** run (Windows Sandbox or a second
-  user account — see below) and the **SmartScreen click-through wording** for a first-time external
-  tester. Both are PRIORITIES → C4.
+- **4th build (v0.7.0) — done 2026-08-07. This is PRIORITIES → C4, and it closes it.** Run against
+  the **Release zip downloaded from GitHub**, on **Windows Sandbox** *and* the author's W11 boot.
+  Every Phase-3 item passes, and the two things no build had ever covered are now covered: the
+  **clean-instance** run and the **SmartScreen click-through wording**.
+
+  **Windows Sandbox is confirmed as the right tool for this** (option 1 above), with one structural
+  limit worth knowing before planning the next run: **the Sandbox cannot record.** It is a VM with
+  internet but no route to the home network, so the PS5 never reaches it. Everything downstream of
+  recording was tested there by **copying capture files in and ingesting them**, which covers ingest,
+  lap traces, the track map, re-ingest and the backup. Only the live-recording items need the W11
+  boot.
+
+  **Three items not ticked, and they are not equivalent:**
+  - *Old DB → additive columns* — **N/A for v0.7.0**, not skipped: C5/C6/C7/F8 touched no schema, so
+    `ensure_schema` had nothing to ALTER (same reasoning as the 2nd build). The other half of that
+    line *was* covered — a fresh `%LOCALAPPDATA%` created a DB cleanly with `meta` holding the
+    current `pipeline_version` and no prompt.
+  - *Pre-Phase-2 DB offers the upgrade* — **carried forward, not re-proven.** It passed on the 2nd
+    build (2026-07-26) and nothing since has touched `check_pipeline_version`; reproducing it needs a
+    legacy unstamped populated database that would have to be manufactured.
+  - *Kill mid-record → recovers on next launch* — **open.** Unreachable in the Sandbox (see above)
+    and not run on the boot. Low risk — it passed on an earlier release and the recording flow has
+    not changed since — but it is genuinely unverified on v0.7.0, so it sits in
+    PRIORITIES → *Needs verification* for the next real session.
+
+  **Two findings from the run:**
+  - **Help → Check for updates fails inside the Sandbox and works on the W11 boot.** Recorded so it
+    is not investigated as an app bug later: the Sandbox's network isolation is the likely cause, and
+    the W11 result is the one that counts.
+  - **A4 (light/dark text colour) is confirmed still present on v0.7.0** — noticed while checking
+    HiDPI/scaling, which is otherwise correct. The CHANGELOG known-issues entry stays accurate, and
+    A4 remains Cycle 4's first item.
+
+  **One improvement raised:** `NOTICE.md` ships as raw markdown, so a tester without a markdown
+  viewer reads `#` and `**` in Notepad. `release.yml` already runs pandoc/xelatex for the guide, so
+  a second invocation is cheap — filed as PRIORITIES → **F9**.
 
 ---
 

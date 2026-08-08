@@ -84,18 +84,19 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
   hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
   whose failure mode is that silent degrade — so C6 is the instrument that makes C7 verifiable
   rather than hopeful. Reversed, the trim is done blind.
-- C4 clean-instance test (Windows Sandbox / second user account) — run against a build carrying
-  C5–C7. Not code: a checklist the author executes, producing doc updates only.
+- C4 clean-instance test (Windows Sandbox / second user account) — **done 2026-08-07** against the
+  published v0.7.0 zip. Not code: a checklist the author executes, producing doc updates only.
 - C8 Phase 4 — see the split below.
 
 **Cycle 3 ships as two releases, not one — decided 2026-08-06.** The remaining items produce two
 different kinds of artifact, and the seam is where that changes:
 
-1. **Release 1 — C7 + F8**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4
-   runs against that published build**: C4 is validation, so it wants a real downloaded artifact
-   rather than a local `dist/` folder.
-2. **Release 2 — C8a + C8b.** Then a **second** clean-instance run, because **C8b changes what
-   "install" means**: a clean-instance test against a zip proves nothing about an installer.
+1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
+   published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
+   **Both complete.**
+2. **Release 2 — C8a + C8b + F9.** Then a **second** clean-instance run, because **C8b changes what
+   "install" means**: a clean-instance test against a zip proves nothing about an installer, and
+   this time the run must confirm the new invariant — installed as admin, *runs* as a standard user.
 
 This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
@@ -124,14 +125,23 @@ remembered. `release_notes.py` was checked and is **not** affected: it reads a r
 whose comments `release_unreleased` has already stripped.
 
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
-- **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
+- **C8a macOS/Linux artifacts → Linux only — done 2026-08-07.** `release.yml` already runs an `ubuntu-latest` job for
   the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
   consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
-  and an unsigned build walking into Gatekeeper.
+  and an unsigned build walking into Gatekeeper. *"Nearly free" turned out to be optimistic* — the
+  first CI run died in PyInstaller's collection stage, not the build: `collect_submodules` imports
+  what it enumerates, and `pyqtgraph.examples` aborts the process on a machine with no display.
+  C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
+  collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
+  a submodule from a `collect_*` call, filter during collection, not afterwards.**
 - **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
-  PACKAGING's #3 "easy to forget". **Open question to settle before code:** the allow-rule needs
-  elevation, while the clean-machine checklist asserts "launch as a non-admin user" — so it is
-  either a per-user install with no rule, or an elevated install with one.
+  PACKAGING's #3 "easy to forget". **The open question is settled, 2026-08-07: an admin install
+  that writes the rule.** Elevation is normal for a Windows installer, and UAC drops the
+  privilege again immediately. A per-user install with an *optional* elevated task would keep both
+  properties but was rejected as the most complex option, with its failure mode landing on a tester
+  machine we cannot debug. **The invariant this must not break:** the app requires no admin rights
+  *at runtime* — the checklist item becomes "install as admin, run as a standard user". Rationale
+  and the consequences table are in PACKAGING → Phase 4.
 - **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
   self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
   toolchain that would replace the zip artifact verified across three builds, for a handful of
@@ -180,10 +190,11 @@ re-run under WAL on 2026-08-05 and passes.
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
 | A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
-| C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
+| C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
-| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **Cycle 3, Release 1** — in flight | see the Cycle 3 plan above |
+| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
+| F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | open — **Cycle 3, Release 2** | PACKAGING → Build history, 4th build |
 
 **E7 is resolved as a question, not as code.** The ranges in `setup_panel._SETUP_SPEC` are
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
@@ -201,7 +212,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
-| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
+| C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
@@ -261,9 +272,59 @@ up opportunistically rather than scheduled.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
+- **Kill mid-record → the app recovers on next launch.** The one clean-machine checklist item C4
+  could not close (2026-08-07). **Windows Sandbox cannot record at all** — it is a VM with internet
+  but no route to the home network, so the PS5 never reaches it — and it was not run on the W11
+  boot either. **Low risk, deliberately not treated as a defect:** it passed on an earlier release
+  and the recording flow has not changed since. **Plan:** start a recording, kill the process,
+  relaunch — a two-minute check at the next real session, which is the same ~2026-08-12 race B1 and
+  E11 are already waiting on. All three settle from one sitting.
 
 ## Recently closed
 
+- **C8a — the Linux release artifact.** Done 2026-08-07; the first item of Cycle 3's Release 2. A
+  `linux-build` job mirroring `windows-build` on `ubuntu-latest`, publishing
+  `f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
+  sanity-check — `LICENSE` and `NOTICE.md` are an LGPL v3 obligation for the bundled Qt, so a
+  missing one fails the build rather than shipping quietly.
+  **Three choices worth not re-litigating:** a **tarball, not an AppImage** (that was already the
+  plan; AppImage needs `linuxdeploy` plus a Qt plugin and is its own debugging surface); **`.tar.gz`,
+  not zip**, because zip does not preserve the executable bit and the binary would need a `chmod +x`
+  to run at all; and **macOS still dropped** — no known user, a runner to pay for, and an unsigned
+  build walking into Gatekeeper.
+  **The limit is stated, not solved:** a PyInstaller bundle links against the **glibc of the machine
+  that built it**, so the artifact needs a distro at least as new as the runner's Ubuntu. Building
+  for older ones means an older container, which is not worth it for a best-effort artifact.
+  **The lesson it produced is worth more than the job.** The first run died in PyInstaller's
+  *collection* stage, before any bundling: `collect_submodules` **imports** each package to
+  enumerate it, and `pyqtgraph.examples` builds Qt objects at import time — so the isolated
+  subprocess reached for the `xcb` plugin, found no display, and **aborted (SIGABRT)**. C7's
+  exclusion filtered the *result*, far too late, and `on_error` cannot catch a child that died
+  rather than raised. Fixed with `collect_submodules(package, filter=…)`, since a package the
+  filter rejects is never recursed into. **The rule: if you exclude a submodule from a `collect_*`
+  call, filter during collection, not afterwards.** The build step also sets
+  `QT_QPA_PLATFORM=offscreen`, as `ci.yml` does for the suite. Windows never hit any of it — its
+  platform plugin initialises without a display server, which is why a Linux artifact was the first
+  thing to find it.
+  Also sanitises the tag into the archive filename in both build jobs: on a no-tag
+  `workflow_dispatch` the tag defaults to the branch name, and a slashed branch was read as a
+  directory in the output path. Latent since Phase 3, reachable only by dispatch.
+- **C4 — the clean-instance test, and what Windows Sandbox can't do.** Done 2026-08-07 against the
+  downloaded **v0.7.0** Release zip, on Windows Sandbox *and* the W11 boot. Closes the two things no
+  build had ever covered: the clean-instance run and the SmartScreen click-through wording.
+  **Sandbox is confirmed as the right tool, with one structural limit worth not rediscovering: it
+  cannot record.** It is a VM with internet but no route to the home network, so the PS5 never
+  reaches it. Everything downstream of recording was covered by copying capture files in and
+  ingesting them — ingest, lap traces, track map, re-ingest, backup. Only the live-recording items
+  need the boot.
+  **Three items unticked, and they are not equivalent** — *old-DB additive columns* is **N/A** (no
+  schema moved in v0.7.0, so `ensure_schema` had nothing to ALTER); *pre-Phase-2 DB* is **carried
+  forward** from the 2nd build rather than re-proven, since reproducing it means manufacturing a
+  legacy unstamped database; and *kill mid-record* is genuinely **open**, now in *Needs
+  verification* for the next real session.
+  **Two findings recorded rather than chased:** Help → Check for updates fails inside the Sandbox
+  and works on the boot (network isolation, not the app), and **A4 is confirmed still present on
+  v0.7.0**. It also produced **F9** — `NOTICE.md` ships as raw markdown, unreadable in Notepad.
 - **C7 — pyqtgraph bloat trim, and what it found instead.** Done 2026-08-06; the third item of
   Cycle 3. `pyqtgraph.examples` — a demo app with its own `__main__` and ~40 scripts, unreachable
   from here — is filtered out of both `hiddenimports` and `collect_data_files`, with an `excludes`
