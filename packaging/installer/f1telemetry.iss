@@ -180,36 +180,36 @@ Filename: "{sys}\netsh.exe"; \
   ------------------------------------------------------------------------------------------------ }
 function AppIsRunning(): Boolean;
 var
-    ResultCode: Integer;
+  ResultCode: Integer;
 begin
-    Result := False;
-    if Exec(ExpandConstant('{cmd}'),
-        '/C tasklist /FI "IMAGENAME eq {#ExeName}" /NH | find /I "{#ExeName}"',
-        '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  Result := False;
+  if Exec(ExpandConstant('{cmd}'),
+          '/C tasklist /FI "IMAGENAME eq {#ExeName}" /NH | find /I "{#ExeName}"',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Result := (ResultCode = 0);
-    { If Exec itself fails we deliberately report "not running" and let the uninstall proceed. A
-      broken detector must not run into a program that cannot be uninstalled at all. }
+  { If Exec itself fails we deliberately report "not running" and let the uninstall proceed. A
+    broken detector must not turn into a program that cannot be uninstalled at all. }
 end;
 
 function InitializeUninstall(): Boolean;
 begin
-    Result := True;
-    while AppIsRunning() do
+  Result := True;
+  while AppIsRunning() do
+  begin
+    { A silent uninstall has nobody to answer a dialog, so refuse rather than hang or half-remove. }
+    if UninstallSilent then
     begin
-        { A silent uninstall has nobody to answer a dialog, so refues rather than hang or half-remove. }
-        if UninstallSilent then
-        begin
-            Result := False;
-            Exit;
-        end;
-        if MsgBox('F1 Telemetry is still running.' + #13#10#13#10 +
+      Result := False;
+      Exit;
+    end;
+    if MsgBox('F1 Telemetry is still running.' + #13#10#13#10 +
               'Close it, then click Retry. Or click Cancel to leave it installed.' + #13#10#13#10 +
               'Uninstalling while it is open would leave part of the program behind, because ' +
               'Windows cannot remove files that are in use.',
               mbError, MB_RETRYCANCEL) = IDCANCEL then
-        begin
-            Result := False;
-            Exit;
-        end;
+    begin
+      Result := False;
+      Exit;
     end;
+  end;
 end;
