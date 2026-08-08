@@ -216,7 +216,7 @@ jobs:
         run: pyinstaller packaging/f1telemetry.spec --noconfirm
 
       # Beside the binary, NOT inside _internal/ - paths.app_dir() resolves here, and the Help 
-      # page's "Open user guide" / "Licences & notices" actions read from it.cancel-timeout-minutes: 
+      # page's "Open user guide" / "Licences & notices" actions read from it.
       - name: Add the user guide beside the binary
         uses: actions/download-artifact@v4
         with:
@@ -236,9 +236,9 @@ jobs:
             { -e "$item" ] || (echo "missing from the bundle: $item"; exit 1); }
           done
 
-      # -C dist so t he archive holds f1telemetry/... rather than the full path.cancel-timeout-minutes: 
+      # -C dist so t he archive holds f1telemetry/... rather than the full path.
       - name: Tar the build
-        working-directory: f1telemetry
+        working-directory: f1telemetry/dist/f1telemetry
         run: |
           # On a no-tag workflow_dispatch, TAG is the branch name - and branch names contain
           # slashes, which would be read as a directory in the output path. Only bites on dispatch
