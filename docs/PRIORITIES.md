@@ -128,7 +128,12 @@ whose comments `release_unreleased` has already stripped.
 - **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
   the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
   consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
-  and an unsigned build walking into Gatekeeper.
+  and an unsigned build walking into Gatekeeper. *"Nearly free" turned out to be optimistic* — the
+  first CI run died in PyInstaller's collection stage, not the build: `collect_submodules` imports
+  what it enumerates, and `pyqtgraph.examples` aborts the process on a machine with no display.
+  C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
+  collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
+  a submodule from a `collect_*` call, filter during collection, not afterwards.**
 - **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
   PACKAGING's #3 "easy to forget". **The open question is settled, 2026-08-07: an admin install
   that writes the rule.** Elevation is normal for a Windows installer, and UAC drops the
@@ -207,7 +212,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
-| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
+| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3, Release 2** — in flight; PACKAGING → Phase 4 |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |

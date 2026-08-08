@@ -207,6 +207,12 @@ jobs:
       
       - name: Build the one-folder bundle
         working-directory: f1telemetry
+        env:
+          # Any Qt import during PyInstaller's collection must not reach for a display: the runner
+          # has none, and Qt aborts the process rather than raising. Same reason ci.yml sets its
+          # for the test suite. The spec's filter is the real fix; this covers the next submodule
+          # that decides to touch Qt at import time.
+          QT_QPA_PLATFORM: offscreen
         run: pyinstaller packaging/f1telemetry.spec --noconfirm
 
       # Beside the binary, NOT inside _internal/ - paths.app_dir() resolves here, and the Help 

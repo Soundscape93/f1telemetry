@@ -378,6 +378,38 @@ the self-updater is packaging Phase 4.)*
   auto-updater (velopack). **Scoped down and scheduled as PRIORITIES → C8a / C8b / C8c**: Linux
   only (macOS dropped), the installer in, velopack deferred.
 
+### The Linux artifact (C8a)
+
+A `linux-build` job in `release.yml` mirroring `windows-build` on `ubuntu-latest`, publishing
+`f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
+sanity-check (`LICENSE` + `NOTICE.md` are an LGPL v3 obligation, so a missing one fails the build).
+
+- **A tarball, not an AppImage** — "a tarball first" was already the plan; AppImage needs
+  `linuxdeploy` plus a Qt plugin and is its own debugging surface.
+- **`.tar.gz`, not zip** — zip does not preserve the executable bit, so the binary would need a
+  `chmod +x` before it would run at all.
+- **Known limit, not a defect:** a PyInstaller bundle links against the **glibc of the machine that
+  built it**, so this artifact needs a distro at least as new as the runner's Ubuntu. Building for
+  older distros means building in an older container, which is not worth it for a best-effort
+  artifact.
+- **The tag is sanitised into the archive name.** On a no-tag `workflow_dispatch` the tag defaults
+  to the branch name, and a slashed branch (`ci/linux-release-artifact`) would be read as a
+  directory in the output path. Latent in `windows-build` since Phase 3, reachable only by dispatch.
+
+**The trap this job walked into first, worth not re-learning.** The initial run died in *collection*,
+before any bundling: `collect_submodules("pyqtgraph")` **imports** each package to enumerate it, and
+`pyqtgraph.examples` builds Qt objects at import time — so PyInstaller's isolated subprocess reached
+for the `xcb` platform plugin, found no display, and **aborted (SIGABRT, exit -6)**. C7's exclusion
+was a filter applied to the *result*, so the import had already happened. `on_error` cannot help:
+it handles exceptions, not a child process that died.
+
+The fix is `collect_submodules("pyqtgraph", filter=…)` — a package the filter rejects is never
+recursed into, so it is never imported. **If you ever exclude a submodule from a `collect_*` call,
+filter during collection, not afterwards.** The build step also sets `QT_QPA_PLATFORM=offscreen`, as
+`ci.yml` does for the suite, to cover the next submodule that decides to touch Qt at import time.
+Windows never hit any of this: its platform plugin initialises without a display server, which is
+why a Linux artifact was the first thing to find it.
+
 ### The installer is an admin install — decided 2026-08-07 (C8b)
 
 The Windows Firewall allow-rule needs administrator rights, and the clean-machine checklist asserts
