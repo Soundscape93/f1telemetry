@@ -91,5 +91,30 @@ class InstallerWorkflowTest(unittest.TestCase):
                          f"release.yml never passes: {sorted(required - passed)}")
 
 
+class InstallerScriptSyntaxTest(unittest.TestCase):
+    """A structural lint, because ISCC only exists on Windows and every syntax error otherwise
+    costs a full CI round trip. Not a parser - it just catches the class of typo that makes Inno
+    read a comment as a section entry (a `:` where a `;` was meant, which reports as the baffling
+    `Unrecognized parameter name ""`)."""
+
+    # A section header, a preprocessor directive, a comment, or a `Name: value` / `Key=value`.
+    _VALID = re.compile(r"^([A-Za-z_]\w*\s*[:=]|;|#|\[)")
+
+    def test_every_line_is_something_inno_can_parse(self):
+        continuation = False
+        offenders = []
+        for number, raw in enumerate(_ISS.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = raw.strip()
+            if not stripped:
+                continuation = False
+                continue
+            if not continuation and not self._VALID.match(stripped):
+                offenders.append(f"line {number}: {stripped[:60]!r}")
+            # Inno continues an entry onto the next line with a trailing backslash; those lines
+            # are fragments and are exempt.
+            continuation = raw.rstrip().endswith("\\")
+        self.assertEqual(offenders, [], "unparseable line(s) in the .iss:\n  " + "\n  ".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main()
