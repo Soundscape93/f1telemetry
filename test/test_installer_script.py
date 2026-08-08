@@ -129,6 +129,28 @@ class InstallerScriptSyntaxTest(unittest.TestCase):
             continuation = raw.rstrip().endswith("\\")
         self.assertEqual(offenders, [], "unparseable line(s) in the .iss:\n  " + "\n  ".join(offenders))
 
+    def test_the_code_section_uses_line_comments_only(self):
+        """Pascal's { } block comments are a trap in THIS file specifically: it is full of Inno
+        constants written {app} / {cmd} / {sys}, and a } inside a brace comment closes it early,
+        so the prose after it is parsed as code. Mandate // and the trap cannot be sprung.
+
+        Only the *code* part of each line is examined - a brace inside a // comment or a string
+        literal is harmless, and flagging those was this guard's own first bug."""
+        text = _ISS.read_text(encoding="utf-8")
+        lower = text.lower()
+        if "[code]" not in lower:
+            self.skipTest("no [Code] section")
+
+        offenders = []
+        for number, line in enumerate(text[lower.index("[code]"):].splitlines(), 1):
+            # String literals first, so ExpandConstant('{cmd}') is exempt and a // inside a
+            # quoted string cannot truncate the line early. Then drop the line comment.
+            bare = re.sub(r"'[^']*'", "", line).split("//", 1)[0]
+            if re.search(r"\{(?!#)", bare):     # {# is the preprocessor, not a comment
+                offenders.append(f"line {number}: {line.strip()[:60]!r}")
+
+        self.assertEqual(offenders, [],
+                         "use // comments in [Code], not { }:\n  " + "\n  ".join(offenders))
 
 
 if __name__ == "__main__":

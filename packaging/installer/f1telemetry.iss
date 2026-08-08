@@ -160,24 +160,28 @@ Filename: "{sys}\netsh.exe"; \
 
 
 [Code]
-{ ------------------------------------------------------------------------------------------------
-  REFUSE TO UNINSTALL WHILE THE APP IS RUNNING.
-
-  Found by the C8b clean-machine run: uninstalling with F1 Telemetry open deleted the documents
-  beside the exe but left f1telemetry.exe and _internal behind - Windows will not remove a running
-  executable or its loaded DLLs. The result is a half-removed install with no obvious way back,
-  which is worse than either outcome on its own. CloseApplications=yes covers Setup; it does not
-  save the uninstaller, which is itself holding {app}.
-
-  InitializeUninstall is the right hook precisely because returning False aborts BEFORE anything is
-  removed, so a refusal leaves the installation exactly as it was.
-
-  Detection is tasklist piped through find, for the same reason the firewall rule uses netsh: it is
-  legible, needs no mutex in the app, and needs no DLL import. `find` exits 1 when it matches
-  nothing, so the exit code IS the answer. The uninstaller runs elevated, and that matters here -
-  elevated tasklist also sees an instance left open by a DIFFERENT user, which is exactly the case
-  a per-machine admin install makes likely.
-  ------------------------------------------------------------------------------------------------ }
+// -------------------------------------------------------------------------------------------
+// REFUSE TO UNINSTALL WHILE THE APP IS RUNNING.
+//
+// Found by the C8b clean-machine run: uninstalling with F1 Telemetry open deleted the documents
+// beside the exe but left f1telemetry.exe and _internal behind - Windows will not remove a
+// running executable or its loaded DLLs. The result is a half-removed install with no obvious
+// way back, which is worse than either outcome on its own. CloseApplications=yes covers Setup;
+// it does not save the uninstaller, which is itself holding the {app} directory.
+//
+// InitializeUninstall is the right hook precisely because returning False aborts BEFORE anything
+// is removed, so a refusal leaves the installation exactly as it was.
+//
+// Detection is tasklist piped through find, for the same reason the firewall rule uses netsh: it
+// is legible, needs no mutex in the app, and needs no DLL import. `find` exits 1 when it matches
+// nothing, so the exit code IS the answer. The uninstaller runs elevated, and that matters here -
+// elevated tasklist also sees an instance left open by a DIFFERENT user, which is exactly the
+// case a per-machine admin install makes likely.
+//
+// NOTE FOR ANYONE EDITING THIS SECTION: use // comments, never Pascal's { } block comments.
+// This file is full of Inno constants written as {app}, {cmd}, {sys} - and a } inside a brace
+// comment CLOSES it, so the prose after it is parsed as code. That cost a CI round trip once.
+// -------------------------------------------------------------------------------------------
 function AppIsRunning(): Boolean;
 var
   ResultCode: Integer;
@@ -187,8 +191,8 @@ begin
           '/C tasklist /FI "IMAGENAME eq {#ExeName}" /NH | find /I "{#ExeName}"',
           '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Result := (ResultCode = 0);
-  { If Exec itself fails we deliberately report "not running" and let the uninstall proceed. A
-    broken detector must not turn into a program that cannot be uninstalled at all. }
+  // If Exec itself fails we deliberately report "not running" and let the uninstall proceed.
+  // A broken detector must not turn into a program that cannot be uninstalled at all.
 end;
 
 function InitializeUninstall(): Boolean;
@@ -196,7 +200,7 @@ begin
   Result := True;
   while AppIsRunning() do
   begin
-    { A silent uninstall has nobody to answer a dialog, so refuse rather than hang or half-remove. }
+    // A silent uninstall has nobody to answer a dialog, so refuse rather than hang or half-remove.
     if UninstallSilent then
     begin
       Result := False;
