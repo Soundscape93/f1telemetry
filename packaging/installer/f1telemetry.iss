@@ -155,5 +155,5 @@ Filename: "{sys}\netsh.exe"; \
 ;   2. An admin uninstall runs under the ADMINISTRATOR's token, but the data_root() is per-user. On the
 ;      machine this whole decision targets - installed as admin, run by standard user - it would
 ;      resolve the admins' %LOCALAPPDATA%, find nothing, and report success while deleting nothing.
-:      A checkbox that lies is worse than no checkbox at all.
+;      A checkbox that lies is worse than no checkbox at all.
 ; Users remove it by hand; Help -> Open Data Folder puts them in the right place.
