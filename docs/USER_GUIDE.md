@@ -16,8 +16,9 @@ one-time game + firewall setup, and day-to-day use.
 
 No Python or other installs are needed; everything is bundled.
 
-Next to `f1telemetry.exe` you'll also find **`USER_GUIDE.pdf`** (this guide) and
-**`roster_template.csv`** (section 5). Inside the app, **Help → Open user guide** opens the PDF.
+Next to `f1telemetry.exe` you'll also find **`USER_GUIDE.pdf`** (this guide),
+**`roster_template.csv`** (section 5), and **`LICENSE`** + **`NOTICE.pdf`** (*Licence & notices*, at
+the end of this guide). Inside the app, **Help → Open user guide** opens the PDF.
 
 ## 2. First-time setup
 
@@ -239,4 +240,6 @@ classification is reconstructed from what's available and clearly marked in the 
 The app is source-available, not open source: you may download and run the official builds, but
 redistribution and reuse need permission. The full licence and the third-party notices — Qt/PySide6
 under LGPL v3, and the MIT-licensed nationality flags among others — are in `LICENSE` and
-`NOTICE.md`, shipped next to the app and available from **Help → Licences & notices**.
+`NOTICE.pdf`, shipped next to the app and available from **Help → Licences & notices**. The same
+notices also ship as `NOTICE.md` for anyone who prefers the plain-text source; the button opens the
+PDF when it is present.

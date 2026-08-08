@@ -410,6 +410,56 @@ filter during collection, not afterwards.** The build step also sets `QT_QPA_PLA
 Windows never hit any of this: its platform plugin initialises without a display server, which is
 why a Linux artifact was the first thing to find it.
 
+### The notices PDF (F9) — done 2026-08-08
+
+Raised by the 4th build: `NOTICE.md` shipped as raw markdown, so a tester without a markdown viewer
+opened it in Notepad and read `#` and `**`. The LGPL v3 notice for the bundled Qt is the one
+document that genuinely has to arrive readable, so this is a compliance fix, not polish.
+
+**A second pandoc invocation inside the existing `guide-pdf` job**, deliberately not a new job: the
+apt install there is load-bearing (see its comment) and already paid for. Same font and geometry
+set as the guide, so the two documents look like they belong together; **no `--toc`**, because a
+contents page for two pages is noise. Both PDFs travel in **one upload artifact**, so each build
+job's existing download step picks up the pair without a second download — and the artifact keeps
+its Phase-3 name (`user-guide-pdf`), since renaming it would touch four places for tidiness alone.
+
+- **`NOTICE.pdf` ships beside `NOTICE.md`, not instead of it.** The markdown is what
+  `resolve_notices` falls back to in a source run, and what the GitHub fallback points at.
+- **Both build jobs' sanity-check lists gain it** — LGPL-relevant, so a missing one fails the build
+  rather than shipping quietly, exactly like `LICENSE` and `NOTICE.md`.
+- **Also published as a standalone Release asset**, so the terms are reachable without a ~250 MB
+  download. It rides in the `user-guide-pdf` artifact, so the `release` job's path for it is
+  `artifacts/user-guide-pdf/NOTICE.pdf` — *not* `artifacts/notice-pdf/`. That job's
+  `download-artifact` has no `name:`, so it lands everything under `artifacts/<artifact-name>/`,
+  and a wrong path here fails **after `tag.yml` has already pushed the tag**. The `release` job is
+  also skipped on a no-tag `workflow_dispatch`, so a dispatch test run cannot catch it.
+
+**The open question is answered: *Licences & notices* prefers the PDF.** `resolve_notices` grew a
+third step and is now the same shape as `resolve_guide` — **presence decides at every step, never
+`is_frozen()`**, which is what makes one rule correct in both worlds:
+
+| Build | `app_dir()` is | `NOTICE.pdf` there? | Opens |
+|---|---|---|---|
+| installed / release archive | beside the exe | yes, CI put it there | **the PDF** |
+| source / dev run | the repo root | no — CI-built and gitignored | **the `.md`**, unchanged |
+| partial extract, exe only | beside the exe | no | the GitHub URL |
+
+The dev path is preserved by a *fact* rather than a special case: `NOTICE.pdf` is a build artifact
+that never lands in the repo (`/NOTICE.pdf` joined `/USER_GUIDE.pdf` in `.gitignore`). Shipping a
+PDF and then having the app's own button still open raw markdown would have defeated the item.
+
+**Two things deliberately not done.** **`LICENSE` is left as plain text** — it contains no markdown
+syntax at all, so it does not have the problem F9 exists to fix, and running its hanging-indented
+sub-clauses through pandoc *as markdown* would reflow and damage them. And the notices are **not
+folded into `USER_GUIDE.pdf`**: *Licences & notices* would have no deep-link target, a distinctly
+named standalone file is the defensible way to deliver an LGPL notice, and G3 (the German guide)
+would otherwise inherit an English legal appendix.
+
+**Known cosmetic limit, recorded so it is not filed as a bug:** `NOTICE.md`'s relative link to
+`src/ui/assets/flags/ATTRIBUTION.md` does not resolve from the bundle — that path exists only under
+`_internal/f1telemetry/`. Pre-existing in the shipped `.md`; the PDF inherits it. The
+`[LICENSE](LICENSE)` link *does* resolve, since `LICENSE` sits beside both files.
+
 ### The installer is an admin install — decided 2026-08-07 (C8b)
 
 The Windows Firewall allow-rule needs administrator rights, and the clean-machine checklist asserts
@@ -935,7 +985,8 @@ first:
 
   **One improvement raised:** `NOTICE.md` ships as raw markdown, so a tester without a markdown
   viewer reads `#` and `**` in Notepad. `release.yml` already runs pandoc/xelatex for the guide, so
-  a second invocation is cheap — filed as PRIORITIES → **F9**.
+  a second invocation is cheap — filed as PRIORITIES → **F9**, and **closed 2026-08-08**: see
+  *The notices PDF (F9)* under the phased plan above.
 
 ---
 

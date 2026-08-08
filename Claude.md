@@ -279,12 +279,15 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (gates + suite → `USER_GUIDE.pdf` via pandoc/xelatex on Linux → PyInstaller on Windows → a **full**
   GitHub Release). **CI never pushes a commit to `main`** — that is the branch protection rule, and
   the reason the bump moved off `main` (2026-08-01). CI **verifies** the version, never stamps it,
-  so the artifact is exactly the tagged commit. The guide PDF, `roster_template.csv`, `LICENSE` and
-  `NOTICE.md` ship **beside the exe** (`paths.app_dir()` —
+  so the artifact is exactly the tagged commit. The guide PDF, `roster_template.csv`, `LICENSE`,
+  `NOTICE.md` and `NOTICE.pdf` ship **beside the exe** (`paths.app_dir()` —
   a third path kind, distinct from `data_root()` and `_MEIPASS`), opened from the Help page along
   with the data / captures / logs folders. Shipping the notices is an **LGPL v3 obligation** for the
   bundled Qt/PySide6, not a courtesy — the repo is *source-available, not open source* (`LICENSE`),
-  and `NOTICE.md` also carries the unofficial-tool / trademark / telemetry-data disclaimer. The published build has been checked against the Phase-3
+  and `NOTICE.md` also carries the unofficial-tool / trademark / telemetry-data disclaimer. **The
+  notices ship as a PDF as well as markdown (F9)** — a second pandoc invocation in the same
+  `guide-pdf` job — and *Licences & notices* prefers it, because raw `#`/`**` in Notepad is not a
+  readable LGPL notice. The published build has been checked against the Phase-3
   checklist (2026-08-02) and passes, and the **clean-instance run is done** (v0.7.0, 2026-08-07, via
   Windows Sandbox + the W11 boot — note the Sandbox *cannot record*, it has no route to the PS5).
   **Phase 4 is in progress, scoped as C8a/C8b/C8c:** the **Linux tarball ships** (`linux-build` in

@@ -49,7 +49,19 @@ class ResolveGuideTest(unittest.TestCase):
 
 
 class ResolveNoticesTest(unittest.TestCase):
-    def test_notices_beside_the_exe_are_used(self):
+    def test_pdf_beside_the_exe_wins_over_the_markdown(self):
+        """F9: the PDF is the readable one, so a release build must open it, not NOTICE.md."""
+        with TemporaryDirectory() as tmp:
+            app_dir, _ = _make_dirs(tmp)
+            (app_dir / user_guide.NOTICES_PDF_NAME).write_bytes(b"%PDF-1.4\n")
+            (app_dir / user_guide.NOTICES_NAME).write_text("# Notices", encoding="utf-8")
+
+            target = user_guide.resolve_notices(app_dir=app_dir)
+            self.assertTrue(target.is_local)
+            self.assertEqual(target.path, app_dir / user_guide.NOTICES_PDF_NAME)
+
+    def test_markdown_used_when_no_pdf_was_generated(self):
+        """The source run, and a build whose PDF step never produced one."""
         with TemporaryDirectory() as tmp:
             app_dir, _ = _make_dirs(tmp)
             (app_dir / user_guide.NOTICES_NAME).write_text("# Notices", encoding="utf-8")
@@ -69,7 +81,9 @@ class ResolveNoticesTest(unittest.TestCase):
             self.assertIn("/blob/main/NOTICE.md", target.url)
 
     def test_defaults_resolve_the_notices_in_this_checkout(self):
-        """app_dir() is the repo root in a source run - which is where NOTICE.md lives."""
+        """app_dir() is the repo root in a source run - which holds NOTICE.md and, because the
+        PDF is gitignored, never NOTICE.pdf. Same assumption test_defaults_resolve_the_markdown_
+        in_this_checkout makes about USER_GUIDE.pdf."""
         target = user_guide.resolve_notices()
         self.assertTrue(target.is_local)
         self.assertEqual(target.path.name, user_guide.NOTICES_NAME)

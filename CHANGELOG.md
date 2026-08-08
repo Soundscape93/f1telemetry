@@ -29,6 +29,11 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   and the Linux build needs a reasonably recent distribution, because it is built against the
   system libraries of the machine that builds it. If it won't start on an older install, that is
   the expected limit rather than a fault.
+- **The licence and third-party notices now ship as a PDF too** (`NOTICE.pdf`), beside the app
+  along with `NOTICE.md`, and attached to the release page on their own. **Help → Licences &
+  notices** opens the PDF when it's there. Previously the only copy was the Markdown file, which
+  opens in Notepad as raw `#` and `**` markup on a machine with no Markdown viewer — and the Qt
+  LGPL notice is the one document that has to be readable.
 
 **Known issues**
 

@@ -94,9 +94,11 @@ different kinds of artifact, and the seam is where that changes:
 1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
    published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
    **Both complete.**
-2. **Release 2 — C8a + C8b + F9.** Then a **second** clean-instance run, because **C8b changes what
-   "install" means**: a clean-instance test against a zip proves nothing about an installer, and
-   this time the run must confirm the new invariant — installed as admin, *runs* as a standard user.
+2. **Release 2 — C8a + C8b + F9.** **C8a done 2026-08-07, F9 done 2026-08-08; C8b is the last item
+   and the release is not cut until it lands.** All three share one `## Unreleased` section. Then a
+   **second** clean-instance run, because **C8b changes what "install" means**: a clean-instance
+   test against a zip proves nothing about an installer, and this time the run must confirm the new
+   invariant — installed as admin, *runs* as a standard user.
 
 This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8** and **F9**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
@@ -124,23 +126,12 @@ was written and was missed on **v0.4.1 and v0.6.0** — a step that depends on r
 remembered. `release_notes.py` was checked and is **not** affected: it reads a released section,
 whose comments `release_unreleased` has already stripped.
 
-**F9 — ship `NOTICE.md` as a PDF. Scope, so it isn't re-derived.** Raised by C4: a tester without a
+**F9 — ship `NOTICE.md` as a PDF. Done 2026-08-08**, as scoped. Raised by C4: a tester without a
 markdown viewer opens `NOTICE.md` in Notepad and reads `#` and `**`, and the LGPL v3 notice for the
-bundled Qt is the one document that genuinely has to reach them. `release.yml`'s `guide-pdf` job
-already runs pandoc/xelatex with the DejaVu font set, so this is **a second invocation in that job**,
-not a new job — and the apt list is already load-bearing there (see Phase 3), so don't touch it.
-
-Decisions this carries:
-- **`NOTICE.pdf` ships *beside* `NOTICE.md`, not instead of it.** The Help page's *Licences &
-  notices* action resolves through `user_guide.resolve_notices`, whose source-run fallback is the
-  repo's `.md`; removing the markdown would break the dev path and the GitHub fallback.
-- **Beside the exe**, like `USER_GUIDE.pdf` — `paths.app_dir()`, never `resource_path()`, which would
-  bury it in `_internal/`.
-- **Both build jobs' sanity-check lists gain the new file**, and both are LGPL-relevant, so a missing
-  one must fail the build rather than ship quietly.
-- **Open question for the implementing session:** whether *Licences & notices* should now prefer the
-  PDF over the `.md` when both are present. Prefer it — it is the readable one — but that means
-  `resolve_notices` grows a step, and it has tests.
+bundled Qt is the one document that genuinely has to reach them. Built as **a second pandoc
+invocation in the existing `guide-pdf` job**, not a new job — the apt list there is load-bearing
+(see Phase 3) and was not touched. Full write-up in PACKAGING → *The notices PDF (F9)*; the summary
+is in *Recently closed*.
 
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
 - **C8a macOS/Linux artifacts → Linux only — done 2026-08-07.** `release.yml` already runs an `ubuntu-latest` job for
@@ -212,7 +203,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
-| F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | open — **Cycle 3, Release 2** | PACKAGING → Build history, 4th build |
+| F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
 
 **E7 is resolved as a question, not as code.** The ranges in `setup_panel._SETUP_SPEC` are
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
@@ -300,6 +291,32 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **F9 — the notices PDF, and the question of which file the button opens.** Done 2026-08-08; the
+  second item of Cycle 3's Release 2. `NOTICE.pdf` is built by **a second pandoc invocation in the
+  existing `guide-pdf` job** (not a new job — the apt list there is load-bearing and already paid
+  for), ships beside the exe in both archives, is in **both** build jobs' sanity-check lists, and is
+  attached to the Release on its own so the terms are reachable without a ~250 MB download.
+  **The open question is answered: *Licences & notices* prefers the PDF.** `resolve_notices` grew a
+  third step and is now the same shape as `resolve_guide` — **presence decides at every step, never
+  `is_frozen()`**. That one rule is correct in both worlds because the dev path is preserved by a
+  fact rather than a special case: `app_dir()` is the repo root in a source run, and `NOTICE.pdf` is
+  a CI artifact that never lands there (`/NOTICE.pdf` joined `/USER_GUIDE.pdf` in `.gitignore`). A
+  release build finds the PDF; a source run finds only the markdown; a partial extract still gets
+  the GitHub URL. Shipping a PDF and then opening raw markdown anyway would have defeated the item.
+  **Two things deliberately not done, so they aren't re-proposed.** **`LICENSE` stays plain text** —
+  it contains no markdown syntax at all, so it never had the problem F9 exists to fix, and running
+  its hanging-indented sub-clauses through pandoc *as markdown* would reflow and damage them. And
+  the notices are **not folded into `USER_GUIDE.pdf`**: the Help action would have no deep-link
+  target, a distinctly named standalone file is the defensible way to deliver an LGPL notice, and G3
+  would otherwise give the German guide an English legal appendix.
+  **One trap found in review and worth not re-learning:** the `release` job's `download-artifact`
+  has no `name:`, so it lands every artifact under `artifacts/<artifact-name>/` — and both PDFs ride
+  in the one `user-guide-pdf` artifact. `artifacts/notice-pdf/NOTICE.pdf` looks right and does not
+  exist. That job is **skipped on a no-tag `workflow_dispatch`**, so the dispatch test run cannot
+  catch it, and it would have failed *after `tag.yml` pushed the tag*.
+  Covered by `test/test_user_guide.py` (`ResolveNoticesTest`, PDF-wins and markdown-fallback cases).
+  The Qt wiring has no automated test — every suite here is deliberately Qt-free — so it was
+  verified by hand by dropping a `NOTICE.pdf` at the repo root and opening the action.
 - **C8a — the Linux release artifact.** Done 2026-08-07; the first item of Cycle 3's Release 2. A
   `linux-build` job mirroring `windows-build` on `ubuntu-latest`, publishing
   `f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
