@@ -106,10 +106,26 @@ jobs:
             -V mainfont="DejaVu Serif" \
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
+
+      # SECOND INOVCATION for this job - the above apt install is load-bearing and already "paid for". Same font/geometry
+      # as the guide, so the two documents look like they belong together. No --toc: NOTICE.md is short, a content page 
+      # adds noise. PDF for builds instead the md as users may not have a viewer that renders the md well.
+      - name: Build NOTICE.pdf
+        run: |
+          pandoc NOTICE.md -o NOTICE.pdf \
+            --pdf-engine=xelatex \
+            -V geometry:margin=2.5cm \
+            -V mainfont="DejaVu Serif" \
+            -V monofont="DejaVu Sans Mono" \
+            -V colorlinks=true
+
+      # One artifact for both PDFs, so each build job's download step picks up the par in one go.
       - uses: actions/upload-artifact@v4
         with:
           name: user-guide-pdf
-          path: USER_GUIDE.pdf
+          path: |
+            USER_GUIDE.pdf
+            NOTICE.pdf
 
   windows-build:
     runs-on: windows-latest
@@ -135,8 +151,9 @@ jobs:
         run: pyinstaller packaging/f1telemetry.spec --noconfirm
 
       # Beside the exe, NOT inside _internal/ - see paths.app_dir() and the Help page's
-      # "Open user guide" action. A tester who never launches the app still finds the guide.
-      - name: Add the user guide beside the exe
+      # "Open user guide" / "License & notices" action. A tester who never launches the app still finds both docs.
+      # One download: the guide-pdf job uploads both PDFs together.
+      - name: Add the generated PDFs beside the exe
         uses: actions/download-artifact@v4
         with:
           name: user-guide-pdf
@@ -160,7 +177,7 @@ jobs:
         working-directory: f1telemetry/dist/f1telemetry
         shell: pwsh
         run: |
-          foreach ($item in "f1telemetry.exe", "_internal", "USER_GUIDE.pdf", "roster_template.csv", "LICENSE", "NOTICE.md") {
+          foreach ($item in "f1telemetry.exe", "_internal", "USER_GUIDE.pdf", "roster_template.csv", "LICENSE", "NOTICE.md", "NOTICE.pdf") {
             if (-not (Test-Path $item)) { throw "missing from the bundle: $item" }
           }
 
@@ -216,8 +233,9 @@ jobs:
         run: pyinstaller packaging/f1telemetry.spec --noconfirm
 
       # Beside the binary, NOT inside _internal/ - paths.app_dir() resolves here, and the Help 
-      # page's "Open user guide" / "Licences & notices" actions read from it.
-      - name: Add the user guide beside the binary
+      # page's "Open user guide" / "Licences & notices" actions read from it. One download: the
+      # guide-pdf job uploads both PDFs together.
+      - name: Add the generated PDFs beside the binary
         uses: actions/download-artifact@v4
         with:
           name: user-guide-pdf
@@ -232,7 +250,7 @@ jobs:
       - name: Sanity-check the bundle
         working-directory: f1telemetry/dist/f1telemetry
         run: |
-          for item in f1telemetry _internal USER_GUIDE.pdf roster_template.csv LICENSE NOTICE.md; do
+          for item in f1telemetry _internal USER_GUIDE.pdf roster_template.csv LICENSE NOTICE.md NOTICE.pdf; do
             [ -e "$item" ] || { echo "missing from the bundle: $item"; exit 1; }
           done
 
@@ -265,6 +283,8 @@ jobs:
 
       # A FULL release, deliberately: GitHub's /releases/latest skips drafts and prereleases, and
       # the in-app update check reads exactly that endpoint (src/update_check.py).
+      # NOTICE.pdf is published as a standalone asset as well as inside both archives, so the 
+      # license terms are reachable without a ~250 MB download.
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -275,4 +295,5 @@ jobs:
             --notes-file artifacts/release-notes/notes.md \
             artifacts/windows-zip/*.zip \
             artifacts/linux-tarball/*.tar.gz \
-            artifacts/user-guide-pdf/USER_GUIDE.pdf
+            artifacts/user-guide-pdf/USER_GUIDE.pdf \
+            artifacts/user-guide-pdf/NOTICE.pdf

@@ -239,12 +239,14 @@ weeks). Summary of the locked direction:
   `release.yml` (preflight gate + test suite →
   `USER_GUIDE.pdf` on Linux via pandoc/xelatex + the PyInstaller Windows build → a **full** GitHub
   Release). CI **verifies** the version, never stamps it (`packaging/check_version.py`), so the
-  artifact is exactly the tagged commit. The PDF, `roster_template.csv`, `LICENSE` and `NOTICE.md`
-  ship **beside the exe**,
+  artifact is exactly the tagged commit. The PDF, `roster_template.csv`, `LICENSE`, `NOTICE.md` and
+  `NOTICE.pdf` (F9 — a second pandoc invocation in the same job, because raw markdown in Notepad is
+  not a readable LGPL notice) ship **beside the exe**,
   reachable from the Help page's **Open user guide** and **Licences & notices** via the new
   `paths.app_dir()` (third path kind)
-  with a PDF → source-`.md` → GitHub fallback chain (the notices need only two steps — `app_dir()`
-  is the repo root in a source run); **Open data / captures / logs folder** actions
+  with a PDF → source-`.md` → GitHub fallback chain each (the notices resolve entirely out of
+  `app_dir()`, which is the repo root in a source run, so no source-tree special case is needed);
+  **Open data / captures / logs folder** actions
   landed alongside (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer rather than the
   data moving). Real self-updater — velopack/Sparkle/`tufup` — still deferred. Details + rationale in
   `docs/PACKAGING.md`.
