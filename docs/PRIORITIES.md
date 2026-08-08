@@ -125,7 +125,7 @@ remembered. `release_notes.py` was checked and is **not** affected: it reads a r
 whose comments `release_unreleased` has already stripped.
 
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
-- **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
+- **C8a macOS/Linux artifacts → Linux only — done 2026-08-07.** `release.yml` already runs an `ubuntu-latest` job for
   the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
   consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
   and an unsigned build walking into Gatekeeper. *"Nearly free" turned out to be optimistic* — the
@@ -212,7 +212,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
-| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3, Release 2** — in flight; PACKAGING → Phase 4 |
+| C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
@@ -282,6 +282,33 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C8a — the Linux release artifact.** Done 2026-08-07; the first item of Cycle 3's Release 2. A
+  `linux-build` job mirroring `windows-build` on `ubuntu-latest`, publishing
+  `f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
+  sanity-check — `LICENSE` and `NOTICE.md` are an LGPL v3 obligation for the bundled Qt, so a
+  missing one fails the build rather than shipping quietly.
+  **Three choices worth not re-litigating:** a **tarball, not an AppImage** (that was already the
+  plan; AppImage needs `linuxdeploy` plus a Qt plugin and is its own debugging surface); **`.tar.gz`,
+  not zip**, because zip does not preserve the executable bit and the binary would need a `chmod +x`
+  to run at all; and **macOS still dropped** — no known user, a runner to pay for, and an unsigned
+  build walking into Gatekeeper.
+  **The limit is stated, not solved:** a PyInstaller bundle links against the **glibc of the machine
+  that built it**, so the artifact needs a distro at least as new as the runner's Ubuntu. Building
+  for older ones means an older container, which is not worth it for a best-effort artifact.
+  **The lesson it produced is worth more than the job.** The first run died in PyInstaller's
+  *collection* stage, before any bundling: `collect_submodules` **imports** each package to
+  enumerate it, and `pyqtgraph.examples` builds Qt objects at import time — so the isolated
+  subprocess reached for the `xcb` plugin, found no display, and **aborted (SIGABRT)**. C7's
+  exclusion filtered the *result*, far too late, and `on_error` cannot catch a child that died
+  rather than raised. Fixed with `collect_submodules(package, filter=…)`, since a package the
+  filter rejects is never recursed into. **The rule: if you exclude a submodule from a `collect_*`
+  call, filter during collection, not afterwards.** The build step also sets
+  `QT_QPA_PLATFORM=offscreen`, as `ci.yml` does for the suite. Windows never hit any of it — its
+  platform plugin initialises without a display server, which is why a Linux artifact was the first
+  thing to find it.
+  Also sanitises the tag into the archive filename in both build jobs: on a no-tag
+  `workflow_dispatch` the tag defaults to the branch name, and a slashed branch was read as a
+  directory in the output path. Latent since Phase 3, reachable only by dispatch.
 - **C4 — the clean-instance test, and what Windows Sandbox can't do.** Done 2026-08-07 against the
   downloaded **v0.7.0** Release zip, on Windows Sandbox *and* the W11 boot. Closes the two things no
   build had ever covered: the clean-instance run and the SmartScreen click-through wording.

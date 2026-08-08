@@ -202,14 +202,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[package]"
-          # Qt needs these to link at build time; the runner image does ntot carry them all.
+          # Qt needs these to link at build time; the runner image does not carry them all.
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1
       
       - name: Build the one-folder bundle
         working-directory: f1telemetry
         env:
           # Any Qt import during PyInstaller's collection must not reach for a display: the runner
-          # has none, and Qt aborts the process rather than raising. Same reason ci.yml sets its
+          # has none, and Qt aborts the process rather than raising. Same reason ci.yml sets it
           # for the test suite. The spec's filter is the real fix; this covers the next submodule
           # that decides to touch Qt at import time.
           QT_QPA_PLATFORM: offscreen
@@ -227,13 +227,13 @@ jobs:
         working-directory: f1telemetry
         run: cp docs/roster_template.csv LICENSE NOTICE.md dist/f1telemetry/
       
-      # same set the the Windows job checks. LICENSE + NOTICE.md are an LGPL v3 obligation for the bundled
+      # same set the Windows job checks. LICENSE + NOTICE.md are an LGPL v3 obligation for the bundled
       # Qt, so a missing one must fail the build rather than ship quietly.
       - name: Sanity-check the bundle
         working-directory: f1telemetry/dist/f1telemetry
         run: |
           for item in f1telemetry _internal USER_GUIDE.pdf roster_template.csv LICENSE NOTICE.md; do
-            [ e "$item" ] || (echo "missing from the bundle: $item" && exit 1)
+            { -e "$item" ] || (echo "missing from the bundle: $item"; exit 1); }
           done
 
       # -C dist so t he archive holds f1telemetry/... rather than the full path.cancel-timeout-minutes: 
