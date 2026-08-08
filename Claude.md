@@ -142,6 +142,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    `(packet_format, packet_id)` via the registry — never a user-facing toggle.
 9. **Enums are stored as raw ints** and read back via `safe_enum` (returns the member, or the
    raw int for values newer than our enum).
+10. **Never construct a QWidget off the GUI thread** — it is undefined behaviour in Qt and can abort
+    the process. This bites because **every worker's `finally` sits outside its `except`**
+    (`IngestWorker`, `ReingestWorker`, `RelocateWorker`, `ImportWorker` all dispose stores there),
+    so an exception from `store.close()` *does* escape `run()` and lands in `sys.excepthook` on the
+    worker's thread. `crash.py` therefore checks the thread and hops to the GUI thread through a
+    queued-connection relay, passing only strings — never the exception, whose traceback would pin
+    worker frames alive across threads. Any new dialog reachable from a worker needs the same care.
 
 ## Conventions
 
@@ -250,7 +257,7 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
   `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics
   surface and an edit-calendar action. See `docs/ROADMAP.md`.
-- **Packaging (Phases 0–3 done; Phase 4 outstanding):** a per-user data root + `resource_path` (`paths.py`), file logging
+- **Packaging (Phases 0–3 done; Phase 4 in progress — Linux artifact shipped, installer next):** a per-user data root + `resource_path` (`paths.py`), file logging
   + crash dialog, `__version__`/`PIPELINE_VERSION` (`version.py`), a PyInstaller one-folder Windows
   build (`packaging/`), and a notify-only GitHub-Releases update check (`update_check.py` + Help
   page). Verified on Windows 11 (2026-07-25). **Phase 2 = the pipeline-version stamp + guided
@@ -278,8 +285,21 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   with the data / captures / logs folders. Shipping the notices is an **LGPL v3 obligation** for the
   bundled Qt/PySide6, not a courtesy — the repo is *source-available, not open source* (`LICENSE`),
   and `NOTICE.md` also carries the unofficial-tool / trademark / telemetry-data disclaimer. The published build has been checked against the Phase-3
-  checklist (2026-08-02) and passes; **Phase 4 is what's left** (macOS/Linux artifacts, Inno Setup
-  installer, real auto-updater). See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+  checklist (2026-08-02) and passes, and the **clean-instance run is done** (v0.7.0, 2026-08-07, via
+  Windows Sandbox + the W11 boot — note the Sandbox *cannot record*, it has no route to the PS5).
+  **Phase 4 is in progress, scoped as C8a/C8b/C8c:** the **Linux tarball ships** (`linux-build` in
+  `release.yml`, best-effort — a PyInstaller bundle needs a distro no older than its build machine's
+  glibc); **macOS is dropped** (no user, unsigned into Gatekeeper); the **Inno Setup installer is
+  next** and is settled as an **admin install** carrying the Windows Firewall allow-rule, with the
+  invariant that *the app itself still needs no admin at runtime*; **velopack is deferred**. See
+  `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+- **Startup capability self-check (C6):** `capabilities.py` (Qt-free) probes pyqtgraph, zstandard,
+  pyarrow and the bundled flag SVGs on every launch, logs one line each — healthy or not, so a
+  tester's log always answers the question — and shows one dialog naming the consequences only when
+  something degraded. It exists because a packaging change can drop a lazily-imported dependency
+  *without* crashing: the app just serves its fallback. Probe depth is per capability on purpose
+  (pyqtgraph is `find_spec`-only, to keep its import lazy), so it proves a module **shipped**, not
+  that it **renders** — see PACKAGING for that distinction before relying on it.
 
 ## Where to look
 

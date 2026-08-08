@@ -248,7 +248,13 @@ weeks). Summary of the locked direction:
   landed alongside (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer rather than the
   data moving). Real self-updater — velopack/Sparkle/`tufup` — still deferred. Details + rationale in
   `docs/PACKAGING.md`.
-- **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
+- **Phase 4 — in progress, split into C8a/C8b/C8c (PRIORITIES → Cycle 3, Release 2).**
+  **C8a done 2026-08-07:** a best-effort **Linux tarball** ships with each release (`linux-build` in
+  `release.yml`); **macOS is dropped** — no known user, and an unsigned build walks into Gatekeeper.
+  **C8b next:** an **Inno Setup installer**, decided as an **admin install** so it can write the
+  Windows Firewall allow-rule, with the standing invariant that the app needs no admin *at runtime*.
+  **C8c (velopack self-updater) deferred** — notify-only stays. Detail and rationale in
+  `docs/PACKAGING.md` → Phase 4.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.
 

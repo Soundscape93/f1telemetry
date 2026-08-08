@@ -98,7 +98,7 @@ different kinds of artifact, and the seam is where that changes:
    "install" means**: a clean-instance test against a zip proves nothing about an installer, and
    this time the run must confirm the new invariant — installed as admin, *runs* as a standard user.
 
-This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8**, added
+This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8** and **F9**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
 Release 1 on 2026-08-07**: a GitHub Actions outage meant the release PR needed a fresh commit to
 re-run its checks anyway, and F8 is precisely a fix to those checks.
@@ -123,6 +123,24 @@ a gate with no escape becomes one people work around). F6 had been a P2 *process
 was written and was missed on **v0.4.1 and v0.6.0** — a step that depends on remembering, twice not
 remembered. `release_notes.py` was checked and is **not** affected: it reads a released section,
 whose comments `release_unreleased` has already stripped.
+
+**F9 — ship `NOTICE.md` as a PDF. Scope, so it isn't re-derived.** Raised by C4: a tester without a
+markdown viewer opens `NOTICE.md` in Notepad and reads `#` and `**`, and the LGPL v3 notice for the
+bundled Qt is the one document that genuinely has to reach them. `release.yml`'s `guide-pdf` job
+already runs pandoc/xelatex with the DejaVu font set, so this is **a second invocation in that job**,
+not a new job — and the apt list is already load-bearing there (see Phase 3), so don't touch it.
+
+Decisions this carries:
+- **`NOTICE.pdf` ships *beside* `NOTICE.md`, not instead of it.** The Help page's *Licences &
+  notices* action resolves through `user_guide.resolve_notices`, whose source-run fallback is the
+  repo's `.md`; removing the markdown would break the dev path and the GitHub fallback.
+- **Beside the exe**, like `USER_GUIDE.pdf` — `paths.app_dir()`, never `resource_path()`, which would
+  bury it in `_internal/`.
+- **Both build jobs' sanity-check lists gain the new file**, and both are LGPL-relevant, so a missing
+  one must fail the build rather than ship quietly.
+- **Open question for the implementing session:** whether *Licences & notices* should now prefer the
+  PDF over the `.md` when both are present. Prefer it — it is the readable one — but that means
+  `resolve_notices` grows a step, and it has tests.
 
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
 - **C8a macOS/Linux artifacts → Linux only — done 2026-08-07.** `release.yml` already runs an `ubuntu-latest` job for

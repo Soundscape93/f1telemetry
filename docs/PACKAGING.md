@@ -441,6 +441,47 @@ ever needs admin to run, that is a bug, not a consequence of this decision.
 The admin requirement must be **documented** — in the user guide's install section, in the release
 notes for the first build that ships an installer, and on the Release page itself.
 
+#### C8b scope — settled vs still to decide
+
+Written down so the implementing session starts building rather than discussing.
+
+**Settled:**
+- **Inno Setup**, per the original Phase 4 plan. Not Briefcase/MSI — that was weighed and deferred
+  in the locked decisions above.
+- **Admin (per-machine) install**, so the firewall rule can be written. See the table above.
+- **The zip keeps shipping.** The installer is an *addition* to the release assets, not a
+  replacement: the zip is the artifact three builds have been verified against, it is what a tester
+  who cannot elevate falls back to, and the Linux tarball has no installer at all. Dropping it would
+  strand both.
+- **The runtime invariant:** the installed app needs no admin. `data_root()` stays
+  `%LOCALAPPDATA%`; nothing is ever written beside the exe.
+- **A Start-menu entry and an uninstaller** — the two things an installer is actually for beyond the
+  firewall rule.
+
+**To decide before writing the `.iss`:**
+- **What uninstall removes.** Three separable things: the program files (obviously), the **firewall
+  rule** (it should go — a rule naming a deleted exe is litter), and the **data root** (`captures/`
+  can be gigabytes and is the *source of truth*). The default must be **leave the data**, with
+  removal offered as an explicit opt-in checkbox at most. Deleting a league's captures on uninstall
+  would be unrecoverable, and this project's whole data story is "the database is disposable, the
+  captures are not".
+- **How the rule is written** — Inno's `[Run]` calling `netsh advfirewall firewall add rule` versus a
+  Pascal-script call to the Windows Firewall API. `netsh` is legible and debuggable in a log; check
+  it is idempotent across reinstalls (add a matching `delete rule` first, or key the rule by name).
+- **Install directory** — `{autopf}\f1telemetry` (Program Files) follows from a per-machine install;
+  confirm nothing in the app assumes a writable install dir, which `paths.py` should already
+  guarantee.
+- **Upgrade-in-place behaviour** — whether the installer replaces a previous version silently and
+  what happens to a running instance (a one-folder Windows app holds file locks; this is the same
+  problem that deferred velopack, and it applies to an installer too).
+- **Whether CI builds the installer.** Inno Setup is available on `windows-latest` runners, so
+  `windows-build` can produce it — but that makes the installer part of the release preflight and
+  therefore able to fail a release. Weigh against building it by hand for the first one or two.
+
+**And when it ships:** the clean-instance run must be repeated, checking the *new* invariant —
+installed as admin, then **run as a standard user** with nothing needing elevation. The existing
+checklist item changes meaning rather than disappearing.
+
 ---
 
 ## Phase 0 — done
