@@ -253,8 +253,11 @@ weeks). Summary of the locked direction:
 - **Phase 4 — in progress, split into C8a/C8b/C8c (PRIORITIES → Cycle 3, Release 2).**
   **C8a done 2026-08-07:** a best-effort **Linux tarball** ships with each release (`linux-build` in
   `release.yml`); **macOS is dropped** — no known user, and an unsigned build walks into Gatekeeper.
-  **C8b next:** an **Inno Setup installer**, decided as an **admin install** so it can write the
-  Windows Firewall allow-rule, with the standing invariant that the app needs no admin *at runtime*.
+  **C8b done 2026-08-08:** an **Inno Setup installer** (`packaging/installer/f1telemetry.iss`, built
+  by CI and published beside the zip), an **admin install** so it can write the Windows Firewall
+  allow-rule, with the standing invariant that the app needs no admin *at runtime*. The zip keeps
+  shipping as the no-elevation fallback. The rule covers **private/domain profiles only**, so a home
+  network Windows has classified as *Public* receives nothing — silently, hence documented.
   **C8c (velopack self-updater) deferred** — notify-only stays. Detail and rationale in
   `docs/PACKAGING.md` → Phase 4.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and

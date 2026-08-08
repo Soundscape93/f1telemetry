@@ -94,11 +94,12 @@ different kinds of artifact, and the seam is where that changes:
 1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
    published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
    **Both complete.**
-2. **Release 2 — C8a + C8b + F9.** **C8a done 2026-08-07, F9 done 2026-08-08; C8b is the last item
-   and the release is not cut until it lands.** All three share one `## Unreleased` section. Then a
+2. **Release 2 — C8a + C8b + F9. All three done (2026-08-07, 2026-08-08, 2026-08-08) and sharing one
+   `## Unreleased` section; the release is ready to cut** — the `staging` → `main` PR, labelled
+   **`minor`** (C8a's new platform artifact and C8b's installer both add capability). Then a
    **second** clean-instance run, because **C8b changes what "install" means**: a clean-instance
    test against a zip proves nothing about an installer, and this time the run must confirm the new
-   invariant — installed as admin, *runs* as a standard user.
+   invariant — installed as admin, *runs* as a standard user. That run is in *Needs verification*.
 
 This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8** and **F9**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
@@ -143,14 +144,15 @@ is in *Recently closed*.
   C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
   collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
   a submodule from a `collect_*` call, filter during collection, not afterwards.**
-- **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
-  PACKAGING's #3 "easy to forget". **The open question is settled, 2026-08-07: an admin install
-  that writes the rule.** Elevation is normal for a Windows installer, and UAC drops the
-  privilege again immediately. A per-user install with an *optional* elevated task would keep both
-  properties but was rejected as the most complex option, with its failure mode landing on a tester
-  machine we cannot debug. **The invariant this must not break:** the app requires no admin rights
-  *at runtime* — the checklist item becomes "install as admin, run as a standard user". Rationale
-  and the consequences table are in PACKAGING → Phase 4.
+- **C8b Inno Setup installer + Windows Firewall allow-rule → done 2026-08-08.** The firewall prompt
+  is PACKAGING's #3 "easy to forget". **Built as an admin install that writes the rule** (option b,
+  settled 2026-08-07): elevation is normal for a Windows installer, and UAC drops the privilege
+  again immediately. A per-user install with an *optional* elevated task would keep both properties
+  but was rejected as the most complex option, with its failure mode landing on a tester machine we
+  cannot debug. **The invariant it must not break:** the app requires no admin rights *at runtime* —
+  the checklist item becomes "install as admin, run as a standard user". Rationale, the consequences
+  table and all six implementation decisions are in PACKAGING → *C8b scope*; the summary is in
+  *Recently closed*.
 - **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
   self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
   toolchain that would replace the zip artifact verified across three builds, for a handful of
@@ -222,7 +224,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
-| C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-08** — Cycle 3, Release 2; PACKAGING → C8b scope |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
@@ -278,6 +280,15 @@ up opportunistically rather than scheduled.
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
+- **The second clean-instance run — the C8b invariant.** Release 2 ships an installer, and a
+  clean-instance test against a zip proves nothing about one. **Plan:** run the full clean-machine
+  checklist in PACKAGING against the **published Release 2 installer**, on Windows Sandbox plus the
+  W11 boot, confirming the item that *changed meaning* — **installed as admin, then run as a
+  standard user** with no UAC prompt, nothing written beside the exe, and the data root belonging to
+  that user. Also new on that list: the rule verified with `netsh … show rule`, upgrade-in-place
+  leaving one rule and one uninstall entry, uninstall removing the rule while leaving captures, and
+  the zip still working standalone. **Sandbox's known limit applies** — it cannot record (no route
+  to the PS5), so the "record with no prompt at all" item needs the boot.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
@@ -291,6 +302,35 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C8b — the admin installer, and the six decisions it needed.** Done 2026-08-08; the last item of
+  Cycle 3's Release 2. `packaging/installer/f1telemetry.iss`, compiled by `windows-build` and
+  published as `f1telemetry-<tag>-windows-x64-setup.exe`: Program Files, Start-menu entry,
+  uninstaller, and the Windows Firewall allow-rule that is the reason it exists. **The zip keeps
+  shipping** — it is the no-elevation fallback and the artifact three builds were verified against.
+  **The runtime invariant was verified, not assumed:** `paths.app_dir()` is read-only at all four
+  call sites and frozen `data_root()` is `%LOCALAPPDATA%\f1telemetry`, so nothing is written beside
+  the exe and Program Files is safe.
+  **Four answers worth not re-deriving.** *Uninstall never touches the data root, and there is no
+  opt-in checkbox either* — beyond "captures are the source of truth", an admin uninstall runs under
+  the **administrator's** token while `data_root()` is per-user, so on the very machine this targets
+  it would resolve the wrong profile, delete nothing and report success. *`netsh`, keyed by rule name
+  and deleted before added* — legible in the install log, and idempotent across reinstalls.
+  *`CloseApplications=yes` plus an `[InstallDelete]` wipe of `_internal`* — Restart Manager solves
+  the one-folder file locks, and the wipe solves the half that is easy to miss, since Inno replaces
+  only files it installs and anything **dropped** by a later build would linger forever. *CI builds
+  it* — a hand-built installer comes from an unverified working tree and breaks both "the published
+  artifact is exactly the tagged commit" and "CI verifies the version, it never stamps it"; the
+  no-tag `workflow_dispatch` path answers the objection that it can now fail a release.
+  **Two things the written scope had not listed.** `profile=private,domain`, **not public** — a
+  home-LAN listener whose parser reads untrusted datagrams, mirroring what the Windows prompt itself
+  ticks. **Its failure is silent**, so it is documented in three places: a home network Windows has
+  classified as *Public* receives nothing with no error. And there is **no "launch now" checkbox** —
+  the installer is elevated, so a post-install launch would hand the app an admin token and create
+  the data root in the wrong profile on its very first run, disproving the invariant immediately.
+  **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
+  `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
+  `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule
+  that exists, looks right, and silently receives nothing.
 - **F9 — the notices PDF, and the question of which file the button opens.** Done 2026-08-08; the
   second item of Cycle 3's Release 2. `NOTICE.pdf` is built by **a second pandoc invocation in the
   existing `guide-pdf` job** (not a new job — the apt list there is load-bearing and already paid

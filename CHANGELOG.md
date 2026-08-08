@@ -34,6 +34,17 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   notices** opens the PDF when it's there. Previously the only copy was the Markdown file, which
   opens in Notepad as raw `#` and `**` markup on a machine with no Markdown viewer — and the Qt
   LGPL notice is the one document that has to be readable.
+- **There is now a Windows installer**, alongside the zip. It puts F1 Telemetry in Program Files
+  with a Start-menu entry and an uninstaller, and — the reason it exists — **it adds the Windows
+  Firewall rule for you**, so telemetry arrives on the first recording with no prompt to click and
+  nothing to fix if you clicked the wrong thing. **Windows asks for administrator rights to
+  install**, which is what writing that rule needs; **running the app never does**, and it still
+  keeps all your data under your own user account. Upgrading installs over the top — close the app
+  first, or let the installer ask. Uninstalling removes the program and the firewall rule and
+  **leaves your captures and database completely untouched**. The zip build stays exactly as it
+  was, for anyone who can't or would rather not elevate. One caveat: the rule covers *private*
+  networks, so if Windows has your home network set to Public, set it to Private or no packets
+  will arrive.
 
 **Known issues**
 

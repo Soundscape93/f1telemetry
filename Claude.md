@@ -292,10 +292,12 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   Windows Sandbox + the W11 boot — note the Sandbox *cannot record*, it has no route to the PS5).
   **Phase 4 is in progress, scoped as C8a/C8b/C8c:** the **Linux tarball ships** (`linux-build` in
   `release.yml`, best-effort — a PyInstaller bundle needs a distro no older than its build machine's
-  glibc); **macOS is dropped** (no user, unsigned into Gatekeeper); the **Inno Setup installer is
-  next** and is settled as an **admin install** carrying the Windows Firewall allow-rule, with the
-  invariant that *the app itself still needs no admin at runtime*; **velopack is deferred**. See
-  `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
+  glibc); **macOS is dropped** (no user, unsigned into Gatekeeper); the **Inno Setup installer
+  ships** (`packaging/installer/f1telemetry.iss`, built by `windows-build`) as an **admin install**
+  carrying the Windows Firewall allow-rule, with the invariant that *the app itself still needs no
+  admin at runtime* — the zip stays as the no-elevation fallback, and the rule is
+  **private/domain-profile only**, so a network Windows classes as *Public* silently receives
+  nothing; **velopack is deferred**. See `docs/PACKAGING.md` / `docs/USER_GUIDE.md`.
 - **Startup capability self-check (C6):** `capabilities.py` (Qt-free) probes pyqtgraph, zstandard,
   pyarrow and the bundled flag SVGs on every launch, logs one line each — healthy or not, so a
   tester's log always answers the question — and shows one dialog naming the consequences only when
