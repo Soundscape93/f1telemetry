@@ -48,6 +48,9 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   was, for anyone who can't or would rather not elevate. One caveat: the rule covers *private*
   networks, so if Windows has your home network set to Public, set it to Private or no packets
   will arrive.
+- **A recording that isn't receiving anything now says so.** Instead of sitting on *"waiting for
+  telemetry"* indefinitely, the status line names the likely reasons after a few seconds — a
+  restart still pending after installing, or a network Windows has set to Public.
 
 **Known issues**
 

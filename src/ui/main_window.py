@@ -49,6 +49,10 @@ from .. import paths
 # writes to the per-user data dir while dev keeps using the workspace-root layout.
 _HOST = "0.0.0.0"
 _PORT = 20777
+# How long a recording may sit at zero datagrams before the status line stops saying "waiting" and
+# starts naming likely causes. Long enough not to fire between sessions on track, short enough that
+# a tester notices before filing a bug (docs/PACKAGING.md, C8b).
+_NO_TELEMETRY_HINT_MS = 25_000
 
 log = logging.getLogger(__name__)
 
@@ -224,8 +228,13 @@ class MainWindow(QMainWindow):
         self._recorder.failed.connect(self._on_failed)
         self._recorder.start()
 
+        self._record_packets = 0
         self._record_button.setText("Stop recording")
-        self._status.setText(f"Recording - waiting for telemetry ...")
+        self._status.setText("Recording - waiting for telemetry ...")
+        # The recorder reports status only when a datagram arrives (Recorder.record loops over the
+        # source), so a socket that receives nothing produces no updates at all and the label sits
+        # on "waiting" forever. One deferred check turns that silence into an actionable hint.
+        QTimer.singleShot(_NO_TELEMETRY_HINT_MS, self._hint_if_no_telemetry)
 
     def _stop_recording(self) -> None:
         """Stop recording live telemetry; the RecorderWorker will finish and emit a done signal."""
@@ -236,9 +245,30 @@ class MainWindow(QMainWindow):
 
     def _on_record_status(self, packets: int, byte_count: int, elapsed: float) -> None:
         """Update the status label with the current recording progress."""
+        self._record_packets = packets
         kb = byte_count / 1024
         self._status.setText(f"Recording - {packets} packets, {kb:.0f} KB, {elapsed:.0f}s")
 
+    def _hint_if_no_telemetry(self) -> None:
+        """Name the likely causes when a recording has run a while with nothing arriving.
+
+        The restart case is why this exists: the installer's firewall rule is not effective until
+        Windows restarts, so a user who declines Setup's restart sees a recording that looks
+        perfectly healthy and receives nothing (docs/PACKAGING.md, C8b). Setup asks for the
+        restart, but a request that can be declined needs a backstop.
+
+        Deliberately one line, and it points at Help - Setup rather than repeating the setup steps
+        in transient status text. A stale timer from a previous recording can only fire while the
+        current one is still at zero packets, in which case the hint is correct anyway.
+        """
+        if self._recorder is None or self._record_packets:
+            return
+        self._status.setText(
+            "Recording - no telemetry yet. If you just installed F1 Telemetry, restart Windows. "
+            "Otherwise check the game is sending, and that your network is set to Private "
+            "(Help - Setup / Configuration)."
+        )
+    
     def _on_record_done(self, path: str, packet_count: int) -> None:
         """Handle the RecorderWorker's done signal; start ingesting the capture."""
         worker, self._recorder = self._recorder, None

@@ -16,10 +16,17 @@ There are two downloads on the project's GitHub **Releases** page. Both give you
 2. Run it. **Windows will ask for administrator rights** — see the note below for why.
 3. **SmartScreen** may warn ("Windows protected your PC") because the build is unsigned — click
    **More info → Run anyway**. This is expected for a small, unsigned app.
-4. Launch **F1 Telemetry** from the Start menu.
+4. **Restart Windows when Setup asks.** This one matters — see the warning below.
+5. Launch **F1 Telemetry** from the Start menu.
 
-The installer sets up the **Windows Firewall rule for you**, so recording works the first time
-with no prompt to click (section 2). It also adds a Start-menu entry and an uninstaller.
+> **Restart before your first recording.** The installer adds the Windows Firewall rule for you,
+> but Windows doesn't put it into effect until it restarts. If you skip the restart, the app
+> starts fine and **Record looks like it is working — but no telemetry arrives, and nothing tells
+> you why**. If that happens, restart and try again. (The app will also hint at this after a few
+> seconds of receiving nothing.)
+
+Once restarted, recording works the first time with no firewall prompt to click (section 2). The
+installer also adds a Start-menu entry and an uninstaller.
 
 > **Administrator rights are needed to install, and never to run.** Adding a firewall rule is a
 > system-wide change, which is the only reason Windows asks. Once installed, F1 Telemetry runs as
@@ -71,7 +78,8 @@ reaches it over your Network.
 ### Windows Firewall
 
 **If you used the installer, this is already done** — the rule was added during installation and
-there is nothing to click.
+there is nothing to click. **But it only takes effect after you restart Windows** (section 1). If
+recording receives nothing right after installing, that restart is the first thing to try.
 
 **If you run the zip build,** Windows shows a firewall prompt the first time you record — click
 **Allow**. If you dismissed or denied it, recording won't receive packets and the prompt won't

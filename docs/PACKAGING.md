@@ -640,11 +640,30 @@ receives the same broadcast, so "the game wasn't sending" can never explain a re
 Because of that history, the clean-machine checklist requires the install → restart → record path
 to pass **twice from scratch**, not once.
 
-The episode also exposed that the app says nothing between `listening on…` and a finished capture —
-filed as PRIORITIES → **A6** — and that a user who declines the restart hits a silent failure with
-no in-app explanation, filed as **A7**. Both are recorder/UI work, deliberately not folded into
-C8b. In fairness A6 would not have shortened this hunt: the GUI already showed a zero packet count.
-The firewall bisection and the simultaneous-recording control are what did the work.
+**Accepted 2026-08-09 on exactly that basis.** Two full clean passes, identical both times: before
+restarting, the installed app received nothing **while the release zip recorded from the same
+broadcast as a control**; closing and reopening the installed app did not help; after restarting,
+it recorded immediately and a `.f1cap` appeared. The control is what makes the result trustworthy —
+it makes "the game wasn't sending" unavailable as an explanation, which is precisely how the three
+earlier false conclusions were reached.
+
+**A7 was folded into C8b rather than deferred, and the reason is worth keeping.** A restart
+*request* can be declined, and the failure that follows is silent — which reproduces the exact
+false bug report C8b exists to prevent, so the feature would have shipped with a hole in its own
+justification. `MainWindow` now replaces `Recording - waiting for telemetry ...` after
+`_NO_TELEMETRY_HINT_MS` of zero datagrams with a line naming the restart case and the Public-network
+case. **No first-run detection**, which is what kept it small: the trigger is zero packets, and the
+advice is correct whenever it fires.
+
+Scoping it surfaced something worth knowing: `Recorder.record` calls `on_status` **inside** its
+`for data in self.source` loop, so a socket receiving nothing produces **no UI updates at all** —
+the label sat on "waiting" forever. Hence a `QTimer` in the UI rather than a change to the Qt-free
+recorder. It also **narrows a standing preference** that setup guidance belongs in docs rather than
+status text: justified here because this cause reaches a user who is already past the docs.
+
+**A6 stays open** — the app still says nothing between `listening on…` and a finished capture. In
+fairness it would not have shortened this hunt: the GUI already showed a zero packet count. The
+firewall bisection and the simultaneous-recording control are what did the work.
 
 **Guarded by `test/test_installer_script.py`.** An `.iss` cannot be unit-tested meaningfully, but
 the rule hard-codes a port and an exe name that Python owns, and the failure when they drift is the
@@ -990,14 +1009,17 @@ W11 boot); see the 4th build entry for what was covered where and what was not.
       name="F1 Telemetry (UDP 20777)" verbose` reports `Enabled: Yes`, `Direction: In`,
       `Protocol: UDP`, `Profiles: Domain,Private`, `LocalPort: Any`, and `Program:` pointing at the
       installed exe.
-- [ ] **Setup asks to restart, and the reason is on the page** — not the generic default text.
-- [ ] **The rule existing is not the test — recording is.** Run the install → **restart** → record
-      path and confirm **packets arrive and a `.f1cap` appears**. **Do this twice, from scratch.**
-      One pass is what was accepted three times during C8b and was wrong every time.
-      **Run the release zip alongside as a control** in any window where the installed app receives
-      nothing: it binds the same port and takes the same broadcast, so "the game wasn't sending"
-      can never explain the result. If the installed app records *before* restarting, say so — that
-      would mean the restart requirement is over-cautious and can be revisited.
+- [ ] **Setup asks to restart, and the page says WHY** — not Inno's generic default text.
+- [ ] **BEFORE restarting:** record → **no telemetry**, and after ~25s the status line names the
+      restart. **Run the release zip alongside: it MUST record**, or the game wasn't sending and
+      the run is void. If the *installed* app records here, say so — the restart requirement would
+      be over-cautious and can be narrowed.
+- [ ] **AFTER restarting:** launch as a **standard user** → record → **packets arrive and a
+      `.f1cap` appears** in *that* user's `%LOCALAPPDATA%\f1telemetry\captures`, with no UAC and no
+      firewall prompt. **This, not the rule existing, is the test.**
+- [ ] **Repeat the whole install → restart → record path a second time, from scratch.** One pass is
+      not acceptance: it was accepted three times during C8b and was wrong every time, twice
+      reaching these docs as a settled conclusion.
 - [ ] **Upgrade in place:** run the installer over an existing install → still **one** firewall rule
       and **one** entry in Apps & features. Repeat with the app **running** → Restart Manager offers
       to close it and the install completes.

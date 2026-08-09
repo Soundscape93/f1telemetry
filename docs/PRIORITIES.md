@@ -94,7 +94,7 @@ different kinds of artifact, and the seam is where that changes:
 1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
    published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
    **Both complete.**
-2. **Release 2 — C8a + C8b + F9. All three done (2026-08-07, 2026-08-08, 2026-08-08) and sharing one
+2. **Release 2 — C8a + C8b + F9. All three done (2026-08-07, 2026-08-08, 2026-08-09) and sharing one
    `## Unreleased` section; the release is ready to cut** — the `staging` → `main` PR, labelled
    **`minor`** (C8a's new platform artifact and C8b's installer both add capability). Then a
    **second** clean-instance run, because **C8b changes what "install" means**: a clean-instance
@@ -144,7 +144,7 @@ is in *Recently closed*.
   C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
   collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
   a submodule from a `collect_*` call, filter during collection, not afterwards.**
-- **C8b Inno Setup installer + Windows Firewall allow-rule → done 2026-08-08.** The firewall prompt
+- **C8b Inno Setup installer + Windows Firewall allow-rule → done 2026-08-09.** The firewall prompt
   is PACKAGING's #3 "easy to forget". **Built as an admin install that writes the rule** (option b,
   settled 2026-08-07): elevation is normal for a Windows installer, and UAC drops the privilege
   again immediately. A per-user install with an *optional* elevated task would keep both properties
@@ -218,7 +218,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 |---|---|---|
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
 | A6 | Recorder observability: first-datagram source IP:port, periodic counts, total at stop | **new 2026-08-08**; PACKAGING → C8b scope |
-| A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **new 2026-08-09**; PACKAGING → C8b scope |
+| A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
@@ -226,7 +226,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
-| C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-08** — Cycle 3, Release 2; PACKAGING → C8b scope |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-09** — Cycle 3, Release 2; PACKAGING → C8b scope |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
@@ -252,12 +252,18 @@ but not understood" is distinguishable from "not arriving". Deliberately **not**
 recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
 both are about what the recording path does and does not report.
 
-**A7, added 2026-08-09.** `Recording — waiting for telemetry …` is correct but unhelpful when it
-never changes: it cannot distinguish "the game isn't sending" from "the firewall rule isn't live
-yet". A user who **declines the installer's restart** lands in exactly that state, and the app says
-nothing about it. Wanted: after some seconds of zero datagrams, a hint naming the two likely causes
-— restart pending after install, and the network classified as *Public*. Sibling of **A6** (which
-is the log-side half) and, like it, deliberately kept out of C8b as UI work.
+**A7, added and done 2026-08-09 — and folded into C8b rather than deferred.** `Recording — waiting
+for telemetry …` is correct but unhelpful when it never changes: it cannot distinguish "the game
+isn't sending" from "the firewall rule isn't live yet". A user who **declines the installer's
+restart** lands in exactly that state. It was reversed into C8b because a restart *request* can be
+declined and the resulting failure is silent — so shipping without it would leave a hole in C8b's
+own justification, which is to stop the false bug report "I installed it, pressed Record, nothing
+happened". `MainWindow` now replaces the label after `_NO_TELEMETRY_HINT_MS` of zero datagrams with
+one line naming the restart case and the Public-network case. **No first-run detection** — the
+trigger is zero packets, and the advice is right whenever it fires, which is what kept it to ~12
+lines. It **narrows** the standing "setup guidance belongs in docs, not status text" preference:
+justified because this cause reaches a user who is already past the docs. **A6 stays open** as the
+log-side half.
 
 **The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
 blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
@@ -381,6 +387,11 @@ up opportunistically rather than scheduled.
   `Private`, not a mismatch; **one successful observation is not a fix** — made three times, twice
   written into these docs as settled; and **test without a control and you measure nothing** —
   run the release zip alongside, since it takes the same broadcast. It produced **A6** and **A7**.
+  **Accepted 2026-08-09 on two full clean passes**, identical both times: before restarting the
+  installed app received nothing *while the zip recorded as control*, closing and reopening it did
+  not help, and after restarting it recorded immediately with a `.f1cap`. **A7 was pulled into this
+  branch rather than deferred** — a restart request can be declined, and that failure is silent, so
+  leaving it out would have shipped C8b with a hole in its own justification.
   **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
   `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
   `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule
