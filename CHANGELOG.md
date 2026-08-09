@@ -19,6 +19,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.8.0 — 2026-08-09
+
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
 or stored moved, so existing captures, sessions and standings are unaffected.
 
