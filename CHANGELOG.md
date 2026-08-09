@@ -19,6 +19,52 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.8.0 — 2026-08-09
+
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
+or stored moved, so existing captures, sessions and standings are unaffected.
+
+### Added
+- **A Linux build is now published with each release**, alongside the Windows one — a
+  `.tar.gz` you unpack and run, with the user guide, roster template, licence and notices beside
+  the program just as on Windows. It is **best-effort**: Windows remains the supported platform,
+  and the Linux build needs a reasonably recent distribution, because it is built against the
+  system libraries of the machine that builds it. If it won't start on an older install, that is
+  the expected limit rather than a fault.
+- **The licence and third-party notices now ship as a PDF too** (`NOTICE.pdf`), beside the app
+  along with `NOTICE.md`, and attached to the release page on their own. **Help → Licences &
+  notices** opens the PDF when it's there. Previously the only copy was the Markdown file, which
+  opens in Notepad as raw `#` and `**` markup on a machine with no Markdown viewer — and the Qt
+  LGPL notice is the one document that has to be readable.
+- **There is now a Windows installer**, alongside the zip. It puts F1 Telemetry in Program Files
+  with a Start-menu entry and an uninstaller, and — the reason it exists — **it adds the Windows
+  Firewall rule for you**, so telemetry arrives on the first recording with no prompt to click and
+  nothing to fix if you clicked the wrong thing. **Windows asks for administrator rights to
+  install**, which is what writing that rule needs; **running the app never does**, and it still
+  keeps all your data under your own user account. **Restart Windows when Setup asks** — the
+  firewall rule doesn't take effect until you do, and until then pressing Record will look like it
+  is working while no data arrives. Upgrading installs over the top — close the app
+  first, or let the installer ask. Uninstalling removes the program and the firewall rule and
+  **leaves your captures and database completely untouched** — close the app first, and the
+  uninstaller will ask you to if you forget. The zip build stays exactly as it
+  was, for anyone who can't or would rather not elevate. One caveat: the rule covers *private*
+  networks, so if Windows has your home network set to Public, set it to Private or no packets
+  will arrive.
+- **A recording that isn't receiving anything now says so.** Instead of sitting on *"waiting for
+  telemetry"* indefinitely, the status line names the likely reasons after a few seconds — a
+  restart still pending after installing, or a network Windows has set to Public.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the Windows light/dark theme while the app is open leaves some text the wrong colour —
+  restart to fix.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.7.0 — 2026-08-07
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged at 2 and nothing about how captures are

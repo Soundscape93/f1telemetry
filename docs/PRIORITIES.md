@@ -84,20 +84,24 @@ C8 — the largest and riskiest — first. It runs **last** instead, and C6 move
   hidden imports + a startup self-check". C7 edits the spec's `excludes` — the exact operation
   whose failure mode is that silent degrade — so C6 is the instrument that makes C7 verifiable
   rather than hopeful. Reversed, the trim is done blind.
-- C4 clean-instance test (Windows Sandbox / second user account) — run against a build carrying
-  C5–C7. Not code: a checklist the author executes, producing doc updates only.
+- C4 clean-instance test (Windows Sandbox / second user account) — **done 2026-08-07** against the
+  published v0.7.0 zip. Not code: a checklist the author executes, producing doc updates only.
 - C8 Phase 4 — see the split below.
 
 **Cycle 3 ships as two releases, not one — decided 2026-08-06.** The remaining items produce two
 different kinds of artifact, and the seam is where that changes:
 
-1. **Release 1 — C7 + F8**, joining C5 and C6 (both already on `staging`, unreleased). Then **C4
-   runs against that published build**: C4 is validation, so it wants a real downloaded artifact
-   rather than a local `dist/` folder.
-2. **Release 2 — C8a + C8b.** Then a **second** clean-instance run, because **C8b changes what
-   "install" means**: a clean-instance test against a zip proves nothing about an installer.
+1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
+   published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
+   **Both complete.**
+2. **Release 2 — C8a + C8b + F9. All three done (2026-08-07, 2026-08-08, 2026-08-09) and sharing one
+   `## Unreleased` section; the release is ready to cut** — the `staging` → `main` PR, labelled
+   **`minor`** (C8a's new platform artifact and C8b's installer both add capability). Then a
+   **second** clean-instance run, because **C8b changes what "install" means**: a clean-instance
+   test against a zip proves nothing about an installer, and this time the run must confirm the new
+   invariant — installed as admin, *runs* as a standard user. That run is in *Needs verification*.
 
-This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8**, added
+This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8** and **F9**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
 Release 1 on 2026-08-07**: a GitHub Actions outage meant the release PR needed a fresh commit to
 re-run its checks anyway, and F8 is precisely a fix to those checks.
@@ -123,15 +127,32 @@ was written and was missed on **v0.4.1 and v0.6.0** — a step that depends on r
 remembered. `release_notes.py` was checked and is **not** affected: it reads a released section,
 whose comments `release_unreleased` has already stripped.
 
+**F9 — ship `NOTICE.md` as a PDF. Done 2026-08-08**, as scoped. Raised by C4: a tester without a
+markdown viewer opens `NOTICE.md` in Notepad and reads `#` and `**`, and the LGPL v3 notice for the
+bundled Qt is the one document that genuinely has to reach them. Built as **a second pandoc
+invocation in the existing `guide-pdf` job**, not a new job — the apt list there is load-bearing
+(see Phase 3) and was not touched. Full write-up in PACKAGING → *The notices PDF (F9)*; the summary
+is in *Recently closed*.
+
 **C8 is three deliverables under one ID, and only two are in this cycle — decided 2026-08-05.**
-- **C8a macOS/Linux artifacts → Linux only.** `release.yml` already runs an `ubuntu-latest` job for
+- **C8a macOS/Linux artifacts → Linux only — done 2026-08-07.** `release.yml` already runs an `ubuntu-latest` job for
   the guide PDF, so a tarball is nearly free, and the author develops on Linux, so it has a real
   consumer. **macOS is deliberately dropped from the cycle:** no known user, a runner to pay for,
-  and an unsigned build walking into Gatekeeper.
-- **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
-  PACKAGING's #3 "easy to forget". **Open question to settle before code:** the allow-rule needs
-  elevation, while the clean-machine checklist asserts "launch as a non-admin user" — so it is
-  either a per-user install with no rule, or an elevated install with one.
+  and an unsigned build walking into Gatekeeper. *"Nearly free" turned out to be optimistic* — the
+  first CI run died in PyInstaller's collection stage, not the build: `collect_submodules` imports
+  what it enumerates, and `pyqtgraph.examples` aborts the process on a machine with no display.
+  C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
+  collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
+  a submodule from a `collect_*` call, filter during collection, not afterwards.**
+- **C8b Inno Setup installer + Windows Firewall allow-rule → done 2026-08-09.** The firewall prompt
+  is PACKAGING's #3 "easy to forget". **Built as an admin install that writes the rule** (option b,
+  settled 2026-08-07): elevation is normal for a Windows installer, and UAC drops the privilege
+  again immediately. A per-user install with an *optional* elevated task would keep both properties
+  but was rejected as the most complex option, with its failure mode landing on a tester machine we
+  cannot debug. **The invariant it must not break:** the app requires no admin rights *at runtime* —
+  the checklist item becomes "install as admin, run as a standard user". Rationale, the consequences
+  table and all six implementation decisions are in PACKAGING → *C8b scope*; the summary is in
+  *Recently closed*.
 - **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
   self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
   toolchain that would replace the zip artifact verified across three builds, for a handful of
@@ -180,10 +201,11 @@ re-run under WAL on 2026-08-05 and passes.
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
 | A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
-| C4 | Clean-instance test (Sandbox / second user account) | open | PACKAGING → Testing on a clean instance |
+| C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
-| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **Cycle 3, Release 1** — in flight | see the Cycle 3 plan above |
+| F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
+| F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
 
 **E7 is resolved as a question, not as code.** The ranges in `setup_panel._SETUP_SPEC` are
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
@@ -195,14 +217,16 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | ID | Item | Detail in |
 |---|---|---|
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
+| A6 | Recorder observability: first-datagram source IP:port, periodic counts, total at stop | **new 2026-08-08**; PACKAGING → C8b scope |
+| A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
-| C8a | Linux release artifact (macOS deliberately dropped) | **Cycle 3**; PACKAGING → Phased plan |
-| C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
+| C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-09** — Cycle 3, Release 2; PACKAGING → C8b scope |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
@@ -217,6 +241,29 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
 | G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**A6, added 2026-08-08, and what earned it.** Between `listening on 0.0.0.0:20777` and a finished
+capture, the recorder says **nothing** — so "it isn't recording" cannot be told apart from "nothing
+is being sent" without reaching for `pktmon`, which is exactly what C8b's clean-machine run had to
+do to disprove a firewall theory that was never true. Wanted: the **source IP:port of the first
+datagram** (proves delivery *and* names the sending device), a **periodic count** while recording,
+and a **total at stop**; optionally parse failures counted separately from receives, so "arriving
+but not understood" is distinguishable from "not arriving". Deliberately **not** folded into C8b —
+recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
+both are about what the recording path does and does not report.
+
+**A7, added and done 2026-08-09 — and folded into C8b rather than deferred.** `Recording — waiting
+for telemetry …` is correct but unhelpful when it never changes: it cannot distinguish "the game
+isn't sending" from "the firewall rule isn't live yet". A user who **declines the installer's
+restart** lands in exactly that state. It was reversed into C8b because a restart *request* can be
+declined and the resulting failure is silent — so shipping without it would leave a hole in C8b's
+own justification, which is to stop the false bug report "I installed it, pressed Record, nothing
+happened". `MainWindow` now replaces the label after `_NO_TELEMETRY_HINT_MS` of zero datagrams with
+one line naming the restart case and the Public-network case. **No first-run detection** — the
+trigger is zero packets, and the advice is right whenever it fires, which is what kept it to ~12
+lines. It **narrows** the standing "setup guidance belongs in docs, not status text" preference:
+justified because this cause reaches a user who is already past the docs. **A6 stays open** as the
+log-side half.
 
 **The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
 blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
@@ -258,12 +305,166 @@ up opportunistically rather than scheduled.
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
+- **The second clean-instance run — the C8b invariant.** Release 2 ships an installer, and a
+  clean-instance test against a zip proves nothing about one. **Plan:** run the full clean-machine
+  checklist in PACKAGING against the **published Release 2 installer**, on Windows Sandbox plus the
+  W11 boot, confirming the item that *changed meaning* — **installed as admin, then run as a
+  standard user** with no UAC prompt, nothing written beside the exe, and the data root belonging to
+  that user. Also new on that list: the rule verified with `netsh … show rule`, upgrade-in-place
+  leaving one rule and one uninstall entry, uninstall removing the rule while leaving captures, and
+  the zip still working standalone. **Sandbox's known limit applies** — it cannot record (no route
+  to the PS5), so the "record with no prompt at all" item needs the boot.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
+- **Kill mid-record → the app recovers on next launch.** The one clean-machine checklist item C4
+  could not close (2026-08-07). **Windows Sandbox cannot record at all** — it is a VM with internet
+  but no route to the home network, so the PS5 never reaches it — and it was not run on the W11
+  boot either. **Low risk, deliberately not treated as a defect:** it passed on an earlier release
+  and the recording flow has not changed since. **Plan:** start a recording, kill the process,
+  relaunch — a two-minute check at the next real session, which is the same ~2026-08-12 race B1 and
+  E11 are already waiting on. All three settle from one sitting.
 
 ## Recently closed
 
+- **C8b — the admin installer, and the six decisions it needed.** Done 2026-08-08; the last item of
+  Cycle 3's Release 2. `packaging/installer/f1telemetry.iss`, compiled by `windows-build` and
+  published as `f1telemetry-<tag>-windows-x64-setup.exe`: Program Files, Start-menu entry,
+  uninstaller, and the Windows Firewall allow-rule that is the reason it exists. **The zip keeps
+  shipping** — it is the no-elevation fallback and the artifact three builds were verified against.
+  **The runtime invariant was verified, not assumed:** `paths.app_dir()` is read-only at all four
+  call sites and frozen `data_root()` is `%LOCALAPPDATA%\f1telemetry`, so nothing is written beside
+  the exe and Program Files is safe.
+  **Four answers worth not re-deriving.** *Uninstall never touches the data root, and there is no
+  opt-in checkbox either* — beyond "captures are the source of truth", an admin uninstall runs under
+  the **administrator's** token while `data_root()` is per-user, so on the very machine this targets
+  it would resolve the wrong profile, delete nothing and report success. *`netsh`, keyed by rule name
+  and deleted before added* — legible in the install log, and idempotent across reinstalls.
+  *`CloseApplications=yes` plus an `[InstallDelete]` wipe of `_internal`* — Restart Manager solves
+  the one-folder file locks, and the wipe solves the half that is easy to miss, since Inno replaces
+  only files it installs and anything **dropped** by a later build would linger forever. *CI builds
+  it* — a hand-built installer comes from an unverified working tree and breaks both "the published
+  artifact is exactly the tagged commit" and "CI verifies the version, it never stamps it"; the
+  no-tag `workflow_dispatch` path answers the objection that it can now fail a release.
+  **Two things the written scope had not listed.** `profile=private,domain`, **not public** — a
+  home-LAN listener whose parser reads untrusted datagrams, mirroring what the Windows prompt itself
+  ticks. **Its failure is silent**, so it is documented in three places: a home network Windows has
+  classified as *Public* receives nothing with no error. And there is **no "launch now" checkbox** —
+  the installer is elevated, so a post-install launch would hand the app an admin token and create
+  the data root in the wrong profile on its very first run, disproving the invariant immediately.
+  **One defect the clean-machine run found, fixed here rather than documented around:** uninstalling
+  with the app **open** deleted the documents beside the exe but left `f1telemetry.exe` and
+  `_internal` behind — a half-removed install, because Windows will not remove a running executable
+  or its loaded DLLs. `CloseApplications=yes` covers Setup but not the uninstaller, which is itself
+  holding `{app}`. An `InitializeUninstall` guard now refuses with Retry/Cancel; **that hook is the
+  point — returning `False` aborts before anything is removed**, so cancelling leaves the install
+  exactly as it was.
+  **And one that took several days and is why the installer asks for a restart:** the installed
+  build received no telemetry while the **byte-identical** zip binary recorded fine on the same
+  machine and network. The rule was neither missing nor malformed — `verbose` showed the right
+  program, protocol and profiles. **A rule that exists and a rule that matches are different
+  things**, and Windows' default inbound action is Block, so a non-matching rule needs no Block
+  rule to produce silence. **A firewall-off bisection settled in one command what two days of
+  reading rule output could not** (disable the Private profile → records; re-enable → silent).
+  **The remedy is `AlwaysRestart=yes`:** install → Record immediately fails *while `pktmon` confirms
+  packets are arriving*; restart → Record works, same game session. Not propagation latency (the
+  failing window ran for minutes) and not per-process staleness (the process was launched after the
+  rule existed). **Mechanism inferred, not proven** — probably a stale path→rule association cached
+  after the exe at that path is replaced. Restarting `MpsSvc`, `advfirewall reset` and `gpupdate`
+  were all rejected; see PACKAGING.
+  **The rule shape was a wrong turn, and the confound is the point:** three shapes were measured
+  (`program`+`localport` failed; either alone worked) and written up as the root cause — but *every
+  success immediately followed a firewall policy change*, and a clean install carrying the port-less
+  rule still failed until restart. Rule shape was never isolated. The port-less form is kept only
+  because it matches what Windows itself writes.
+  **Genuinely eliminated by measurement**, not argument — the firewall-off run and a run with the
+  installed app and the zip **recording the same broadcast simultaneously** close: Program Files
+  path, the folder-name space, Start-menu context, working directory, standard-user context,
+  packaged `_internal`, any zip-vs-installed binary difference, stale rules, and duplicate
+  listeners. **Do not re-test these.**
+  **Four wrong turns recorded in PACKAGING:** `pktmon` **cannot fix a firewall** (an early "it
+  worked when I ran pktmon" was correlation, and cost a day); `Domain,Private` is a **superset** of
+  `Private`, not a mismatch; **one successful observation is not a fix** — made three times, twice
+  written into these docs as settled; and **test without a control and you measure nothing** —
+  run the release zip alongside, since it takes the same broadcast. It produced **A6** and **A7**.
+  **Accepted 2026-08-09 on two full clean passes**, identical both times: before restarting the
+  installed app received nothing *while the zip recorded as control*, closing and reopening it did
+  not help, and after restarting it recorded immediately with a `.f1cap`. **A7 was pulled into this
+  branch rather than deferred** — a restart request can be declined, and that failure is silent, so
+  leaving it out would have shipped C8b with a hole in its own justification.
+  **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
+  `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
+  `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule
+  that exists, looks right, and silently receives nothing.
+- **F9 — the notices PDF, and the question of which file the button opens.** Done 2026-08-08; the
+  second item of Cycle 3's Release 2. `NOTICE.pdf` is built by **a second pandoc invocation in the
+  existing `guide-pdf` job** (not a new job — the apt list there is load-bearing and already paid
+  for), ships beside the exe in both archives, is in **both** build jobs' sanity-check lists, and is
+  attached to the Release on its own so the terms are reachable without a ~250 MB download.
+  **The open question is answered: *Licences & notices* prefers the PDF.** `resolve_notices` grew a
+  third step and is now the same shape as `resolve_guide` — **presence decides at every step, never
+  `is_frozen()`**. That one rule is correct in both worlds because the dev path is preserved by a
+  fact rather than a special case: `app_dir()` is the repo root in a source run, and `NOTICE.pdf` is
+  a CI artifact that never lands there (`/NOTICE.pdf` joined `/USER_GUIDE.pdf` in `.gitignore`). A
+  release build finds the PDF; a source run finds only the markdown; a partial extract still gets
+  the GitHub URL. Shipping a PDF and then opening raw markdown anyway would have defeated the item.
+  **Two things deliberately not done, so they aren't re-proposed.** **`LICENSE` stays plain text** —
+  it contains no markdown syntax at all, so it never had the problem F9 exists to fix, and running
+  its hanging-indented sub-clauses through pandoc *as markdown* would reflow and damage them. And
+  the notices are **not folded into `USER_GUIDE.pdf`**: the Help action would have no deep-link
+  target, a distinctly named standalone file is the defensible way to deliver an LGPL notice, and G3
+  would otherwise give the German guide an English legal appendix.
+  **One trap found in review and worth not re-learning:** the `release` job's `download-artifact`
+  has no `name:`, so it lands every artifact under `artifacts/<artifact-name>/` — and both PDFs ride
+  in the one `user-guide-pdf` artifact. `artifacts/notice-pdf/NOTICE.pdf` looks right and does not
+  exist. That job is **skipped on a no-tag `workflow_dispatch`**, so the dispatch test run cannot
+  catch it, and it would have failed *after `tag.yml` pushed the tag*.
+  Covered by `test/test_user_guide.py` (`ResolveNoticesTest`, PDF-wins and markdown-fallback cases).
+  The Qt wiring has no automated test — every suite here is deliberately Qt-free — so it was
+  verified by hand by dropping a `NOTICE.pdf` at the repo root and opening the action.
+- **C8a — the Linux release artifact.** Done 2026-08-07; the first item of Cycle 3's Release 2. A
+  `linux-build` job mirroring `windows-build` on `ubuntu-latest`, publishing
+  `f1telemetry-<tag>-linux-x64.tar.gz` with the same four files beside the binary and the same
+  sanity-check — `LICENSE` and `NOTICE.md` are an LGPL v3 obligation for the bundled Qt, so a
+  missing one fails the build rather than shipping quietly.
+  **Three choices worth not re-litigating:** a **tarball, not an AppImage** (that was already the
+  plan; AppImage needs `linuxdeploy` plus a Qt plugin and is its own debugging surface); **`.tar.gz`,
+  not zip**, because zip does not preserve the executable bit and the binary would need a `chmod +x`
+  to run at all; and **macOS still dropped** — no known user, a runner to pay for, and an unsigned
+  build walking into Gatekeeper.
+  **The limit is stated, not solved:** a PyInstaller bundle links against the **glibc of the machine
+  that built it**, so the artifact needs a distro at least as new as the runner's Ubuntu. Building
+  for older ones means an older container, which is not worth it for a best-effort artifact.
+  **The lesson it produced is worth more than the job.** The first run died in PyInstaller's
+  *collection* stage, before any bundling: `collect_submodules` **imports** each package to
+  enumerate it, and `pyqtgraph.examples` builds Qt objects at import time — so the isolated
+  subprocess reached for the `xcb` plugin, found no display, and **aborted (SIGABRT)**. C7's
+  exclusion filtered the *result*, far too late, and `on_error` cannot catch a child that died
+  rather than raised. Fixed with `collect_submodules(package, filter=…)`, since a package the
+  filter rejects is never recursed into. **The rule: if you exclude a submodule from a `collect_*`
+  call, filter during collection, not afterwards.** The build step also sets
+  `QT_QPA_PLATFORM=offscreen`, as `ci.yml` does for the suite. Windows never hit any of it — its
+  platform plugin initialises without a display server, which is why a Linux artifact was the first
+  thing to find it.
+  Also sanitises the tag into the archive filename in both build jobs: on a no-tag
+  `workflow_dispatch` the tag defaults to the branch name, and a slashed branch was read as a
+  directory in the output path. Latent since Phase 3, reachable only by dispatch.
+- **C4 — the clean-instance test, and what Windows Sandbox can't do.** Done 2026-08-07 against the
+  downloaded **v0.7.0** Release zip, on Windows Sandbox *and* the W11 boot. Closes the two things no
+  build had ever covered: the clean-instance run and the SmartScreen click-through wording.
+  **Sandbox is confirmed as the right tool, with one structural limit worth not rediscovering: it
+  cannot record.** It is a VM with internet but no route to the home network, so the PS5 never
+  reaches it. Everything downstream of recording was covered by copying capture files in and
+  ingesting them — ingest, lap traces, track map, re-ingest, backup. Only the live-recording items
+  need the boot.
+  **Three items unticked, and they are not equivalent** — *old-DB additive columns* is **N/A** (no
+  schema moved in v0.7.0, so `ensure_schema` had nothing to ALTER); *pre-Phase-2 DB* is **carried
+  forward** from the 2nd build rather than re-proven, since reproducing it means manufacturing a
+  legacy unstamped database; and *kill mid-record* is genuinely **open**, now in *Needs
+  verification* for the next real session.
+  **Two findings recorded rather than chased:** Help → Check for updates fails inside the Sandbox
+  and works on the boot (network isolation, not the app), and **A4 is confirmed still present on
+  v0.7.0**. It also produced **F9** — `NOTICE.md` ships as raw markdown, unreadable in Notepad.
 - **C7 — pyqtgraph bloat trim, and what it found instead.** Done 2026-08-06; the third item of
   Cycle 3. `pyqtgraph.examples` — a demo app with its own `__main__` and ~40 scripts, unreachable
   from here — is filtered out of both `hiddenimports` and `collect_data_files`, with an `excludes`

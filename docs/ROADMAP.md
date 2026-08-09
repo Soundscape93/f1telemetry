@@ -239,16 +239,27 @@ weeks). Summary of the locked direction:
   `release.yml` (preflight gate + test suite →
   `USER_GUIDE.pdf` on Linux via pandoc/xelatex + the PyInstaller Windows build → a **full** GitHub
   Release). CI **verifies** the version, never stamps it (`packaging/check_version.py`), so the
-  artifact is exactly the tagged commit. The PDF, `roster_template.csv`, `LICENSE` and `NOTICE.md`
-  ship **beside the exe**,
+  artifact is exactly the tagged commit. The PDF, `roster_template.csv`, `LICENSE`, `NOTICE.md` and
+  `NOTICE.pdf` (F9 — a second pandoc invocation in the same job, because raw markdown in Notepad is
+  not a readable LGPL notice) ship **beside the exe**,
   reachable from the Help page's **Open user guide** and **Licences & notices** via the new
   `paths.app_dir()` (third path kind)
-  with a PDF → source-`.md` → GitHub fallback chain (the notices need only two steps — `app_dir()`
-  is the repo root in a source run); **Open data / captures / logs folder** actions
+  with a PDF → source-`.md` → GitHub fallback chain each (the notices resolve entirely out of
+  `app_dir()`, which is the repo root in a source run, so no source-tree special case is needed);
+  **Open data / captures / logs folder** actions
   landed alongside (`%LOCALAPPDATA%` is hidden by default — the app opens Explorer rather than the
   data moving). Real self-updater — velopack/Sparkle/`tufup` — still deferred. Details + rationale in
   `docs/PACKAGING.md`.
-- **Phase 4:** macOS/Linux artifacts, Inno Setup installer, real auto-update.
+- **Phase 4 — in progress, split into C8a/C8b/C8c (PRIORITIES → Cycle 3, Release 2).**
+  **C8a done 2026-08-07:** a best-effort **Linux tarball** ships with each release (`linux-build` in
+  `release.yml`); **macOS is dropped** — no known user, and an unsigned build walks into Gatekeeper.
+  **C8b done 2026-08-08:** an **Inno Setup installer** (`packaging/installer/f1telemetry.iss`, built
+  by CI and published beside the zip), an **admin install** so it can write the Windows Firewall
+  allow-rule, with the standing invariant that the app needs no admin *at runtime*. The zip keeps
+  shipping as the no-elevation fallback. The rule covers **private/domain profiles only**, so a home
+  network Windows has classified as *Public* receives nothing — silently, hence documented.
+  **C8c (velopack self-updater) deferred** — notify-only stays. Detail and rationale in
+  `docs/PACKAGING.md` → Phase 4.
 - **First milestone:** a zipped one-folder Windows build that runs on the author's Win11 boot and
   is shared with a few trusted testers.
 

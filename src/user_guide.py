@@ -11,11 +11,13 @@ dead-end (docs/PACKAGING.md "Phase 3 - agreed scope", item 1):
 3. else the guide rendered on GitHub - costs nothing (the owner/repo constants already exist for
    the update check) and still works for someone who unzipped only the exe.
 
-``resolve_notices`` - two steps, because ``NOTICE.md`` needs no source-tree special case:
-``app_dir()`` is *beside the exe* when frozen and the *repo root* in a source run, and the file
-lives at the repo root, so one probe covers both. Falls back to the copy on GitHub. That fallback
-is not just convenience - the LGPL v3 notice for the bundled Qt/PySide6 has to reach whoever got
-the binary.
+``resolve_notices`` - three steps, the same *shape* as the guide and for the same reason. The PDF
+is preferred because it is the **readable** one: a user without a markdown viewer opens the
+``.md`` in Notepad and reads ``#`` and ``**``. ``app_dir()`` is *beside the exe* when frozen and
+the *repo root* in a source run, and the ``.pdf`` is CI-generated and gitignored, so one pair of
+probes covers both worlds with no ``is_frozen()`` branch: a release build finds the PDF, a source
+run finds only the markdown. Falls back to the copy on GitHub. That fallback is not just
+convenience - the LGPL v3 notice for the bundled Qt/PySide6 has to reach whoever got the binary.
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from .update_check import GITHUB_OWNER, GITHUB_REPO
 PDF_NAME = "USER_GUIDE.pdf"
 MD_NAME = "USER_GUIDE.md"
 NOTICES_NAME = "NOTICE.md"
+NOTICES_PDF_NAME = "NOTICE.pdf"
 _BRANCH = "main"  # the default branch the guide is read from
 
 
@@ -73,13 +76,21 @@ def notices_url() -> str:
 def resolve_notices(*, app_dir: Path | None = None) -> GuideTarget:
     """Licence + third-party notices. Never raises; always returns a target.
     
-    Only two steps, unlike the guide: ``app_dir`` is *beside the exe* when frozen and the 
-    *repo root* in a source run, and NOTICE.md lives at the repo root - so one probe covers
-    both. The LGPL notice for the bundled Qt must reach the user, hence the URL fallback for
-    someone who unzipped only the exe.
+    Three steps, and a presence decides at every one - never :func:`paths.is_frozen()` which is what
+    keeps this symmetrical with :func:`resolve_guide`:
+
+    1. ``NOTICE.pdf`` beside the exe - a release build. **Preferred, because it is the readable
+       one**; shipping a PDF and then opening the raw markdown anyway would defeat the point.
+    2. else ``NOTICE.md`` in the same directory. ``app_dir()`` is the *repo root* in a source run
+       and the PDF is a CI artifact that is never committed, so this is the dev path, unchanged.
+       It is also the packaged fallback if only part of the archive was extracted.
+    3. else the copy on GitHub, so the action can never dead-end.
     """
     app_dir = paths.app_dir() if app_dir is None else app_dir
 
+    pdf = app_dir / NOTICES_PDF_NAME
+    if pdf.is_file():
+        return GuideTarget(path=pdf)
     notices = app_dir / NOTICES_NAME
     if notices.is_file():
         return GuideTarget(path=notices)
