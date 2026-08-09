@@ -94,6 +94,17 @@ class InstallerScriptTest(unittest.TestCase):
         self.assertIn("TelemetryPort", rule_line)
         self.assertNotIn(str(expected), rule_line)
 
+    def test_the_installer_requests_a_restart(self):
+        """The firewall rule is not reliably effective until Windows restarts, and the failure is
+        silent - Record looks like it is working and no data arrives. Removing this turns a known
+        limitation straight back into a false bug report."""
+        self.assertIn("AlwaysRestart=yes", self.text)
+
+    def test_the_restart_page_explains_why(self):
+        """Inno's default restart text is generic; an unexplained reboot reads as gratuitous and
+        gets declined, which lands the user in exactly the failure it prevents."""
+        self.assertIn("FinishedRestartLabel=", self.text)
+
 
 class InstallerWorkflowTest(unittest.TestCase):
     """The .iss and release.yml agree about define names, or the build fails 10 CI-minutes in."""

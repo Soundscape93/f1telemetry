@@ -218,6 +218,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 |---|---|---|
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
 | A6 | Recorder observability: first-datagram source IP:port, periodic counts, total at stop | **new 2026-08-08**; PACKAGING → C8b scope |
+| A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **new 2026-08-09**; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
@@ -250,6 +251,13 @@ and a **total at stop**; optionally parse failures counted separately from recei
 but not understood" is distinguishable from "not arriving". Deliberately **not** folded into C8b —
 recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
 both are about what the recording path does and does not report.
+
+**A7, added 2026-08-09.** `Recording — waiting for telemetry …` is correct but unhelpful when it
+never changes: it cannot distinguish "the game isn't sending" from "the firewall rule isn't live
+yet". A user who **declines the installer's restart** lands in exactly that state, and the app says
+nothing about it. Wanted: after some seconds of zero datagrams, a hint naming the two likely causes
+— restart pending after install, and the network classified as *Public*. Sibling of **A6** (which
+is the log-side half) and, like it, deliberately kept out of C8b as UI work.
 
 **The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
 blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
@@ -345,22 +353,34 @@ up opportunistically rather than scheduled.
   holding `{app}`. An `InitializeUninstall` guard now refuses with Retry/Cancel; **that hook is the
   point — returning `False` aborts before anything is removed**, so cancelling leaves the install
   exactly as it was.
-  **And one that took two days and changed the shipped rule:** the installed build received no
-  telemetry while the **byte-identical** zip binary recorded fine on the same machine and network.
-  The rule was not missing or malformed — `verbose` showed the right program, protocol, port and
-  profiles. **A rule that exists and a rule that matches are different things**, and Windows'
-  default inbound action is Block, so a non-matching rule needs no Block rule to produce silence.
-  **A firewall-off bisection settled in one command what two days of reading rule output could
-  not** (disable the Private profile → records; re-enable → silent). Then three shapes, edited live
-  with `netsh` rather than rebuilt: **`program` + `localport` fails; `program` alone works;
-  `localport` alone works** — the two predicates together never match, while either alone does.
-  Shipped **program-scoped with no port**, since port-only would let any binary receive UDP 20777;
-  `test_installer_script.py` now fails the suite if `localport=` is re-added, because the failure
-  has no error message anywhere. **Three wrong turns recorded in PACKAGING so they are not
-  re-walked:** `pktmon` is an ETW observer and **cannot fix a firewall** (an early "it worked when I
-  ran pktmon" was correlation, and cost a day); `Domain,Private` is a **superset** of `Private`, not
-  a mismatch; and **one successful observation is not a fix** — a single clean run was written up as
-  "test state, closed" and the failure returned on the next build. It also produced **A6**.
+  **And one that took several days and is why the installer asks for a restart:** the installed
+  build received no telemetry while the **byte-identical** zip binary recorded fine on the same
+  machine and network. The rule was neither missing nor malformed — `verbose` showed the right
+  program, protocol and profiles. **A rule that exists and a rule that matches are different
+  things**, and Windows' default inbound action is Block, so a non-matching rule needs no Block
+  rule to produce silence. **A firewall-off bisection settled in one command what two days of
+  reading rule output could not** (disable the Private profile → records; re-enable → silent).
+  **The remedy is `AlwaysRestart=yes`:** install → Record immediately fails *while `pktmon` confirms
+  packets are arriving*; restart → Record works, same game session. Not propagation latency (the
+  failing window ran for minutes) and not per-process staleness (the process was launched after the
+  rule existed). **Mechanism inferred, not proven** — probably a stale path→rule association cached
+  after the exe at that path is replaced. Restarting `MpsSvc`, `advfirewall reset` and `gpupdate`
+  were all rejected; see PACKAGING.
+  **The rule shape was a wrong turn, and the confound is the point:** three shapes were measured
+  (`program`+`localport` failed; either alone worked) and written up as the root cause — but *every
+  success immediately followed a firewall policy change*, and a clean install carrying the port-less
+  rule still failed until restart. Rule shape was never isolated. The port-less form is kept only
+  because it matches what Windows itself writes.
+  **Genuinely eliminated by measurement**, not argument — the firewall-off run and a run with the
+  installed app and the zip **recording the same broadcast simultaneously** close: Program Files
+  path, the folder-name space, Start-menu context, working directory, standard-user context,
+  packaged `_internal`, any zip-vs-installed binary difference, stale rules, and duplicate
+  listeners. **Do not re-test these.**
+  **Four wrong turns recorded in PACKAGING:** `pktmon` **cannot fix a firewall** (an early "it
+  worked when I ran pktmon" was correlation, and cost a day); `Domain,Private` is a **superset** of
+  `Private`, not a mismatch; **one successful observation is not a fix** — made three times, twice
+  written into these docs as settled; and **test without a control and you measure nothing** —
+  run the release zip alongside, since it takes the same broadcast. It produced **A6** and **A7**.
   **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
   `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
   `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule

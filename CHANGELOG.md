@@ -39,7 +39,9 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   Firewall rule for you**, so telemetry arrives on the first recording with no prompt to click and
   nothing to fix if you clicked the wrong thing. **Windows asks for administrator rights to
   install**, which is what writing that rule needs; **running the app never does**, and it still
-  keeps all your data under your own user account. Upgrading installs over the top — close the app
+  keeps all your data under your own user account. **Restart Windows when Setup asks** — the
+  firewall rule doesn't take effect until you do, and until then pressing Record will look like it
+  is working while no data arrives. Upgrading installs over the top — close the app
   first, or let the installer ask. Uninstalling removes the program and the firewall rule and
   **leaves your captures and database completely untouched** — close the app first, and the
   uninstaller will ask you to if you forget. The zip build stays exactly as it

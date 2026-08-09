@@ -574,50 +574,77 @@ would normally offer. The installer runs elevated, so a post-install launch woul
 machine this design targets, and disproving the runtime invariant on its very first run. The
 Start-menu entry is the way in.
 
-**Why the firewall rule carries no `localport`, and the two days it took to find out.** The
+**The installed app not recording, and why the installer now asks for a restart.** The
 clean-machine run showed the installed build receiving no telemetry while the **byte-identical**
-binary from the release zip recorded fine on the same machine, network and port. The rule was not
-missing or malformed — `show rule … verbose` reported the right program, protocol, port and
-profiles, `Enabled: Yes` — so "the rule exists" was true and useless. **A rule that exists and a
-rule that matches are different things, and Windows' default inbound action is Block**, so a rule
-that fails to match needs no explicit Block rule to produce silence.
+binary from the release zip recorded fine on the same machine, network and port. This took several
+days and produced two wrong conclusions before the right remedy; the wrong turns are recorded
+below because they are the more useful half.
 
-**What settled it was a bisection, not more inspection.** Disabling the Private profile
+**The remedy: Windows must restart before the installer-created firewall rule is effective.**
+Measured repeatedly — install, press Record immediately, no telemetry arrives *while `pktmon`
+confirms the packets are reaching the NIC*; restart, press Record, works, same game session. The
+failing window spanned several minutes, so this is **not** propagation latency that waiting would
+clear, and the app process in the failing run was launched *after* the rule existed, so it is
+**not** per-process staleness either. Hence `AlwaysRestart=yes` and a custom `FinishedRestartLabel`
+saying why — the failure is silent, so an unexplained reboot would be declined and the user would
+land in exactly the state it prevents.
+
+**Mechanism inferred, not proven.** Most likely a stale path→rule association cached by the
+firewall service after the exe at that path is replaced. **We ship the remedy, not the theory** —
+and this note deliberately stops short of asserting more than was measured, having twice done the
+opposite. Rejected alternatives: restarting `MpsSvc` from the installer (frequently refuses to
+stop, depends on BFE, briefly drops protection mid-install, and any failure lands on a tester
+machine we cannot debug); `netsh advfirewall reset` (wipes every rule on the system); `gpupdate`
+(irrelevant — this is a local rule, not Group Policy).
+
+**The bisection that opened it up.** Disabling the Private profile
 (`Set-NetFirewallProfile -Profile Private -Enabled False`) made the installed app record
-immediately; re-enabling it stopped delivery. One command, and it halved the problem space after
-two days of reading rule output. **Reach for that first next time.**
+immediately; re-enabling it stopped delivery. One command, after two days of reading rule output.
+**Reach for that first next time** — it separates "the firewall is involved" from everything else
+in seconds.
 
-Then three live rule shapes, edited in place with `netsh` rather than rebuilt — each test costs
-seconds instead of a CI round trip:
+**Three rule shapes, and the confound that invalidated the conclusion drawn from them.** Edited
+live with `netsh` rather than rebuilt:
 
 | Rule | Result |
 |---|---|
-| `program` + UDP + `localport=20777` | **fails — app receives nothing** |
-| `program` + UDP, no port | works ← **shipped** |
-| UDP + `localport=20777`, no program | works ← rejected: any binary could then receive |
+| `program` + UDP + `localport=20777` | failed |
+| `program` + UDP, no port | worked ← shipped |
+| UDP + `localport=20777`, no program | worked ← rejected anyway: any binary could then receive |
 
-**The two predicates together never match; either alone does.** Mechanism inferred rather than
-proven: for inbound **broadcast** UDP the program identity is not resolved at the layer where the
-port predicate is evaluated, so a rule demanding both can never satisfy both at once. It also
-explains why the zip always worked — every rule Windows itself writes from the first-record prompt
-is program-scoped with `LocalPort: Any`. **Program scope is kept and the port dropped**, because
-port-only would open UDP 20777 to any binary. `test_installer_script.py` fails the suite if
-`localport=` is ever re-added: the failure has no error message anywhere and would otherwise be
-found only by a tester who cannot record.
+These are **observations, not a causal finding.** *Every one of those "worked" results immediately
+followed a firewall policy change* — which appears to be what actually refreshed the rule. A clean
+install carrying the port-less rule still failed until Windows was restarted. **Rule shape was
+never isolated.** The port-less form is kept because it matches what Windows itself writes from the
+first-record prompt, not because it was proven to fix anything.
 
-**Three wrong turns, recorded so they are not re-walked.** **`pktmon` cannot fix a firewall** — it
-is an ETW observer with no path to WFP policy, so an early "it started working when I ran pktmon"
-was pure correlation, and chasing it cost a day. **`Domain,Private` is a superset of `Private`, not
-a mismatch** — profiles are the set a rule applies to, so narrowing it fixes nothing and would only
-break a domain-joined machine later. And **one successful observation is not a fix**: a single
-clean run was accepted as proof the problem was test state, the item was written up as closed, and
-it came back on the next build. Intermittent-looking failures need a mechanism before they need a
-verdict.
+**Genuinely eliminated, and by measurement rather than argument.** The firewall-off run recorded
+successfully from the installed exe in Program Files, and a later run had the installed app and the
+release zip **recording the same broadcast simultaneously**, producing two capture files within
+seconds of each other. Between them those two results close: the **Program Files path**, the
+**space in the folder name**, **Start-menu launch context**, **working directory**, **standard-user
+context**, the packaged **`_internal`** path, any **zip-vs-installed binary difference**, **stale
+firewall rules**, and **MultiViewer or another duplicate listener**. Do not re-test these.
+
+**Four wrong turns, which are the real lesson.** **`pktmon` cannot fix a firewall** — it is an ETW
+observer with no path to WFP policy, so an early "it started working when I ran pktmon" was pure
+correlation, and chasing it cost a day. **`Domain,Private` is a superset of `Private`, not a
+mismatch** — profiles are the set a rule applies to, so narrowing it fixes nothing and would only
+break a domain-joined machine later. **One successful observation is not a fix** — a single clean
+run was accepted as proof the problem was test state, written up as closed, and the failure
+returned on the next build; the same mistake was then made again with the rule shape. And **test
+without a control and you measure nothing**: several failures were recorded without confirming the
+game was sending at that moment. **Run the release zip alongside** — it binds the same port and
+receives the same broadcast, so "the game wasn't sending" can never explain a result again.
+
+Because of that history, the clean-machine checklist requires the install → restart → record path
+to pass **twice from scratch**, not once.
 
 The episode also exposed that the app says nothing between `listening on…` and a finished capture —
-filed as PRIORITIES → **A6**, deliberately not folded into C8b, being recorder-layer work. In
-fairness it would not have shortened this hunt: the GUI already showed a zero packet count. The
-firewall bisection is what did the work.
+filed as PRIORITIES → **A6** — and that a user who declines the restart hits a silent failure with
+no in-app explanation, filed as **A7**. Both are recorder/UI work, deliberately not folded into
+C8b. In fairness A6 would not have shortened this hunt: the GUI already showed a zero packet count.
+The firewall bisection and the simultaneous-recording control are what did the work.
 
 **Guarded by `test/test_installer_script.py`.** An `.iss` cannot be unit-tested meaningfully, but
 the rule hard-codes a port and an exe name that Python owns, and the failure when they drift is the
@@ -959,14 +986,18 @@ W11 boot); see the 4th build entry for what was covered where and what was not.
       run, that is a bug, not a consequence of the admin install.
 - [ ] **Installer:** UAC prompts (credential screen on a standard account); installs to
       `C:\Program Files\F1 Telemetry`; Start-menu entry appears.
-- [ ] **The firewall rule is real, and it *works*.** `netsh advfirewall firewall show rule
+- [ ] **The firewall rule is real.** `netsh advfirewall firewall show rule
       name="F1 Telemetry (UDP 20777)" verbose` reports `Enabled: Yes`, `Direction: In`,
-      `Protocol: UDP`, `Profiles: Domain,Private`, and `Program:` pointing at the installed exe.
-      **`LocalPort` must read `Any`** — a port-qualified rule was tried and silently failed to
-      match; see *C8b scope* above and the block comment in the `.iss`. **The rule existing is not
-      the test:** record and confirm **packets actually arrive** and a `.f1cap` appears. That
-      distinction is the whole lesson of this item — a correct-looking rule delivered nothing for
-      two days.
+      `Protocol: UDP`, `Profiles: Domain,Private`, `LocalPort: Any`, and `Program:` pointing at the
+      installed exe.
+- [ ] **Setup asks to restart, and the reason is on the page** — not the generic default text.
+- [ ] **The rule existing is not the test — recording is.** Run the install → **restart** → record
+      path and confirm **packets arrive and a `.f1cap` appears**. **Do this twice, from scratch.**
+      One pass is what was accepted three times during C8b and was wrong every time.
+      **Run the release zip alongside as a control** in any window where the installed app receives
+      nothing: it binds the same port and takes the same broadcast, so "the game wasn't sending"
+      can never explain the result. If the installed app records *before* restarting, say so — that
+      would mean the restart requirement is over-cautious and can be revisited.
 - [ ] **Upgrade in place:** run the installer over an existing install → still **one** firewall rule
       and **one** entry in Apps & features. Repeat with the app **running** → Restart Manager offers
       to close it and the install completes.

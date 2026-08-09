@@ -88,6 +88,32 @@ LicenseFile={#BundleDir}\LICENSE
 CloseApplications=yes
 RestartApplications=no
 
+; ---- WINDOWS MUST RESTART BEFORE THE FIREWALL RULE IS EFFECTIVE -------------------------------
+; Measured, repeatedly: install -> press Record immediately = no telemetry, while pktmon confirms
+; the packets are arriving at the NIC; reboot -> Record = works, same game session. The failing
+; window spanned several minutes, so this is not propagation latency that waiting would clear, and
+; the app process in the failing run was launched AFTER the rule existed, so it is not per-process
+; staleness either.
+; Mechanism INFERRED, NOT PROVEN - most likely a stale path->rule association cached by the
+; firewall service after the exe at that path is replaced. We ship the remedy, not the theory.
+; Restarting MpsSvc from the installer was rejected: it frequently refuses to stop, depends on BFE,
+; and briefly drops protection mid-install, with any failure landing on a tester machine we cannot
+; debug. `netsh advfirewall reset` would wipe every rule on the system. gpupdate is irrelevant -
+; this is a local rule, not Group Policy.
+; REQUEST, not force: Inno shows the standard restart-now/later page and the user keeps control.
+; A forced reboot can destroy unsaved work; a mere message is too easy to miss.
+; Every install AND update, not only the first - an update replaces the exe and re-adds the rule,
+; which is exactly the condition suspected of causing the staleness.
+; This exists to prevent the false bug report it was found as: "I installed it, pressed Record,
+; nothing happened."
+AlwaysRestart=yes
+
+
+[Messages]
+; The default restart text is generic and would read as gratuitous. Say why, and say what the
+; failure looks like, because it is silent: Record appears to work and no data arrives.
+FinishedRestartLabel=Setup has finished installing [name].%n%nWindows needs to restart before the firewall rule that lets telemetry reach the app becomes active. Until you restart, pressing Record will look like it is working, but no data will arrive.%n%nRestart now?
+
 
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; \
@@ -135,24 +161,23 @@ Filename: "{sys}\netsh.exe"; \
 ; The consequence is a silent failure and is documented in USER_GUIDE section 2: if Windows has
 ; the home network classified as Public, this rule does not apply and no packets arrive.
 ;
-; ---- NO localport PREDICATE. THIS IS LOAD-BEARING, NOT SLOPPY. --------------------------------
-; A rule with BOTH program= and localport= silently fails to match. Measured on Windows 11
-; against a real PS5 broadcast, three ways:
-;     program + UDP + localport=20777  -> FAILS, app receives nothing
-;     program + UDP, no port           -> works        <- what we ship
-;     UDP + localport=20777, no program-> works        <- rejected: any binary could receive
-; Established first with a firewall-off bisection: disabling the Private profile made the
-; installed app record immediately, and re-enabling it stopped delivery - so the packets were
-; being dropped by default-deny because the rule was not matching, not because of anything in
-; the app. The same binary run from the release zip records fine, because every rule Windows
-; itself writes from the first-record prompt is program-scoped with LocalPort: Any.
-; Likely mechanism, inferred rather than proven: for inbound BROADCAST UDP the program identity
-; is not resolved at the layer where the port predicate is evaluated, so a rule demanding both
-; can never satisfy both at once. Either predicate alone is fine.
-; Scope stays tight via program=, which is the property actually worth having: this binary may
+; ---- NO localport PREDICATE ---------------------------------------------------------------
+; Kept because it matches the shape of every rule Windows itself writes from the first-record
+; prompt (program-scoped, LocalPort: Any), and those demonstrably work on the test machine.
+; NOT kept because it was proven to be the fix - it was not, and the earlier version of this
+; comment said otherwise. Three shapes were measured live with netsh:
+;     program + UDP + localport=20777  -> failed
+;     program + UDP, no port           -> worked   <- what we ship
+;     UDP + localport=20777, no program-> worked   <- rejected anyway: any binary could receive
+; THE CONFOUND, named so nobody re-derives the wrong conclusion: every one of those "worked"
+; results immediately followed a firewall policy change, which appears to be what actually
+; refreshed the rule. A clean install carrying the port-less rule still failed until Windows was
+; restarted. Rule shape was therefore never isolated, and these three lines are observations, not
+; a causal finding. The real remedy is AlwaysRestart - see the note in [Setup].
+; Scope stays tight via program=, which is the property genuinely worth having: this binary may
 ; receive inbound UDP, nothing else may.
-; DO NOT re-add localport= for neatness - it reintroduces a bug with no error message anywhere.
-; test_installer_script.py enforces this, so the suite will stop you.
+; If you want to re-add localport=, get evidence first - a clean install + restart + record, with
+; the release zip running alongside as a control. test_installer_script.py currently refuses it.
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall add rule name=""{#FirewallRule}"" dir=in action=allow program=""{app}\{#ExeName}"" protocol=UDP profile=private,domain enable=yes"; \
     Flags: runhidden waituntilterminated; \
