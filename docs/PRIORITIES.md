@@ -345,12 +345,22 @@ up opportunistically rather than scheduled.
   holding `{app}`. An `InitializeUninstall` guard now refuses with Retry/Cancel; **that hook is the
   point — returning `False` aborts before anything is removed**, so cancelling leaves the install
   exactly as it was.
-  **And one that was chased and disproved:** the installed build appeared not to record while the
-  zip did. The rule is provably correct (`verbose` shows the right program, port and profiles), the
-  bind logs, there is one listener and no Block rule, and a controlled re-run recorded fine — the
-  first failure was **test state**, the game not sending. Two traps recorded in PACKAGING so they
-  are not re-walked: **`pktmon` is an observer and cannot fix a firewall**, and **`Domain,Private` is
-  a superset of `Private`, not a mismatch**. Nothing was changed as a result; it produced **A6**.
+  **And one that took two days and changed the shipped rule:** the installed build received no
+  telemetry while the **byte-identical** zip binary recorded fine on the same machine and network.
+  The rule was not missing or malformed — `verbose` showed the right program, protocol, port and
+  profiles. **A rule that exists and a rule that matches are different things**, and Windows'
+  default inbound action is Block, so a non-matching rule needs no Block rule to produce silence.
+  **A firewall-off bisection settled in one command what two days of reading rule output could
+  not** (disable the Private profile → records; re-enable → silent). Then three shapes, edited live
+  with `netsh` rather than rebuilt: **`program` + `localport` fails; `program` alone works;
+  `localport` alone works** — the two predicates together never match, while either alone does.
+  Shipped **program-scoped with no port**, since port-only would let any binary receive UDP 20777;
+  `test_installer_script.py` now fails the suite if `localport=` is re-added, because the failure
+  has no error message anywhere. **Three wrong turns recorded in PACKAGING so they are not
+  re-walked:** `pktmon` is an ETW observer and **cannot fix a firewall** (an early "it worked when I
+  ran pktmon" was correlation, and cost a day); `Domain,Private` is a **superset** of `Private`, not
+  a mismatch; and **one successful observation is not a fix** — a single clean run was written up as
+  "test state, closed" and the failure returned on the next build. It also produced **A6**.
   **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
   `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
   `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule

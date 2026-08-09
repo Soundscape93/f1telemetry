@@ -31,10 +31,6 @@ class InstallerScriptTest(unittest.TestCase):
     def setUp(self):
         self.text = _ISS.read_text(encoding="utf-8")
 
-    def test_the_firewall_rule_opens_the_port_the_recorder_actually_binds(self):
-        expected = inspect.signature(LiveUDPSource.__init__).parameters["port"].default
-        self.assertEqual(_define(self.text, "TelemetryPort"), str(expected))
-
     def test_the_rule_is_inbound_udp(self):
         """Outbound or TCP would be a rule that exists, looks right, and does nothing."""
         add = next(l for l in self.text.splitlines() if "firewall add rule" in l)
@@ -81,6 +77,22 @@ class InstallerScriptTest(unittest.TestCase):
         the same drift the port and spec guards exist for."""
         code = self.text[self.text.index("[Code]"):]
         self.assertIn("{#ExeName}", code)
+
+    def test_the_rule_name_states_the_port_the_recorder_actually_binds(self):
+        """The rule is deliberately NOT port-qualified, so the port survives only in its NAME -
+        which is how a human finds it in the Firewall UI. Two halves, and both are needed: the
+        define tracks the code, and the rule name is BUILT from the define rather than repeating
+        the literal, so the two cannot drift apart. A rule named 20777 on a build that listens
+        elsewhere would send the next debugger down a false trail."""
+        expected = inspect.signature(LiveUDPSource.__init__).parameters["port"].default
+        self.assertEqual(_define(self.text, "TelemetryPort"), str(expected))
+
+        # _define() parses a simple literal and FirewallRule is now a concatenation, so assert on
+        # the raw line instead: it must reference the define, and must not repeat the number.
+        rule_line = next(l for l in self.text.splitlines()
+                         if l.startswith("#define FirewallRule"))
+        self.assertIn("TelemetryPort", rule_line)
+        self.assertNotIn(str(expected), rule_line)
 
 
 class InstallerWorkflowTest(unittest.TestCase):

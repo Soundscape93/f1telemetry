@@ -574,23 +574,50 @@ would normally offer. The installer runs elevated, so a post-install launch woul
 machine this design targets, and disproving the runtime invariant on its very first run. The
 Start-menu entry is the way in.
 
-**The installed app "not recording" was chased to a conclusion and disproved — do not re-open it as
-an installer defect.** The first clean-machine run showed the installed build receiving no telemetry
-while the zip build did, which looks exactly like a bad firewall rule. It is not. Positively
-established, in this order: `show rule … verbose` reports `Program: C:\Program Files\F1
-Telemetry\f1telemetry.exe`, UDP, `LocalPort 20777`, `Domain,Private`, `Enabled: Yes`; the bind
-succeeds (`listening on 0.0.0.0:20777` in the log); `Get-NetUDPEndpoint` shows **exactly one**
-listener and it is the installed exe; **no Block rule exists** (block outranks allow, so this had to
-be checked rather than assumed); and the WLAN profile is Private. A controlled re-run — prove
-packets are flowing with `pktmon` while the app is idle, **stop** the capture, then press Record —
-**recorded correctly**. The original failure was **test state**: the game was not sending during
-that window. Two traps worth not re-walking: **`pktmon` cannot fix a firewall**, being an ETW
-observer with no path to WFP policy, so "it started working when I ran pktmon" is correlation; and
-**`Domain,Private` is a superset of `Private`, not a mismatch** — profiles are the set a rule applies
-to, so narrowing it fixes nothing and would only break a domain-joined machine later. Nothing was
-changed as a result. What the episode *did* expose is that the app says nothing between
-`listening on…` and a finished capture, which is why the diagnosis needed `pktmon` at all — filed as
-PRIORITIES → **A6**, and deliberately not folded into C8b, being recorder-layer work.
+**Why the firewall rule carries no `localport`, and the two days it took to find out.** The
+clean-machine run showed the installed build receiving no telemetry while the **byte-identical**
+binary from the release zip recorded fine on the same machine, network and port. The rule was not
+missing or malformed — `show rule … verbose` reported the right program, protocol, port and
+profiles, `Enabled: Yes` — so "the rule exists" was true and useless. **A rule that exists and a
+rule that matches are different things, and Windows' default inbound action is Block**, so a rule
+that fails to match needs no explicit Block rule to produce silence.
+
+**What settled it was a bisection, not more inspection.** Disabling the Private profile
+(`Set-NetFirewallProfile -Profile Private -Enabled False`) made the installed app record
+immediately; re-enabling it stopped delivery. One command, and it halved the problem space after
+two days of reading rule output. **Reach for that first next time.**
+
+Then three live rule shapes, edited in place with `netsh` rather than rebuilt — each test costs
+seconds instead of a CI round trip:
+
+| Rule | Result |
+|---|---|
+| `program` + UDP + `localport=20777` | **fails — app receives nothing** |
+| `program` + UDP, no port | works ← **shipped** |
+| UDP + `localport=20777`, no program | works ← rejected: any binary could then receive |
+
+**The two predicates together never match; either alone does.** Mechanism inferred rather than
+proven: for inbound **broadcast** UDP the program identity is not resolved at the layer where the
+port predicate is evaluated, so a rule demanding both can never satisfy both at once. It also
+explains why the zip always worked — every rule Windows itself writes from the first-record prompt
+is program-scoped with `LocalPort: Any`. **Program scope is kept and the port dropped**, because
+port-only would open UDP 20777 to any binary. `test_installer_script.py` fails the suite if
+`localport=` is ever re-added: the failure has no error message anywhere and would otherwise be
+found only by a tester who cannot record.
+
+**Three wrong turns, recorded so they are not re-walked.** **`pktmon` cannot fix a firewall** — it
+is an ETW observer with no path to WFP policy, so an early "it started working when I ran pktmon"
+was pure correlation, and chasing it cost a day. **`Domain,Private` is a superset of `Private`, not
+a mismatch** — profiles are the set a rule applies to, so narrowing it fixes nothing and would only
+break a domain-joined machine later. And **one successful observation is not a fix**: a single
+clean run was accepted as proof the problem was test state, the item was written up as closed, and
+it came back on the next build. Intermittent-looking failures need a mechanism before they need a
+verdict.
+
+The episode also exposed that the app says nothing between `listening on…` and a finished capture —
+filed as PRIORITIES → **A6**, deliberately not folded into C8b, being recorder-layer work. In
+fairness it would not have shortened this hunt: the GUI already showed a zero packet count. The
+firewall bisection is what did the work.
 
 **Guarded by `test/test_installer_script.py`.** An `.iss` cannot be unit-tested meaningfully, but
 the rule hard-codes a port and an exe name that Python owns, and the failure when they drift is the
@@ -932,10 +959,14 @@ W11 boot); see the 4th build entry for what was covered where and what was not.
       run, that is a bug, not a consequence of the admin install.
 - [ ] **Installer:** UAC prompts (credential screen on a standard account); installs to
       `C:\Program Files\F1 Telemetry`; Start-menu entry appears.
-- [ ] **The firewall rule is real:** `netsh advfirewall firewall show rule name="F1 Telemetry (UDP
-      20777)"` reports `Enabled: Yes`, `Direction: In`, `Protocol: UDP`, `LocalPort: 20777`,
-      `Profiles: Domain,Private`. Then record with **no prompt appearing at all** — that is the
-      whole point of the item.
+- [ ] **The firewall rule is real, and it *works*.** `netsh advfirewall firewall show rule
+      name="F1 Telemetry (UDP 20777)" verbose` reports `Enabled: Yes`, `Direction: In`,
+      `Protocol: UDP`, `Profiles: Domain,Private`, and `Program:` pointing at the installed exe.
+      **`LocalPort` must read `Any`** — a port-qualified rule was tried and silently failed to
+      match; see *C8b scope* above and the block comment in the `.iss`. **The rule existing is not
+      the test:** record and confirm **packets actually arrive** and a `.f1cap` appears. That
+      distinction is the whole lesson of this item — a correct-looking rule delivered nothing for
+      two days.
 - [ ] **Upgrade in place:** run the installer over an existing install → still **one** firewall rule
       and **one** entry in Apps & features. Repeat with the app **running** → Restart Manager offers
       to close it and the install completes.

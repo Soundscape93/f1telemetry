@@ -34,9 +34,12 @@
 #define AppName "F1 Telemetry"
 #define ExeName "f1telemetry.exe"
 #define RepoUrl "https://github.com/Soundscape93/f1telemetry"
-; Keyed by NAME so the delete-before-add-below can find it again on every reinstall.
-#define FirewallRule "F1 Telemetry (UDP 20777)"
+; The rule carries NO localport predicate (see [Run]) - the port survives only in the rule's NAME,
+; so a human can tell at a glance what it is for. Built from the define rather than repeated as a
+; literal, so test_installer_script.py can still catch it drifting from LiveUDPSource's default.
 #define TelemetryPort "20777"
+; Keyed by NAME so the delete-before-add below can find it again on every reinstall.
+#define FirewallRule "F1 Telemetry (UDP " + TelemetryPort + ")"
 
 
 [Setup]
@@ -121,20 +124,39 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#ExeName}"; Tasks: desktopic
 ; Delete-then-add, keyed by rule name, so a reinstall or an upgrade REPLACES the rule instead of
 ; stacking duplicates. The delete exits nonzero when nothing matches - the normal first-install
 ; case - and that is fine: Inno does not fail a [Run] entry on a nonzero exit code.
-;
-; profile=private,domain and NOT public, deliberately. This is a home-LAN listener whose parser
-; reads untrusted datagrams, and it mirrors what the Windows prompt itself ticks by default.
-; The consequence is a silent failure and is documented in USER_GUIDE section 2: if Windows has
-; the home network classified as Public, this rule does not apply and no packets arrive.
+
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall delete rule name=""{#FirewallRule}"""; \
     Flags: runhidden waituntilterminated; \
     StatusMsg: "Replacing any previous firewall rule ..."
 
+; profile=private,domain and NOT public, deliberately. This is a home-LAN listener whose parser
+; reads untrusted datagrams, and it mirrors what the Windows prompt itself ticks by default.
+; The consequence is a silent failure and is documented in USER_GUIDE section 2: if Windows has
+; the home network classified as Public, this rule does not apply and no packets arrive.
+;
+; ---- NO localport PREDICATE. THIS IS LOAD-BEARING, NOT SLOPPY. --------------------------------
+; A rule with BOTH program= and localport= silently fails to match. Measured on Windows 11
+; against a real PS5 broadcast, three ways:
+;     program + UDP + localport=20777  -> FAILS, app receives nothing
+;     program + UDP, no port           -> works        <- what we ship
+;     UDP + localport=20777, no program-> works        <- rejected: any binary could receive
+; Established first with a firewall-off bisection: disabling the Private profile made the
+; installed app record immediately, and re-enabling it stopped delivery - so the packets were
+; being dropped by default-deny because the rule was not matching, not because of anything in
+; the app. The same binary run from the release zip records fine, because every rule Windows
+; itself writes from the first-record prompt is program-scoped with LocalPort: Any.
+; Likely mechanism, inferred rather than proven: for inbound BROADCAST UDP the program identity
+; is not resolved at the layer where the port predicate is evaluated, so a rule demanding both
+; can never satisfy both at once. Either predicate alone is fine.
+; Scope stays tight via program=, which is the property actually worth having: this binary may
+; receive inbound UDP, nothing else may.
+; DO NOT re-add localport= for neatness - it reintroduces a bug with no error message anywhere.
+; test_installer_script.py enforces this, so the suite will stop you.
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""{#FirewallRule}"" dir=in action=allow program=""{app}\{#ExeName}"" protocol=UDP localport={#TelemetryPort} profile=private,domain enable=yes"; \
+    Parameters: "advfirewall firewall add rule name=""{#FirewallRule}"" dir=in action=allow program=""{app}\{#ExeName}"" protocol=UDP profile=private,domain enable=yes"; \
     Flags: runhidden waituntilterminated; \
-    StatusMsg: "Allowing telemetry trough Windows Firewall (UDP {#TelemetryPort}) ..."
+    StatusMsg: "Allowing telemetry through Windows Firewall ..."
 
 ; NOTE: there is deliberately NO "launch the app now" checkbox. The installer runs elevated, so a post 
 ; install launch would hand the app an ADMIN token - creating the data root in the wrong user
@@ -149,12 +171,12 @@ Filename: "{sys}\netsh.exe"; \
     Flags: runhidden waituntilterminated; \
     RunOnceId: "DeleteFirewallRule"
 
-; NOTHING removes %LOCALAPPDATA%\f1telemetry, and there is deliberatel no opt-in checkbox fo it
-; either. Two reasons, and the secon is decisive:
+; NOTHING removes %LOCALAPPDATA%\f1telemetry, and there is deliberately no opt-in checkbox for it
+; either. Two reasons, and the second is decisive:
 ;   1. captures/ is the source of truth and can be gigabytes of data; the database is the disposable half.
 ;   2. An admin uninstall runs under the ADMINISTRATOR's token, but the data_root() is per-user. On the
-;      machine this whole decision targets - installed as admin, run by standard user - it would
-;      resolve the admins' %LOCALAPPDATA%, find nothing, and report success while deleting nothing.
+;      machine this whole decision targets - installed as admin, run by a standard user - it would
+;      resolve the admin's %LOCALAPPDATA%, find nothing, and report success while deleting nothing.
 ;      A checkbox that lies is worse than no checkbox at all.
 ; Users remove it by hand; Help -> Open Data Folder puts them in the right place.
 

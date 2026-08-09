@@ -107,7 +107,7 @@ jobs:
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
 
-      # SECOND INOVCATION for this job - the above apt install is load-bearing and already "paid for". Same font/geometry
+      # SECOND INVOCATION for this job - the above apt install is load-bearing and already "paid for". Same font/geometry
       # as the guide, so the two documents look like they belong together. No --toc: NOTICE.md is short, a content page 
       # adds noise. PDF for builds instead the md as users may not have a viewer that renders the md well.
       - name: Build NOTICE.pdf
@@ -119,7 +119,7 @@ jobs:
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
 
-      # One artifact for both PDFs, so each build job's download step picks up the par in one go.
+      # One artifact for both PDFs, so each build job's download step picks up the pair in one go.
       - uses: actions/upload-artifact@v4
         with:
           name: user-guide-pdf
