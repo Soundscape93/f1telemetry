@@ -107,7 +107,7 @@ jobs:
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
 
-      # SECOND INOVCATION for this job - the above apt install is load-bearing and already "paid for". Same font/geometry
+      # SECOND INVOCATION for this job - the above apt install is load-bearing and already "paid for". Same font/geometry
       # as the guide, so the two documents look like they belong together. No --toc: NOTICE.md is short, a content page 
       # adds noise. PDF for builds instead the md as users may not have a viewer that renders the md well.
       - name: Build NOTICE.pdf
@@ -119,7 +119,7 @@ jobs:
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
 
-      # One artifact for both PDFs, so each build job's download step picks up the par in one go.
+      # One artifact for both PDFs, so each build job's download step picks up the pair in one go.
       - uses: actions/upload-artifact@v4
         with:
           name: user-guide-pdf
@@ -181,6 +181,50 @@ jobs:
             if (-not (Test-Path $item)) { throw "missing from the bundle: $item" }
           }
 
+      # C8b. Deliberately after the sanity check: the installer can then only ever package a bunlde
+      # that already has the guide, notices, license and template besite the exe.
+      #
+      # Built by CI rather than by hand, on purpose. A hand-built installer comes from an unverified
+      # working tree and breaks two invariants this pipeline states outright - "the published
+      # artifact is exactly the tagged commit" and "CI verifies the version, it never stamps it".
+      # The usual objection (it can now fail a release) is covered by the no-tag workflow_dispatch
+      # path, which builds every artifact without publishing - the same escape hatch that de-risked
+      # C8a and F9.
+      #
+      # The version comes from check_version.py's source_version(), NOT a regex here: preflight has
+      # already proven that file agrees with the tag, and a second parser would be free to drift.
+      - name: Build the Windows installer
+        working-directory: f1telemetry
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            # Preinstalled on the runner image today; this keeps the job alive if that changes.
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          $version = python -c "import sys; sys.path.insert(0, 'packaging'); import check_version; print(check_version.source_version())"
+          # On a no-tag workflow_dispatch, TAG is the branch name, and a slashed-branch would be read
+          # as a directory in the output path - same sanitising both archive steps already do.
+          $safe = $env:TAG -replace '/', '-'
+          & $iscc /Qp `
+            "/DAppVersion=$version" `
+            "/DBundleDir=$((Resolve-Path dist\f1telemetry).Path)" `
+            "/DOutputDir=$((Resolve-Path dist).Path)" `
+            "/DOutputBaseFilename=f1telemetry-${safe}-windows-x64-setup" `
+            packaging\installer\f1telemetry.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+      
+      - name: Sanity-check the installer
+        working-directory: f1telemetry/dist
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem -Filter "*-setup.exe")
+          if ($setup.Count -ne 1) { throw "expected exactly one installer, found $($setup.Count)" }
+          # A truncated or empty ISCC output would otherwise sail through as a valid Release asset.
+          if ($setup[0].Length -lt 50MB) { throw "installer is only $($setup[0].Length) bytes - the bundle is ~250 MB, so this did not package it" }
+          Write-Host "installer is $($setup[0].Name) ($([math]::Round($setup[0].Length / 1MB)) MB)"
+
       # 7-Zip is preinstalled on the runner and is minutes faster than Compress-Archive on a
       # bundle this size (thousands of files, ~250 MB).
       - name: Zip the build
@@ -194,6 +238,13 @@ jobs:
         with:
           name: windows-zip
           path: f1telemetry/dist/*.zip
+
+      # Its own artifact, not folded into windows-zip; the zip artifact's path is the *.zip, and
+      # the release job addresses assets by artifact folder (see the release step's comment).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: f1telemetry/dist/*-setup.exe
   
   # Best-effort Linux artifact (PRIORITIES C8a). Deliberately a tarball, not an AppImage:
   # A .tar.gz rather than a zip because zip does not preservere the executable bit, so a zip
@@ -285,6 +336,10 @@ jobs:
       # the in-app update check reads exactly that endpoint (src/update_check.py).
       # NOTICE.pdf is published as a standalone asset as well as inside both archives, so the 
       # license terms are reachable without a ~250 MB download.
+      # PATHS ARE artifacts/<ARTIFACT-NAME>/<file>: the download step above has no `name:`, so it
+      # lands every artifact under its own folder. Getting this wrong fails AFTER tag.yml has
+      # already pushed the tag, and then the release job is skipped on a no-tag dispatch, so a test run
+      # cannot catch it.
       - name: Publish the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -293,6 +348,7 @@ jobs:
           gh release create "$TAG" \
             --title "F1 Telemetry $TAG" \
             --notes-file artifacts/release-notes/notes.md \
+            artifacts/windows-installer/*-setup.exe \
             artifacts/windows-zip/*.zip \
             artifacts/linux-tarball/*.tar.gz \
             artifacts/user-guide-pdf/USER_GUIDE.pdf \

@@ -8,17 +8,59 @@ one-time game + firewall setup, and day-to-day use.
 
 ## 1. Install & run
 
-1. Download the latest release zip from the project's GitHub **Releases** page.
-2. Unzip it and keep the whole `f1telemetry` folder together and run
-   **`f1telemetry.exe`** from inside it.
+There are two downloads on the project's GitHub **Releases** page. Both give you the same app.
+
+### Option A — the installer (recommended)
+
+1. Download **`f1telemetry-<version>-windows-x64-setup.exe`**.
+2. Run it. **Windows will ask for administrator rights** — see the note below for why.
 3. **SmartScreen** may warn ("Windows protected your PC") because the build is unsigned — click
    **More info → Run anyway**. This is expected for a small, unsigned app.
+4. **Restart Windows when Setup asks.** This one matters — see the warning below.
+5. Launch **F1 Telemetry** from the Start menu.
 
-No Python or other installs are needed; everything is bundled.
+> **Restart before your first recording.** The installer adds the Windows Firewall rule for you,
+> but Windows doesn't put it into effect until it restarts. If you skip the restart, the app
+> starts fine and **Record looks like it is working — but no telemetry arrives, and nothing tells
+> you why**. If that happens, restart and try again. (The app will also hint at this after a few
+> seconds of receiving nothing.)
 
-Next to `f1telemetry.exe` you'll also find **`USER_GUIDE.pdf`** (this guide),
+Once restarted, recording works the first time with no firewall prompt to click (section 2). The
+installer also adds a Start-menu entry and an uninstaller.
+
+> **Administrator rights are needed to install, and never to run.** Adding a firewall rule is a
+> system-wide change, which is the only reason Windows asks. Once installed, F1 Telemetry runs as
+> an ordinary program under your own account, and everything it saves stays in your own user
+> folder (section 6). If it ever asks for administrator rights to *start*, that is a bug — please
+> report it.
+
+**Updating:** run the new installer over the top. Close the app first, or let the installer ask.
+Your captures, database and rosters are untouched.
+
+**Uninstalling:** Settings → Apps → F1 Telemetry → Uninstall. This removes the program and the
+firewall rule. It deliberately **does not delete your captures or database** — those are yours and
+can be many gigabytes. Remove them by hand if you want them gone (Help → Open data folder shows
+you where they are).
+
+### Option B — the zip
+
+Use this if you can't or would rather not grant administrator rights.
+
+1. Download the latest release zip.
+2. Unzip it, keep the whole `f1telemetry` folder together, and run **`f1telemetry.exe`** from
+   inside it.
+3. Click through the same SmartScreen warning as above.
+
+The zip needs no administrator rights at all, but nothing sets up the firewall rule for you — you
+click **Allow** on the Windows prompt the first time you record (section 2).
+
+No Python or other installs are needed with either option; everything is bundled.
+
+Either way, next to `f1telemetry.exe` you'll also find **`USER_GUIDE.pdf`** (this guide),
 **`roster_template.csv`** (section 5), and **`LICENSE`** + **`NOTICE.pdf`** (*Licence & notices*, at
-the end of this guide). Inside the app, **Help → Open user guide** opens the PDF.
+the end of this guide). With the installer that folder is `C:\Program Files\F1 Telemetry`; you
+rarely need to go there, because **Help → Open user guide** and **Help → Licences & notices** open
+these from inside the app.
 
 ## 2. First-time setup
 
@@ -35,10 +77,19 @@ reaches it over your Network.
 
 ### Windows Firewall
 
-The first time you record, Windows shows a firewall prompt — click **Allow**. If you dismissed or
-denied it, recording won't receive packets and the prompt won't reappear (Windows remembers the
-denial). To fix it: open **Windows Defender Firewall → Inbound Rules**, delete the **f1telemetry**
-rule, then press **Record** again to get a fresh prompt.
+**If you used the installer, this is already done** — the rule was added during installation and
+there is nothing to click. **But it only takes effect after you restart Windows** (section 1). If
+recording receives nothing right after installing, that restart is the first thing to try.
+
+**If you run the zip build,** Windows shows a firewall prompt the first time you record — click
+**Allow**. If you dismissed or denied it, recording won't receive packets and the prompt won't
+reappear (Windows remembers the denial). To fix it: open **Windows Defender Firewall → Inbound
+Rules**, delete the **f1telemetry** rule, then press **Record** again to get a fresh prompt.
+
+**Either way, the rule only covers *private* networks** — which is what a home network should be,
+and what Windows' own prompt ticks by default. If Windows has your home network classified as
+**Public**, no telemetry will arrive and there will be no error message to tell you so. Check
+under **Settings → Network & internet → your network**, and set it to **Private network**.
 
 ## 3. Recording a session
 

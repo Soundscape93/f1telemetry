@@ -376,7 +376,9 @@ the self-updater is packaging Phase 4.)*
 - **Phase 4 — reach + polish:** macOS/Linux artifacts (unsigned), Inno Setup installer (a natural
   home for the Windows Firewall allow-rule so testers never see the prompt), later a real
   auto-updater (velopack). **Scoped down and scheduled as PRIORITIES → C8a / C8b / C8c**: Linux
-  only (macOS dropped), the installer in, velopack deferred.
+  only (macOS dropped), the installer in, velopack deferred. **C8a done 2026-08-07 and C8b done
+  2026-08-08 — only C8c remains, and it is deferred out of the cycle**, so Phase 4 is complete as
+  scoped.
 
 ### The Linux artifact (C8a)
 
@@ -491,11 +493,13 @@ ever needs admin to run, that is a bug, not a consequence of this decision.
 The admin requirement must be **documented** — in the user guide's install section, in the release
 notes for the first build that ships an installer, and on the Release page itself.
 
-#### C8b scope — settled vs still to decide
+#### C8b scope — all settled, built 2026-08-08
 
-Written down so the implementing session starts building rather than discussing.
+The script is [`packaging/installer/f1telemetry.iss`](../packaging/installer/f1telemetry.iss); it
+is compiled by `release.yml`'s `windows-build` job and published as
+`f1telemetry-<tag>-windows-x64-setup.exe`.
 
-**Settled:**
+**Settled before the work started:**
 - **Inno Setup**, per the original Phase 4 plan. Not Briefcase/MSI — that was weighed and deferred
   in the locked decisions above.
 - **Admin (per-machine) install**, so the firewall rule can be written. See the table above.
@@ -508,25 +512,165 @@ Written down so the implementing session starts building rather than discussing.
 - **A Start-menu entry and an uninstaller** — the two things an installer is actually for beyond the
   firewall rule.
 
-**To decide before writing the `.iss`:**
-- **What uninstall removes.** Three separable things: the program files (obviously), the **firewall
-  rule** (it should go — a rule naming a deleted exe is litter), and the **data root** (`captures/`
-  can be gigabytes and is the *source of truth*). The default must be **leave the data**, with
-  removal offered as an explicit opt-in checkbox at most. Deleting a league's captures on uninstall
-  would be unrecoverable, and this project's whole data story is "the database is disposable, the
-  captures are not".
-- **How the rule is written** — Inno's `[Run]` calling `netsh advfirewall firewall add rule` versus a
-  Pascal-script call to the Windows Firewall API. `netsh` is legible and debuggable in a log; check
-  it is idempotent across reinstalls (add a matching `delete rule` first, or key the rule by name).
-- **Install directory** — `{autopf}\f1telemetry` (Program Files) follows from a per-machine install;
-  confirm nothing in the app assumes a writable install dir, which `paths.py` should already
-  guarantee.
-- **Upgrade-in-place behaviour** — whether the installer replaces a previous version silently and
-  what happens to a running instance (a one-folder Windows app holds file locks; this is the same
-  problem that deferred velopack, and it applies to an installer too).
-- **Whether CI builds the installer.** Inno Setup is available on `windows-latest` runners, so
-  `windows-build` can produce it — but that makes the installer part of the release preflight and
-  therefore able to fail a release. Weigh against building it by hand for the first one or two.
+**The five open questions, answered 2026-08-08:**
+
+- **Uninstall removes the program files and the firewall rule; it never touches the data root, and
+  there is deliberately no opt-in checkbox either.** The earlier note allowed "removal offered as
+  an explicit opt-in checkbox at most" — that was dropped for a reason specific to option (b), and
+  it is the decisive one: **an admin uninstall runs under the *administrator's* token, while
+  `data_root()` is per-user.** On exactly the machine this design targets — installed as admin, run
+  by a standard user — the uninstaller would resolve the *admin's* `%LOCALAPPDATA%`, find nothing,
+  delete nothing, and report success. That is not a risky feature but a broken one, and a checkbox
+  that lies is worse than no checkbox. Users remove it by hand; *Help → Open data folder* puts them
+  in the right place. The original argument still holds too: `captures/` is the source of truth and
+  can be gigabytes, and only the database is the disposable half.
+- **`netsh`, not the Firewall COM API.** Legible, and it leaves a line in the install log that can
+  be read out over a chat window on a machine that cannot be debugged remotely. **Keyed by rule name
+  and deleted before it is added**, so a reinstall or an upgrade replaces the rule instead of
+  stacking duplicates. The delete exits nonzero on a first install, when nothing matches; that is
+  fine, because Inno does not fail a `[Run]` entry on a nonzero exit code.
+- **Install directory `{autopf}\F1 Telemetry`**, which `PrivilegesRequired=admin` resolves to
+  `C:\Program Files`. The "nothing assumes a writable install dir" check was **done, not assumed**:
+  `paths.app_dir()` is read-only at all four call sites (both `user_guide` resolvers), and frozen
+  `data_root()` is `%LOCALAPPDATA%\f1telemetry`.
+- **Upgrade-in-place works via `CloseApplications=yes`** — Restart Manager finds the running
+  one-folder app and offers to close it, which is the file-lock problem that deferred velopack.
+  **Plus an `[InstallDelete]` wipe of `{app}\_internal`**, which is the half that is easy to miss:
+  Inno replaces only the files it is installing, so anything *dropped* by a later build would linger
+  there forever, and a stale Qt plugin or DLL is precisely the shape of an unreproducible bug.
+- **CI builds it, inside `windows-build`, after that job's bundle sanity-check.** The alternative —
+  building the first one or two by hand — was rejected because it breaks two invariants stated
+  outright above: *"the published artifact is exactly the tagged commit"* and *"CI verifies the
+  version, it never stamps it"*. A hand-built installer comes from an unverified working tree. The
+  objection it was meant to answer (the installer can now fail a release) is already covered by the
+  **no-tag `workflow_dispatch` path**, which builds every artifact without publishing — the same
+  escape hatch that de-risked C8a and F9. Ordering it after the sanity-check means the installer can
+  only ever package a bundle already proven to carry the guide, notices, licence and template.
+
+**A seventh, found by the clean-machine run: the uninstaller refuses to run while the app is open.**
+Uninstalling with F1 Telemetry running deleted the documents beside the exe but left
+`f1telemetry.exe` and `_internal` behind — Windows will not remove a running executable or its
+loaded DLLs — producing a **half-removed install**, which is worse than either outcome on its own.
+`CloseApplications=yes` covers *Setup* but does not save the *uninstaller*, which is itself holding
+`{app}`. Fixed rather than documented around, with an `InitializeUninstall` guard offering
+Retry/Cancel. **That hook is the whole point: returning `False` aborts before anything is removed**,
+so a refusal leaves the installation exactly as it was. Detection is `tasklist` piped through
+`find` — legible, no mutex needed in the app, no DLL import, and `find`'s exit code *is* the answer.
+The uninstaller runs elevated, which matters: it therefore also sees an instance left open by a
+**different user**, which is exactly the case a per-machine admin install makes likely. A failure of
+`Exec` itself deliberately reports "not running", because a broken detector must never become a
+program that cannot be uninstalled.
+
+**A sixth decision the scope had not listed: the firewall profile.** `profile=private,domain`,
+**not public.** This is a home-LAN listener whose parser reads untrusted datagrams, and it mirrors
+what the Windows prompt itself ticks by default. **The consequence is a silent failure and must stay
+documented:** if Windows has the home network classified as *Public*, the rule does not apply, no
+packets arrive, and there is no error. It is in `USER_GUIDE.md` §2, the Help → Setup panel and the
+release notes.
+
+**And one deliberate omission.** There is **no "launch the app now" checkbox**, which an installer
+would normally offer. The installer runs elevated, so a post-install launch would hand the app an
+**admin token** — creating the data root in the wrong user profile on exactly the standard-user
+machine this design targets, and disproving the runtime invariant on its very first run. The
+Start-menu entry is the way in.
+
+**The installed app not recording, and why the installer now asks for a restart.** The
+clean-machine run showed the installed build receiving no telemetry while the **byte-identical**
+binary from the release zip recorded fine on the same machine, network and port. This took several
+days and produced two wrong conclusions before the right remedy; the wrong turns are recorded
+below because they are the more useful half.
+
+**The remedy: Windows must restart before the installer-created firewall rule is effective.**
+Measured repeatedly — install, press Record immediately, no telemetry arrives *while `pktmon`
+confirms the packets are reaching the NIC*; restart, press Record, works, same game session. The
+failing window spanned several minutes, so this is **not** propagation latency that waiting would
+clear, and the app process in the failing run was launched *after* the rule existed, so it is
+**not** per-process staleness either. Hence `AlwaysRestart=yes` and a custom `FinishedRestartLabel`
+saying why — the failure is silent, so an unexplained reboot would be declined and the user would
+land in exactly the state it prevents.
+
+**Mechanism inferred, not proven.** Most likely a stale path→rule association cached by the
+firewall service after the exe at that path is replaced. **We ship the remedy, not the theory** —
+and this note deliberately stops short of asserting more than was measured, having twice done the
+opposite. Rejected alternatives: restarting `MpsSvc` from the installer (frequently refuses to
+stop, depends on BFE, briefly drops protection mid-install, and any failure lands on a tester
+machine we cannot debug); `netsh advfirewall reset` (wipes every rule on the system); `gpupdate`
+(irrelevant — this is a local rule, not Group Policy).
+
+**The bisection that opened it up.** Disabling the Private profile
+(`Set-NetFirewallProfile -Profile Private -Enabled False`) made the installed app record
+immediately; re-enabling it stopped delivery. One command, after two days of reading rule output.
+**Reach for that first next time** — it separates "the firewall is involved" from everything else
+in seconds.
+
+**Three rule shapes, and the confound that invalidated the conclusion drawn from them.** Edited
+live with `netsh` rather than rebuilt:
+
+| Rule | Result |
+|---|---|
+| `program` + UDP + `localport=20777` | failed |
+| `program` + UDP, no port | worked ← shipped |
+| UDP + `localport=20777`, no program | worked ← rejected anyway: any binary could then receive |
+
+These are **observations, not a causal finding.** *Every one of those "worked" results immediately
+followed a firewall policy change* — which appears to be what actually refreshed the rule. A clean
+install carrying the port-less rule still failed until Windows was restarted. **Rule shape was
+never isolated.** The port-less form is kept because it matches what Windows itself writes from the
+first-record prompt, not because it was proven to fix anything.
+
+**Genuinely eliminated, and by measurement rather than argument.** The firewall-off run recorded
+successfully from the installed exe in Program Files, and a later run had the installed app and the
+release zip **recording the same broadcast simultaneously**, producing two capture files within
+seconds of each other. Between them those two results close: the **Program Files path**, the
+**space in the folder name**, **Start-menu launch context**, **working directory**, **standard-user
+context**, the packaged **`_internal`** path, any **zip-vs-installed binary difference**, **stale
+firewall rules**, and **MultiViewer or another duplicate listener**. Do not re-test these.
+
+**Four wrong turns, which are the real lesson.** **`pktmon` cannot fix a firewall** — it is an ETW
+observer with no path to WFP policy, so an early "it started working when I ran pktmon" was pure
+correlation, and chasing it cost a day. **`Domain,Private` is a superset of `Private`, not a
+mismatch** — profiles are the set a rule applies to, so narrowing it fixes nothing and would only
+break a domain-joined machine later. **One successful observation is not a fix** — a single clean
+run was accepted as proof the problem was test state, written up as closed, and the failure
+returned on the next build; the same mistake was then made again with the rule shape. And **test
+without a control and you measure nothing**: several failures were recorded without confirming the
+game was sending at that moment. **Run the release zip alongside** — it binds the same port and
+receives the same broadcast, so "the game wasn't sending" can never explain a result again.
+
+Because of that history, the clean-machine checklist requires the install → restart → record path
+to pass **twice from scratch**, not once.
+
+**Accepted 2026-08-09 on exactly that basis.** Two full clean passes, identical both times: before
+restarting, the installed app received nothing **while the release zip recorded from the same
+broadcast as a control**; closing and reopening the installed app did not help; after restarting,
+it recorded immediately and a `.f1cap` appeared. The control is what makes the result trustworthy —
+it makes "the game wasn't sending" unavailable as an explanation, which is precisely how the three
+earlier false conclusions were reached.
+
+**A7 was folded into C8b rather than deferred, and the reason is worth keeping.** A restart
+*request* can be declined, and the failure that follows is silent — which reproduces the exact
+false bug report C8b exists to prevent, so the feature would have shipped with a hole in its own
+justification. `MainWindow` now replaces `Recording - waiting for telemetry ...` after
+`_NO_TELEMETRY_HINT_MS` of zero datagrams with a line naming the restart case and the Public-network
+case. **No first-run detection**, which is what kept it small: the trigger is zero packets, and the
+advice is correct whenever it fires.
+
+Scoping it surfaced something worth knowing: `Recorder.record` calls `on_status` **inside** its
+`for data in self.source` loop, so a socket receiving nothing produces **no UI updates at all** —
+the label sat on "waiting" forever. Hence a `QTimer` in the UI rather than a change to the Qt-free
+recorder. It also **narrows a standing preference** that setup guidance belongs in docs rather than
+status text: justified here because this cause reaches a user who is already past the docs.
+
+**A6 stays open** — the app still says nothing between `listening on…` and a finished capture. In
+fairness it would not have shortened this hunt: the GUI already showed a zero packet count. The
+firewall bisection and the simultaneous-recording control are what did the work.
+
+**Guarded by `test/test_installer_script.py`.** An `.iss` cannot be unit-tested meaningfully, but
+the rule hard-codes a port and an exe name that Python owns, and the failure when they drift is the
+worst kind — a rule that opens the wrong port, a recording that receives nothing, no error anywhere.
+The suite closes the chain `.iss` ↔ `LiveUDPSource`'s default ↔ `main_window._PORT`, the last read
+as *text* because every suite here is deliberately Qt-free. It also pins inbound/UDP,
+delete-before-add, uninstall cleanup, admin-with-no-override, and the absence of `postinstall`.
 
 **And when it ships:** the clean-instance run must be repeated, checking the *new* invariant —
 installed as admin, then **run as a standard user** with nothing needing elevation. The existing
@@ -853,7 +997,41 @@ untick the previous one. **Last full run: v0.7.0 on 2026-08-07 — passed** (Win
 W11 boot); see the 4th build entry for what was covered where and what was not.
 
 - [ ] Launch by **double-click** from a folder that is *not* the repo (proves CWD independence).
-- [ ] Launch as a **non-admin** user; nothing tries to write beside the exe.
+- [ ] **The C8b invariant — install as admin, then run as a standard user.** This item *changed
+      meaning* when the installer landed; it used to read "launch as a non-admin user". Installing
+      elevates (that is what the firewall rule needs); **launching must not**. Log in as a standard
+      user, start it from the Start menu, and confirm no UAC prompt, nothing written beside the exe,
+      and a `%LOCALAPPDATA%\f1telemetry` belonging to *that* user. If a build ever needs admin to
+      run, that is a bug, not a consequence of the admin install.
+- [ ] **Installer:** UAC prompts (credential screen on a standard account); installs to
+      `C:\Program Files\F1 Telemetry`; Start-menu entry appears.
+- [ ] **The firewall rule is real.** `netsh advfirewall firewall show rule
+      name="F1 Telemetry (UDP 20777)" verbose` reports `Enabled: Yes`, `Direction: In`,
+      `Protocol: UDP`, `Profiles: Domain,Private`, `LocalPort: Any`, and `Program:` pointing at the
+      installed exe.
+- [ ] **Setup asks to restart, and the page says WHY** — not Inno's generic default text.
+- [ ] **BEFORE restarting:** record → **no telemetry**, and after ~25s the status line names the
+      restart. **Run the release zip alongside: it MUST record**, or the game wasn't sending and
+      the run is void. If the *installed* app records here, say so — the restart requirement would
+      be over-cautious and can be narrowed.
+- [ ] **AFTER restarting:** launch as a **standard user** → record → **packets arrive and a
+      `.f1cap` appears** in *that* user's `%LOCALAPPDATA%\f1telemetry\captures`, with no UAC and no
+      firewall prompt. **This, not the rule existing, is the test.**
+- [ ] **Repeat the whole install → restart → record path a second time, from scratch.** One pass is
+      not acceptance: it was accepted three times during C8b and was wrong every time, twice
+      reaching these docs as a settled conclusion.
+- [ ] **Upgrade in place:** run the installer over an existing install → still **one** firewall rule
+      and **one** entry in Apps & features. Repeat with the app **running** → Restart Manager offers
+      to close it and the install completes.
+- [ ] **Uninstall, app closed:** program files and firewall rule both gone (`show rule` reports no
+      match), and `%LOCALAPPDATA%\f1telemetry` **still present with captures intact** — this is
+      deliberate, not a miss.
+- [ ] **Uninstall, app open → Cancel:** the guard's dialog appears, and cancelling leaves the
+      installation **completely intact** — relaunch it to confirm. This is the item the original
+      behaviour got wrong, so it is the one worth actually performing rather than assuming.
+- [ ] **Uninstall, app open → close it → Retry:** the uninstall then completes normally.
+- [ ] **The zip still works standalone** (it is the no-elevation fallback, so it must not rot):
+      unzip, run, and the first-record firewall *prompt* appears as before.
 - [ ] Launched on a **clean Windows instance** — see "Testing on a clean instance" below. (The old
       wording was "a machine with no Python installed", which is only a *proxy* for the properties
       that actually matter: no missing VC++ runtime, the Qt platform plugin resolving, no dev-only
@@ -1053,7 +1231,11 @@ These are **Phase 0 / documentation requirements**, not afterthoughts:
 2. **In-game UDP setup doc** — the F1 game must be told to send UDP telemetry to the recorder's
    IP/port (recorder binds `0.0.0.0:20777`); without it nothing records. Biggest support-ticket
    source. (Tester doc.)
-3. **Windows Firewall prompt** on first record — tell testers to **Allow**.
+3. **Windows Firewall prompt** on first record — tell testers to **Allow**. **Largely retired by
+   C8b:** the installer writes the rule, so installer users never see the prompt. It still applies
+   to the **zip** build. What replaces it as the thing to tell testers is the *Public network* trap:
+   the rule covers private/domain profiles only, so a home network Windows has classified as Public
+   receives nothing, silently.
 4. **Capture sharing flow** — captures are hash-identified and portable *by design*; give the
    league a concrete "drop files here / Import folder" procedure (builds on the `captures` metadata
    table + the planned shared-folder import).

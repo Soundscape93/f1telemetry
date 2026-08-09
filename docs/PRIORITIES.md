@@ -94,11 +94,12 @@ different kinds of artifact, and the seam is where that changes:
 1. **Release 1 — C5 + C6 + C7 + F8 → shipped as v0.7.0 on 2026-08-07.** Then **C4 ran against that
    published build** — validation wants a real downloaded artifact, not a local `dist/` folder.
    **Both complete.**
-2. **Release 2 — C8a + C8b + F9.** **C8a done 2026-08-07, F9 done 2026-08-08; C8b is the last item
-   and the release is not cut until it lands.** All three share one `## Unreleased` section. Then a
+2. **Release 2 — C8a + C8b + F9. All three done (2026-08-07, 2026-08-08, 2026-08-09) and sharing one
+   `## Unreleased` section; the release is ready to cut** — the `staging` → `main` PR, labelled
+   **`minor`** (C8a's new platform artifact and C8b's installer both add capability). Then a
    **second** clean-instance run, because **C8b changes what "install" means**: a clean-instance
    test against a zip proves nothing about an installer, and this time the run must confirm the new
-   invariant — installed as admin, *runs* as a standard user.
+   invariant — installed as admin, *runs* as a standard user. That run is in *Needs verification*.
 
 This is a release split, not a cycle split — the cycle is C4/C7/C8a/C8b, plus **F8** and **F9**, added
 2026-08-06 when preparing Release 1 exposed it. F8 was scheduled for Release 2 and **pulled into
@@ -143,14 +144,15 @@ is in *Recently closed*.
   C7's exclusion filtered the *result*, too late to prevent the import. Fixed by filtering during
   collection; full write-up in PACKAGING → Phase 4, including the rule it produced: **if you exclude
   a submodule from a `collect_*` call, filter during collection, not afterwards.**
-- **C8b Inno Setup installer + Windows Firewall allow-rule → in.** The firewall prompt is
-  PACKAGING's #3 "easy to forget". **The open question is settled, 2026-08-07: an admin install
-  that writes the rule.** Elevation is normal for a Windows installer, and UAC drops the
-  privilege again immediately. A per-user install with an *optional* elevated task would keep both
-  properties but was rejected as the most complex option, with its failure mode landing on a tester
-  machine we cannot debug. **The invariant this must not break:** the app requires no admin rights
-  *at runtime* — the checklist item becomes "install as admin, run as a standard user". Rationale
-  and the consequences table are in PACKAGING → Phase 4.
+- **C8b Inno Setup installer + Windows Firewall allow-rule → done 2026-08-09.** The firewall prompt
+  is PACKAGING's #3 "easy to forget". **Built as an admin install that writes the rule** (option b,
+  settled 2026-08-07): elevation is normal for a Windows installer, and UAC drops the privilege
+  again immediately. A per-user install with an *optional* elevated task would keep both properties
+  but was rejected as the most complex option, with its failure mode landing on a tester machine we
+  cannot debug. **The invariant it must not break:** the app requires no admin rights *at runtime* —
+  the checklist item becomes "install as admin, run as a standard user". Rationale, the consequences
+  table and all six implementation decisions are in PACKAGING → *C8b scope*; the summary is in
+  *Recently closed*.
 - **C8c velopack auto-updater → deferred out of Cycle 3.** PACKAGING already calls full
   self-replace on a *running* one-folder Windows app "fiddly… deferred deliberately". It is a .NET
   toolchain that would replace the zip artifact verified across three builds, for a handful of
@@ -215,6 +217,8 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | ID | Item | Detail in |
 |---|---|---|
 | A5 | Isolate `ES_DISPLAY_REQUIRED` from `ES_SYSTEM_REQUIRED`; managed-machine lock untested | ROADMAP → recorder stalls |
+| A6 | Recorder observability: first-datagram source IP:port, periodic counts, total at stop | **new 2026-08-08**; PACKAGING → C8b scope |
+| A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
@@ -222,7 +226,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
-| C8b | Inno Setup installer + Windows Firewall allow-rule | **Cycle 3**; PACKAGING → Phased plan |
+| C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-09** — Cycle 3, Release 2; PACKAGING → C8b scope |
 | C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
@@ -237,6 +241,29 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
 | G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**A6, added 2026-08-08, and what earned it.** Between `listening on 0.0.0.0:20777` and a finished
+capture, the recorder says **nothing** — so "it isn't recording" cannot be told apart from "nothing
+is being sent" without reaching for `pktmon`, which is exactly what C8b's clean-machine run had to
+do to disprove a firewall theory that was never true. Wanted: the **source IP:port of the first
+datagram** (proves delivery *and* names the sending device), a **periodic count** while recording,
+and a **total at stop**; optionally parse failures counted separately from receives, so "arriving
+but not understood" is distinguishable from "not arriving". Deliberately **not** folded into C8b —
+recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
+both are about what the recording path does and does not report.
+
+**A7, added and done 2026-08-09 — and folded into C8b rather than deferred.** `Recording — waiting
+for telemetry …` is correct but unhelpful when it never changes: it cannot distinguish "the game
+isn't sending" from "the firewall rule isn't live yet". A user who **declines the installer's
+restart** lands in exactly that state. It was reversed into C8b because a restart *request* can be
+declined and the resulting failure is silent — so shipping without it would leave a hole in C8b's
+own justification, which is to stop the false bug report "I installed it, pressed Record, nothing
+happened". `MainWindow` now replaces the label after `_NO_TELEMETRY_HINT_MS` of zero datagrams with
+one line naming the restart case and the Public-network case. **No first-run detection** — the
+trigger is zero packets, and the advice is right whenever it fires, which is what kept it to ~12
+lines. It **narrows** the standing "setup guidance belongs in docs, not status text" preference:
+justified because this cause reaches a user who is already past the docs. **A6 stays open** as the
+log-side half.
 
 **The G block, added 2026-08-06.** Localization is a new concern that fits none of the existing
 blocks, hence a new letter. The app is used by a Swiss league; most members would rather read
@@ -278,6 +305,15 @@ up opportunistically rather than scheduled.
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
   rotation deliberately follows the game's world frame, **not** F1.com broadcast art
   (DECISIONS → UI) — so "different from broadcast" is expected and is not the thing being checked.
+- **The second clean-instance run — the C8b invariant.** Release 2 ships an installer, and a
+  clean-instance test against a zip proves nothing about one. **Plan:** run the full clean-machine
+  checklist in PACKAGING against the **published Release 2 installer**, on Windows Sandbox plus the
+  W11 boot, confirming the item that *changed meaning* — **installed as admin, then run as a
+  standard user** with no UAC prompt, nothing written beside the exe, and the data root belonging to
+  that user. Also new on that list: the rule verified with `netsh … show rule`, upgrade-in-place
+  leaving one rule and one uninstall entry, uninstall removing the rule while leaving captures, and
+  the zip still working standalone. **Sandbox's known limit applies** — it cannot record (no route
+  to the PS5), so the "record with no prompt at all" item needs the boot.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
@@ -291,6 +327,75 @@ up opportunistically rather than scheduled.
 
 ## Recently closed
 
+- **C8b — the admin installer, and the six decisions it needed.** Done 2026-08-08; the last item of
+  Cycle 3's Release 2. `packaging/installer/f1telemetry.iss`, compiled by `windows-build` and
+  published as `f1telemetry-<tag>-windows-x64-setup.exe`: Program Files, Start-menu entry,
+  uninstaller, and the Windows Firewall allow-rule that is the reason it exists. **The zip keeps
+  shipping** — it is the no-elevation fallback and the artifact three builds were verified against.
+  **The runtime invariant was verified, not assumed:** `paths.app_dir()` is read-only at all four
+  call sites and frozen `data_root()` is `%LOCALAPPDATA%\f1telemetry`, so nothing is written beside
+  the exe and Program Files is safe.
+  **Four answers worth not re-deriving.** *Uninstall never touches the data root, and there is no
+  opt-in checkbox either* — beyond "captures are the source of truth", an admin uninstall runs under
+  the **administrator's** token while `data_root()` is per-user, so on the very machine this targets
+  it would resolve the wrong profile, delete nothing and report success. *`netsh`, keyed by rule name
+  and deleted before added* — legible in the install log, and idempotent across reinstalls.
+  *`CloseApplications=yes` plus an `[InstallDelete]` wipe of `_internal`* — Restart Manager solves
+  the one-folder file locks, and the wipe solves the half that is easy to miss, since Inno replaces
+  only files it installs and anything **dropped** by a later build would linger forever. *CI builds
+  it* — a hand-built installer comes from an unverified working tree and breaks both "the published
+  artifact is exactly the tagged commit" and "CI verifies the version, it never stamps it"; the
+  no-tag `workflow_dispatch` path answers the objection that it can now fail a release.
+  **Two things the written scope had not listed.** `profile=private,domain`, **not public** — a
+  home-LAN listener whose parser reads untrusted datagrams, mirroring what the Windows prompt itself
+  ticks. **Its failure is silent**, so it is documented in three places: a home network Windows has
+  classified as *Public* receives nothing with no error. And there is **no "launch now" checkbox** —
+  the installer is elevated, so a post-install launch would hand the app an admin token and create
+  the data root in the wrong profile on its very first run, disproving the invariant immediately.
+  **One defect the clean-machine run found, fixed here rather than documented around:** uninstalling
+  with the app **open** deleted the documents beside the exe but left `f1telemetry.exe` and
+  `_internal` behind — a half-removed install, because Windows will not remove a running executable
+  or its loaded DLLs. `CloseApplications=yes` covers Setup but not the uninstaller, which is itself
+  holding `{app}`. An `InitializeUninstall` guard now refuses with Retry/Cancel; **that hook is the
+  point — returning `False` aborts before anything is removed**, so cancelling leaves the install
+  exactly as it was.
+  **And one that took several days and is why the installer asks for a restart:** the installed
+  build received no telemetry while the **byte-identical** zip binary recorded fine on the same
+  machine and network. The rule was neither missing nor malformed — `verbose` showed the right
+  program, protocol and profiles. **A rule that exists and a rule that matches are different
+  things**, and Windows' default inbound action is Block, so a non-matching rule needs no Block
+  rule to produce silence. **A firewall-off bisection settled in one command what two days of
+  reading rule output could not** (disable the Private profile → records; re-enable → silent).
+  **The remedy is `AlwaysRestart=yes`:** install → Record immediately fails *while `pktmon` confirms
+  packets are arriving*; restart → Record works, same game session. Not propagation latency (the
+  failing window ran for minutes) and not per-process staleness (the process was launched after the
+  rule existed). **Mechanism inferred, not proven** — probably a stale path→rule association cached
+  after the exe at that path is replaced. Restarting `MpsSvc`, `advfirewall reset` and `gpupdate`
+  were all rejected; see PACKAGING.
+  **The rule shape was a wrong turn, and the confound is the point:** three shapes were measured
+  (`program`+`localport` failed; either alone worked) and written up as the root cause — but *every
+  success immediately followed a firewall policy change*, and a clean install carrying the port-less
+  rule still failed until restart. Rule shape was never isolated. The port-less form is kept only
+  because it matches what Windows itself writes.
+  **Genuinely eliminated by measurement**, not argument — the firewall-off run and a run with the
+  installed app and the zip **recording the same broadcast simultaneously** close: Program Files
+  path, the folder-name space, Start-menu context, working directory, standard-user context,
+  packaged `_internal`, any zip-vs-installed binary difference, stale rules, and duplicate
+  listeners. **Do not re-test these.**
+  **Four wrong turns recorded in PACKAGING:** `pktmon` **cannot fix a firewall** (an early "it
+  worked when I ran pktmon" was correlation, and cost a day); `Domain,Private` is a **superset** of
+  `Private`, not a mismatch; **one successful observation is not a fix** — made three times, twice
+  written into these docs as settled; and **test without a control and you measure nothing** —
+  run the release zip alongside, since it takes the same broadcast. It produced **A6** and **A7**.
+  **Accepted 2026-08-09 on two full clean passes**, identical both times: before restarting the
+  installed app received nothing *while the zip recorded as control*, closing and reopening it did
+  not help, and after restarting it recorded immediately with a `.f1cap`. **A7 was pulled into this
+  branch rather than deferred** — a restart request can be declined, and that failure is silent, so
+  leaving it out would have shipped C8b with a hole in its own justification.
+  **`test/test_installer_script.py` is the drift net an `.iss` invites**, closing the chain `.iss` ↔
+  `LiveUDPSource`'s default ↔ `main_window._PORT` — the last read as *text*, because importing
+  `main_window` would pull PySide6 into a deliberately Qt-free suite. A wrong port there is a rule
+  that exists, looks right, and silently receives nothing.
 - **F9 — the notices PDF, and the question of which file the button opens.** Done 2026-08-08; the
   second item of Cycle 3's Release 2. `NOTICE.pdf` is built by **a second pandoc invocation in the
   existing `guide-pdf` job** (not a new job — the apt list there is load-bearing and already paid
