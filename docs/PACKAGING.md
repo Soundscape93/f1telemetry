@@ -640,12 +640,35 @@ receives the same broadcast, so "the game wasn't sending" can never explain a re
 Because of that history, the clean-machine checklist requires the install → restart → record path
 to pass **twice from scratch**, not once.
 
-**Accepted 2026-08-09 on exactly that basis.** Two full clean passes, identical both times: before
-restarting, the installed app received nothing **while the release zip recorded from the same
-broadcast as a control**; closing and reopening the installed app did not help; after restarting,
-it recorded immediately and a `.f1cap` appeared. The control is what makes the result trustworthy —
-it makes "the game wasn't sending" unavailable as an explanation, which is precisely how the three
-earlier false conclusions were reached.
+**Accepted 2026-08-09 on exactly that basis, and C8b closed.** Two full clean passes, identical both
+times: before restarting, the installed app received nothing **while the release zip recorded from
+the same broadcast as a control**; closing and reopening the installed app did not help; after
+restarting, it recorded immediately and a `.f1cap` appeared. The control is what makes the result
+trustworthy — it makes "the game wasn't sending" unavailable as an explanation, which is precisely
+how the three earlier false conclusions were reached.
+
+**The restart is also required after an in-place upgrade, not only after a fresh install.** Tested
+2026-08-09: install v0.8.0 → restart → records; run the *same* installer over the top → **records
+no longer** until Windows is restarted again. So the requirement attaches to *running the
+installer*, in any form. The user guide, the release notes and Setup's own restart page all say so.
+
+**The accepted final invariant for C8b:** a standard user can launch the installed app with **no UAC
+and no firewall prompt**, and **after restarting Windows** recording works, writing captures to that
+user's `%LOCALAPPDATA%\f1telemetry`. The reboot is a documented requirement, not a defect to keep
+chasing.
+
+**What is still not known, stated plainly so nobody re-derives a false answer.** Two candidate
+triggers were never separated, because every test changed both at once: (a) the **exe at the rule's
+path being replaced**, and (b) the **rule being deleted and re-added**. The `localport` predicate is
+**not** the proven cause — that claim was made, was wrong, and is retracted; `LocalPort: Any` is kept
+only because it matches what Windows itself writes from the first-record prompt.
+
+**One command would separate them**, and it decides whether an update path can ever avoid the
+reboot: in the failing post-upgrade state, run `netsh advfirewall firewall delete rule name="F1
+Telemetry (UDP 20777)"` followed by the installer's own `add rule` line, and record **without
+rebooting**. Records → trigger (b), and re-adding the rule late is a possible fix. Still silent →
+trigger (a), and **nothing short of a restart helps**, including any self-updater, because they all
+replace the exe.
 
 **A7 was folded into C8b rather than deferred, and the reason is worth keeping.** A restart
 *request* can be declined, and the failure that follows is silent — which reproduces the exact

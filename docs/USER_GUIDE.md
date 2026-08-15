@@ -19,11 +19,14 @@ There are two downloads on the project's GitHub **Releases** page. Both give you
 4. **Restart Windows when Setup asks.** This one matters — see the warning below.
 5. Launch **F1 Telemetry** from the Start menu.
 
-> **Restart before your first recording.** The installer adds the Windows Firewall rule for you,
-> but Windows doesn't put it into effect until it restarts. If you skip the restart, the app
-> starts fine and **Record looks like it is working — but no telemetry arrives, and nothing tells
-> you why**. If that happens, restart and try again. (The app will also hint at this after a few
-> seconds of receiving nothing.)
+> **Restart before your first recording — and after every update.** The installer adds the Windows
+> Firewall rule for you, but Windows doesn't put it into effect until it restarts. If you skip the
+> restart, the app starts fine and **Record looks like it is working — but no telemetry arrives,
+> and nothing tells you why**. If that happens, restart and try again. (The app will also hint at
+> this after a few seconds of receiving nothing.)
+>
+> This applies **every time you run the installer**, including installing a new version over an
+> existing one — not just the first install.
 
 Once restarted, recording works the first time with no firewall prompt to click (section 2). The
 installer also adds a Start-menu entry and an uninstaller.
@@ -34,8 +37,9 @@ installer also adds a Start-menu entry and an uninstaller.
 > folder (section 6). If it ever asks for administrator rights to *start*, that is a bug — please
 > report it.
 
-**Updating:** run the new installer over the top. Close the app first, or let the installer ask.
-Your captures, database and rosters are untouched.
+**Updating:** run the new installer over the top. Close the app first, or let the installer ask,
+and **restart Windows afterwards** — the firewall rule needs it again after every install. Your
+captures, database and rosters are untouched.
 
 **Uninstalling:** Settings → Apps → F1 Telemetry → Uninstall. This removes the program and the
 firewall rule. It deliberately **does not delete your captures or database** — those are yours and
