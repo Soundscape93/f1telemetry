@@ -163,6 +163,12 @@ is in *Recently closed*.
 **Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4**, then the E-block
 surfaces (E1/E2, E3, E5) in whatever order they earn.
 
+**C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
+after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
+entry: while every update still requires a Windows restart, an assisted update buys one click and
+carries the app's first download-and-execute path. A4 is the better use of the same cycle. See the
+C8d entry in P3 for the full reasoning and for what brings it back.
+
 - A4 Windows light/dark switch leaves text miscoloured — **moved out of Cycle 3, 2026-08-06.** Not
   for lack of importance: it has shipped as a known issue in every release since v0.3.0. It is
   cross-surface UI refactoring in 15 files, which shares no review context with build/CI plumbing —
@@ -227,7 +233,7 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-09** — Cycle 3, Release 2; PACKAGING → C8b scope |
-| C8d | Assisted update: download + launch the installer from Help → Check for updates | **new 2026-08-09** — next topic to evaluate; see below |
+| C8d | Assisted update: download + launch the installer from Help → Check for updates | **evaluated 2026-08-15 — deferred, deliberately NOT in Cycle 4**; design in PACKAGING → C8d |
 | C8c | velopack real auto-updater | **still deferred** — and it now *conflicts with C8b*; see below |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
@@ -260,10 +266,50 @@ to **download the installer and launch it**. No self-replace, so none of the one
 problem that deferred velopack — and Setup's Restart Manager already handles a running app (proven
 in C8b). It keeps Program Files, the admin install and the firewall rule untouched.
 
-**What C8d cannot do is avoid the restart.** Running the installer over an existing install requires
-one (measured 2026-08-09), and C8d *is* running the installer. It buys convenience — one click
-instead of a manual download — not a shorter update. Whether *anything* can avoid it depends on the
-one unseparated question in PACKAGING → C8b scope, which is in *Needs verification*.
+**What C8d cannot do is avoid the restart.** Running the installer requires one, in any form
+(measured 2026-08-09), and C8d *is* running the installer. It buys convenience — one click instead
+of a manual download — not a shorter update. **And nothing else can avoid it either:** the restart
+attaches to the installer-created rule itself, not to updating, since clean *first* installs need it
+too (2026-08-15). Only *dropping* the rule could remove it — see the open question below.
+
+**C8d is deferred out of Cycle 4 — decided 2026-08-15. The design is recorded in PACKAGING → C8d so
+it does not have to be re-derived; this is why it waits.** The reboot eats most of the value: C8d
+removes *browse, find, download, run* and leaves *elevate, close, reboot*, so the update stays a
+sit-down operation and C8d makes only the small half smaller. It would also be **the app's first
+path that downloads a binary and executes it** — a new trust boundary in an app that otherwise only
+reads UDP and files, landing in the same release-phase area that just cost several days. Against
+that, **A4 has shipped as a known issue in every release since v0.3.0** and fires on every theme
+switch, while a handful of testers doing a manual download roughly monthly is the cheaper problem.
+The notify-only path is confirmed working against a real Release (2026-08-02), and the group is
+still small enough that a chat message covers version drift.
+
+**What brings it back** — so a future session need not re-argue it: **either** the reboot
+requirement goes away, **or** the tester group outgrows "tell them in chat", **or** a release ships
+something urgent enough that version drift becomes a real support problem.
+
+**No new item for app-side no-telemetry detection: A7 already is it.** `_hint_if_no_telemetry` fires
+after 25s of zero datagrams and names both the restart case and the Public-network case, and its
+advice is correct after an assisted update for exactly the reason it is correct after a manual one.
+Gating it on "a matching firewall rule exists" was considered and **rejected** — parsing `netsh`
+output or taking a COM dependency, Windows-only and fragile, to drop half of one sentence. **A6** is
+the open half worth building, not a second hint.
+
+**Worth doing without C8d, and much cheaper (~15 lines in `help_page.py`):** point the update
+dialog's button at the matching setup asset's `browser_download_url` rather than the release page,
+and **say in the dialog that installing an update needs administrator rights and a Windows restart**.
+The second half stands on its own — the dialog currently says nothing about the reboot, which is the
+most important fact about updating this app. It can ride along with any Cycle 4 release.
+
+**The open question C8b left: should the installer write the firewall rule at all?** Recorded
+2026-08-15 because the trade-off genuinely moved — when C8b was decided the rule was free, and it now
+costs a restart on every install and update. **The answer for now is keep it**, and the decisive
+reason is that C8b's target model is *installed by an admin, run by a standard user*: in that model
+the Windows first-run prompt **cannot** produce a rule, because it needs admin credentials the
+standard user does not have (and under GPO with notifications off it never appears at all). Dropping
+the rule would trade a documented, requested, one-time reboot for a **silent, irrecoverable
+standard-user failure** — and silence is the one thing this whole investigation exists to eliminate.
+The full comparison table, and the experiment that would decide it (which is a **reopening of C8b**,
+not a small check), are in PACKAGING → *The open question C8b left*.
 
 **C8c stays deferred, and now for a second reason: it conflicts with the C8b install model.**
 Velopack's value rests on a **per-user, `%LOCALAPPDATA%`, non-elevated, self-replacing** install.
@@ -312,13 +358,19 @@ translation one.
 Built or believed-done, but never proven. Each names *how* it gets proven, so it can be picked
 up opportunistically rather than scheduled.
 
-- **Which change makes the firewall rule need a restart (C8b).** Closed as a *requirement*, open as
-  a *cause*: every test changed two things at once — the **exe at the rule's path being replaced**
-  and the **rule being deleted and re-added**. **Plan:** in the failing state right after running the
-  installer over an existing install, delete and re-add the rule by hand and record **without
-  rebooting**. Records → it is the rule, and re-adding it late could remove the restart. Silent →
-  it is the exe replacement, and **no update mechanism can avoid the restart**, which settles how
-  much C8d is worth before any of it is built. One command; do it before starting C8d.
+- **Which change makes the firewall rule need a restart (C8b) — largely answered 2026-08-15, and the
+  answer is "neither, as framed".** This item posed two candidate triggers, never separated because
+  every test changed both at once: (a) the **exe at the rule's path being replaced**, (b) the **rule
+  being deleted and re-added**. **(a) is falsified** — clean *first* installs fail, where no previous
+  exe existed at that path. **(b) survives only as a possible trigger, never as a remedy** — in the
+  failing window, disabling and re-enabling the app's own rule did not help, and neither did an
+  unrelated policy touch. **Plan, now opportunistic rather than blocking:** one exact `delete rule`
+  + the installer's own `add rule` (a new rule object, unlike disable/enable), then record without
+  rebooting. Low odds given the above. **This no longer gates C8d** — C8d was deferred on other
+  grounds, and (a)'s death already settles the question it was posed for: the reboot attaches to the
+  installer-created rule itself, not to updating. **Do not schedule "experiment #6", a real
+  v0.7.0 → v0.8.0 upgrade test: it is not runnable**, because v0.8.0 is the first release that
+  shipped an installer.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
   rendered map against the in-game track map when recording the next sessions — which is the same
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
@@ -392,9 +444,14 @@ up opportunistically rather than scheduled.
   **The remedy is `AlwaysRestart=yes`:** install → Record immediately fails *while `pktmon` confirms
   packets are arriving*; restart → Record works, same game session. Not propagation latency (the
   failing window ran for minutes) and not per-process staleness (the process was launched after the
-  rule existed). **Mechanism inferred, not proven** — probably a stale path→rule association cached
-  after the exe at that path is replaced. Restarting `MpsSvc`, `advfirewall reset` and `gpupdate`
-  were all rejected; see PACKAGING.
+  rule existed). **The mechanism is unnamed — corrected 2026-08-15.** This entry used to say
+  "probably a stale path→rule association cached after the exe at that path is replaced"; that is
+  **disproven**, because clean *first* installs fail too, with no previous exe at that path. What is
+  measured: the drop is in WFP (firewall off → records; on with correct allow rules → silent), and a
+  reboot is the only remedy that has ever worked. `advfirewall reset` and `gpupdate` were rejected;
+  **restarting `MpsSvc` is not merely inadvisable but impossible** — `sc.exe sdshow mpssvc` shows the
+  `BA` ACE carrying no `WP` (stop) right, so nothing stops the service even elevated. Full falsified
+  list in PACKAGING.
   **The rule shape was a wrong turn, and the confound is the point:** three shapes were measured
   (`program`+`localport` failed; either alone worked) and written up as the root cause — but *every
   success immediately followed a firewall policy change*, and a clean install carrying the port-less
