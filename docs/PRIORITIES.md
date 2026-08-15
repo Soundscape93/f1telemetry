@@ -163,6 +163,12 @@ is in *Recently closed*.
 **Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4**, then the E-block
 surfaces (E1/E2, E3, E5) in whatever order they earn.
 
+**C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
+after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
+entry: while every update still requires a Windows restart, an assisted update buys one click and
+carries the app's first download-and-execute path. A4 is the better use of the same cycle. See the
+C8d entry in P3 for the full reasoning and for what brings it back.
+
 - A4 Windows light/dark switch leaves text miscoloured — **moved out of Cycle 3, 2026-08-06.** Not
   for lack of importance: it has shipped as a known issue in every release since v0.3.0. It is
   cross-surface UI refactoring in 15 files, which shares no review context with build/CI plumbing —
@@ -227,7 +233,8 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | C9 | Transitive dependency trim: scipy / pandas / pillow (~105 MB, 18%) | **later, not Cycle 3**; PACKAGING → Phase 1 known issues |
 | C8a | Linux release artifact (macOS deliberately dropped) | **done 2026-08-07** — Cycle 3, Release 2; PACKAGING → Phase 4 |
 | C8b | Inno Setup installer + Windows Firewall allow-rule | **done 2026-08-09** — Cycle 3, Release 2; PACKAGING → C8b scope |
-| C8c | velopack real auto-updater | **deferred out of Cycle 3, 2026-08-05** — see the cycle plan |
+| C8d | Assisted update: download + launch the installer from Help → Check for updates | **evaluated 2026-08-15 — deferred, deliberately NOT in Cycle 4**; design in PACKAGING → C8d |
+| C8c | velopack real auto-updater | **still deferred** — and it now *conflicts with C8b*; see below |
 | D2 | Alembic — adopt at the first non-additive migration (trigger-based) | DECISIONS → Migrations |
 | D3 | Persisted `track_layouts/*.parquet` cache | DECISIONS → UI |
 | D4 | True geometric centerline (needs Motion Ex / track width) | DECISIONS → UI |
@@ -251,6 +258,67 @@ and a **total at stop**; optionally parse failures counted separately from recei
 but not understood" is distinguishable from "not arriving". Deliberately **not** folded into C8b —
 recorder-layer work, no shared review context with an installer. Pairs naturally with **A5**, since
 both are about what the recording path does and does not report.
+
+**C8d, added 2026-08-09 — and C8c is now harder than "deferred" implied.** With the installer
+shipped, updating means *download the asset, elevate, restart Windows*. **C8d** is the small version:
+`Help → Check for updates` already queries `/releases/latest` and shows a manual link, so extend it
+to **download the installer and launch it**. No self-replace, so none of the one-folder file-lock
+problem that deferred velopack — and Setup's Restart Manager already handles a running app (proven
+in C8b). It keeps Program Files, the admin install and the firewall rule untouched.
+
+**What C8d cannot do is avoid the restart.** Running the installer requires one, in any form
+(measured 2026-08-09), and C8d *is* running the installer. It buys convenience — one click instead
+of a manual download — not a shorter update. **And nothing else can avoid it either:** the restart
+attaches to the installer-created rule itself, not to updating, since clean *first* installs need it
+too (2026-08-15). Only *dropping* the rule could remove it — see the open question below.
+
+**C8d is deferred out of Cycle 4 — decided 2026-08-15. The design is recorded in PACKAGING → C8d so
+it does not have to be re-derived; this is why it waits.** The reboot eats most of the value: C8d
+removes *browse, find, download, run* and leaves *elevate, close, reboot*, so the update stays a
+sit-down operation and C8d makes only the small half smaller. It would also be **the app's first
+path that downloads a binary and executes it** — a new trust boundary in an app that otherwise only
+reads UDP and files, landing in the same release-phase area that just cost several days. Against
+that, **A4 has shipped as a known issue in every release since v0.3.0** and fires on every theme
+switch, while a handful of testers doing a manual download roughly monthly is the cheaper problem.
+The notify-only path is confirmed working against a real Release (2026-08-02), and the group is
+still small enough that a chat message covers version drift.
+
+**What brings it back** — so a future session need not re-argue it: **either** the reboot
+requirement goes away, **or** the tester group outgrows "tell them in chat", **or** a release ships
+something urgent enough that version drift becomes a real support problem.
+
+**No new item for app-side no-telemetry detection: A7 already is it.** `_hint_if_no_telemetry` fires
+after 25s of zero datagrams and names both the restart case and the Public-network case, and its
+advice is correct after an assisted update for exactly the reason it is correct after a manual one.
+Gating it on "a matching firewall rule exists" was considered and **rejected** — parsing `netsh`
+output or taking a COM dependency, Windows-only and fragile, to drop half of one sentence. **A6** is
+the open half worth building, not a second hint.
+
+**Worth doing without C8d, and much cheaper (~15 lines in `help_page.py`):** point the update
+dialog's button at the matching setup asset's `browser_download_url` rather than the release page,
+and **say in the dialog that installing an update needs administrator rights and a Windows restart**.
+The second half stands on its own — the dialog currently says nothing about the reboot, which is the
+most important fact about updating this app. It can ride along with any Cycle 4 release.
+
+**The open question C8b left: should the installer write the firewall rule at all?** Recorded
+2026-08-15 because the trade-off genuinely moved — when C8b was decided the rule was free, and it now
+costs a restart on every install and update. **The answer for now is keep it**, and the decisive
+reason is that C8b's target model is *installed by an admin, run by a standard user*: in that model
+the Windows first-run prompt **cannot** produce a rule, because it needs admin credentials the
+standard user does not have (and under GPO with notifications off it never appears at all). Dropping
+the rule would trade a documented, requested, one-time reboot for a **silent, irrecoverable
+standard-user failure** — and silence is the one thing this whole investigation exists to eliminate.
+The full comparison table, and the experiment that would decide it (which is a **reopening of C8b**,
+not a small check), are in PACKAGING → *The open question C8b left*.
+
+**C8c stays deferred, and now for a second reason: it conflicts with the C8b install model.**
+Velopack's value rests on a **per-user, `%LOCALAPPDATA%`, non-elevated, self-replacing** install.
+C8b deliberately chose the opposite — **per-machine, Program Files, elevated, machine-wide firewall
+rule**. Adopting velopack means either dropping the firewall rule or reviving **option (c)** (per-user
+install plus an elevated task), which was rejected as the most complex option with its failure mode
+on an undebuggable tester machine. Velopack also uses versioned folders behind a stub, so the exe
+path can move between versions — and the firewall rule names a path. **C8c is therefore not a small
+next item; it is a re-opening of C8b.** Do not pick it up as one.
 
 **A7, added and done 2026-08-09 — and folded into C8b rather than deferred.** `Recording — waiting
 for telemetry …` is correct but unhelpful when it never changes: it cannot distinguish "the game
@@ -290,16 +358,19 @@ translation one.
 Built or believed-done, but never proven. Each names *how* it gets proven, so it can be picked
 up opportunistically rather than scheduled.
 
-- **B1 — GP-multiplayer roster grouping.** `ROSTER_SEASON_MODES` was widened to include
-  `GRAND_PRIX` (the 2026 league runs in Grand Prix multiplayer), but the league's *normal* state
-  — drivers captured as `"Player"` with telemetry restricted, grouped by race number via
-  `roster.member_key` — has never been tested on a real capture. **Plan:** the author sets their
-  own online name/ID to restricted at the next race, **scheduled for ~2026-08-12** (confirmed
-  2026-08-05). Deliberately *not* asking other members to change their settings, since they'd risk
-  leaving them restricted afterwards. Season-critical if wrong (standings), so verify before
-  trusting a full season's table. **When it runs, capture the session and check it against
-  `LeagueRoster.session_keys` before assuming the standings are right** — a wrong grouping shows up
-  as two members merged into one row, or one member split across two.
+- **Which change makes the firewall rule need a restart (C8b) — largely answered 2026-08-15, and the
+  answer is "neither, as framed".** This item posed two candidate triggers, never separated because
+  every test changed both at once: (a) the **exe at the rule's path being replaced**, (b) the **rule
+  being deleted and re-added**. **(a) is falsified** — clean *first* installs fail, where no previous
+  exe existed at that path. **(b) survives only as a possible trigger, never as a remedy** — in the
+  failing window, disabling and re-enabling the app's own rule did not help, and neither did an
+  unrelated policy touch. **Plan, now opportunistic rather than blocking:** one exact `delete rule`
+  + the installer's own `add rule` (a new rule object, unlike disable/enable), then record without
+  rebooting. Low odds given the above. **This no longer gates C8d** — C8d was deferred on other
+  grounds, and (a)'s death already settles the question it was posed for: the reboot attaches to the
+  installer-created rule itself, not to updating. **Do not schedule "experiment #6", a real
+  v0.7.0 → v0.8.0 upgrade test: it is not runnable**, because v0.8.0 is the first release that
+  shipped an installer.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
   rendered map against the in-game track map when recording the next sessions — which is the same
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
@@ -317,16 +388,20 @@ up opportunistically rather than scheduled.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
-- **Kill mid-record → the app recovers on next launch.** The one clean-machine checklist item C4
-  could not close (2026-08-07). **Windows Sandbox cannot record at all** — it is a VM with internet
-  but no route to the home network, so the PS5 never reaches it — and it was not run on the W11
-  boot either. **Low risk, deliberately not treated as a defect:** it passed on an earlier release
-  and the recording flow has not changed since. **Plan:** start a recording, kill the process,
-  relaunch — a two-minute check at the next real session, which is the same ~2026-08-12 race B1 and
-  E11 are already waiting on. All three settle from one sitting.
-
 ## Recently closed
 
+- **Kill mid-record → recovers on next launch. Verified 2026-08-09** during the v0.8.0 clean-test
+  runs, where it is a checklist item. It had been open since 2026-08-07 only because **Windows
+  Sandbox cannot record** (a VM with internet but no route to the home network, so the PS5 never
+  reaches it) and the W11 boot run had not covered it. Closed on the real boot, which is the only
+  place the live-recording items can be checked at all.
+- **B1 — GP-multiplayer roster grouping, verified 2026-08-09.** The league's *normal* state — the
+  author's own online name/ID set to **private/restricted**, drivers arriving as `"Player"` and
+  grouped by race number via `roster.member_key` — was tested on a real race and **the standings
+  table is correct**. This was the season-critical unknown: a wrong grouping shows up as two members
+  merged into one row, or one member split across two, and neither is obvious until a season's table
+  is already wrong. `ROSTER_SEASON_MODES` including `GRAND_PRIX` is therefore proven against real
+  data rather than assumed.
 - **C8b — the admin installer, and the six decisions it needed.** Done 2026-08-08; the last item of
   Cycle 3's Release 2. `packaging/installer/f1telemetry.iss`, compiled by `windows-build` and
   published as `f1telemetry-<tag>-windows-x64-setup.exe`: Program Files, Start-menu entry,
@@ -369,9 +444,14 @@ up opportunistically rather than scheduled.
   **The remedy is `AlwaysRestart=yes`:** install → Record immediately fails *while `pktmon` confirms
   packets are arriving*; restart → Record works, same game session. Not propagation latency (the
   failing window ran for minutes) and not per-process staleness (the process was launched after the
-  rule existed). **Mechanism inferred, not proven** — probably a stale path→rule association cached
-  after the exe at that path is replaced. Restarting `MpsSvc`, `advfirewall reset` and `gpupdate`
-  were all rejected; see PACKAGING.
+  rule existed). **The mechanism is unnamed — corrected 2026-08-15.** This entry used to say
+  "probably a stale path→rule association cached after the exe at that path is replaced"; that is
+  **disproven**, because clean *first* installs fail too, with no previous exe at that path. What is
+  measured: the drop is in WFP (firewall off → records; on with correct allow rules → silent), and a
+  reboot is the only remedy that has ever worked. `advfirewall reset` and `gpupdate` were rejected;
+  **restarting `MpsSvc` is not merely inadvisable but impossible** — `sc.exe sdshow mpssvc` shows the
+  `BA` ACE carrying no `WP` (stop) right, so nothing stops the service even elevated. Full falsified
+  list in PACKAGING.
   **The rule shape was a wrong turn, and the confound is the point:** three shapes were measured
   (`program`+`localport` failed; either alone worked) and written up as the root cause — but *every
   success immediately followed a firewall policy change*, and a clean install carrying the port-less
