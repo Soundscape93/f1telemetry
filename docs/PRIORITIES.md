@@ -161,8 +161,8 @@ is in *Recently closed*.
   the C block, and a deferred item with no row reads as a forgotten one.
 
 **Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4** — **done
-2026-08-15**, less the five controls now tracked as **A4b** — then the E-block surfaces (E1/E2, E3,
-E5) in whatever order they earn.
+2026-08-15**, with **A4b** closing the last controls on 2026-08-18 — then the E-block surfaces
+(E1/E2, E3, E5) in whatever order they earn.
 
 **C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
 after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
@@ -184,7 +184,8 @@ C8d entry in P3 for the full reasoning and for what brings it back.
   `ui/style.py`; the fix also turned up two never-applied stylesheets (a missing `f` prefix in
   `slider_row.py` and in `car_status_graphic.py`). A guard test now fails if a font-bearing
   stylesheet without an explicit colour reappears, so this cannot silently come back the way it
-  accumulated. **A4b** carries the five remaining controls — see its row in P2.
+  accumulated. **A4b** carried the five remaining controls and closed on 2026-08-18 — see its
+  row in P2.
 
 **Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
 surfaces: translating a UI that is still growing means translating it twice.
@@ -216,7 +217,7 @@ re-run under WAL on 2026-08-05 and passes.
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
 | A4 | Windows light/dark switch leaves text miscoloured | **done 2026-08-15** — Cycle 4; 32 of 37 sites, five controls left as **A4b** | PACKAGING → Phase 1 known issues |
-| A4b | The same freeze on five *controls*: sidebar, season cards, 2 collapse toggles, Compare button | open — Cycle 4, after the E-block unless it blocks something | PACKAGING → Phase 1 known issues |
+| A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |

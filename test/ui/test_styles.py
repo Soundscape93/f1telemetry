@@ -125,13 +125,10 @@ _CONSTS = {
 }
 
 
-# A4b: the five *controls* whose padding/border/alignment has no QFont equivalent are a separate
-# follow-up (PACKAGING -> Phase 1 known issues). Only the two carrying a font property need to be
-# excused here. Delete an entry when its site is fixed - a stale one fails the test.
-_DEFERRED = frozenset({
-    ("laps/overview_page.py", "QToolButton { font-weight: 600; border: none; padding: 4px 0; }"),
-    ("seasons/weekend_page.py", "QToolButton { font-weight: 600; border: none; padding: 4px 0; }"),
-})
+# Empty since A4b removed the last two font-bearing widget stylesheets. Kept as the documented
+# escape hatch: add a (file, sheet) pair here only with a reason, and note that the stale-entry
+# assertion below fails once that site is fixed, so an entry cannot quietly outlive its cause.
+_DEFERRED: frozenset[tuple[str, str]] = frozenset()
 
 
 def _module_constants(tree: ast.Module) -> dict[str, str]:

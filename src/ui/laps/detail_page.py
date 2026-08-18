@@ -214,7 +214,9 @@ class DetailPage(QWidget):
         button = QToolButton()
         button.setText("Compare ▾")
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setStyleSheet("QToolButton { padding: 2px 6px; }")
+        # No stylesheet - it would freeze the button's text colour at apply time (A4b).
+        # The old "padding: 2px 6px" becomes a minimum size off the natural hint.
+        button.setMinimumSize(button.sizeHint().width() + 12, button.sizeHint().height() + 4)
         menu = QMenu(button)
         self._compare_actions = []
         for scope in (SCOPE_BEST, SCOPE_SESSION, SCOPE_WEEKEND):

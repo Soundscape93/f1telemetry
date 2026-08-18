@@ -984,16 +984,39 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
   inside a plain string, so the fixed light-grey ground that exists specifically "so the neon reads
   the same on light & dark mode" had never been applied. Both fixed alongside A4.
 
-  **Done 2026-08-15 except five controls.** 32 label sites moved to `QFont` behind `apply_font` /
-  `apply_heading` / `apply_bold` in `ui/style.py`, with a guard test
-  (`test/ui/test_styles.py`) that fails if a font-bearing stylesheet without an explicit colour
-  reappears. Deliberately deferred: the **five widget blocks** — sidebar, season cards, the two
-  collapse toggles, the Compare button — whose `padding` / `border` / `text-align` have no `QFont`
-  equivalent, and where `QPushButton`'s `text-align` has no widget API at all. **Measure first in
-  the follow-up:** re-applying the same stylesheet string on `colorSchemeChanged`
-  (`w.setStyleSheet(w.styleSheet())`) may force `QStyleSheetStyle` to re-resolve its cached palette
-  and fix all five at once. That is an untested hypothesis, not a plan — measure it before building
-  five bespoke replacements.
+  **A4a done 2026-08-15.** 32 label sites moved to `QFont` behind `apply_font` / `apply_heading` /
+  `apply_bold` in `ui/style.py`, with a guard test (`test/ui/test_styles.py`) that fails if a
+  font-bearing stylesheet without an explicit colour reappears. It left the **five widget blocks** —
+  sidebar, season cards, the two collapse toggles, the Compare button — whose `padding` / `border` /
+  `text-align` have no `QFont` equivalent.
+
+  **A4b done 2026-08-18, four of those five.** Sidebar → item size hints
+  (`fontMetrics().height() + 16`, measured pixel-identical at 33px rows) plus
+  `setViewportMargins(4, 0, 4, 0)`; the two toggles → `setAutoRaise(True)` + `apply_bold` +
+  a minimum height (28px, matching); the Compare button → a minimum size off its natural hint.
+  Each **removes** the stylesheet rather than working around its caching, so the widgets follow the
+  palette natively like every other label.
+
+  **The `colorSchemeChanged` re-apply hypothesis was never confirmed, and was sidestepped rather
+  than relied on.** The theory — that `w.setStyleSheet(w.styleSheet())` would force
+  `QStyleSheetStyle` to re-resolve its cached palette — could not be tested: under the offscreen
+  platform with Fusion a stylesheet'd `QListWidget` recolours correctly on a palette change, so the
+  sandbox never reproduced the symptom and therefore could not test the remedy. Removing the
+  stylesheets made the question moot. **It remains unproven** — do not cite it as a mechanism.
+
+  **The season card is a deliberate, measured exception.** `QPushButton { text-align: left;
+  padding: 12px 14px; }` has no non-QSS equivalent: dropping the sheet gives a 25px-tall *centred*
+  button against the current 43px left-aligned card, `QCommandLinkButton` renders 230px tall, and
+  a `QPushButton` hosting its own layout collapses to a 43×25 size hint because the button's hint
+  ignores its child layout. Against that, **no misbehaviour was ever observed on this widget** on
+  either Linux or Windows. Keeping one documented stylesheet beat a visual regression taken to fix
+  something nobody had seen go wrong.
+
+  **The symptom was Windows-only.** All 32 A4a label sites reproduced and verified on Ubuntu, but
+  the sidebar — the one remaining *visible* case — never misbehaved on Linux and only ever showed
+  on Windows. That matches `app._install_theme_refresh`'s own docstring note that item views can
+  keep their old ground, and it means the "mostly verifiable on the dev box" claim held for labels
+  but not for item views.
 - **pyqtgraph bloat — DONE 2026-08-06 (PRIORITIES → C7), and it was not where the weight was.**
   The contrib hook plus our own `collect_submodules("pyqtgraph")` pulled in `pyqtgraph.examples.*`:
   a demo application with its own `__main__` and ~40 example scripts, unreachable from here (this
