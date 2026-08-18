@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...domain.models import Setup
+from ..style import apply_bold
 from .slider_row import SetupSliderRow
 
 # section -> rows of (label, attr, index, minimum, maximum, decimals, unit).
@@ -117,7 +118,8 @@ def build_setup_table(setup: Setup) -> QWidget:
     for label, field in setup_fields(setup):
         if field is None:           # section header
             head = QLabel(label)
-            head.setStyleSheet("font-weight: 600; margin-top: 6px;")
+            apply_bold(head)
+            head.setContentsMargins(0, 6, 0, 0)
             box.addWidget(head)
             continue
         box.addWidget(SetupSliderRow(

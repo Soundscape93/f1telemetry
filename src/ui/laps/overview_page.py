@@ -33,7 +33,7 @@ from ...protocol.reference import track_name
 from ..components import cell, clear_layout, fit_table_height, tidy_table
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_heading
 
 
 def _recorded_label(recorded_at: datetime | None) -> str:
@@ -61,7 +61,7 @@ class OverviewPage(QWidget):
         outer = QVBoxLayout(self)
 
         title = QLabel("Laps")
-        title.setStyleSheet("font-size: 20px; font-weight: 600;")
+        apply_heading(title, size_px=20)
         outer.addWidget(title)
 
         controls = QHBoxLayout()

@@ -42,7 +42,7 @@ from ..storage.laps import LapStore
 from .seasons import SeasonsView
 from .laps import LapsView
 from .help_page import HelpPage
-from .style import MUTED_TEXT_QSS
+from .style import MUTED_TEXT_QSS, apply_heading
 from .. import paths
 
 # Data paths (DB, captures, lap traces, rosters) resolve through ``paths`` so a frozen build
@@ -68,7 +68,7 @@ class _PlaceholderPage(QWidget):
         layout.addStretch(1)
         heading = QLabel(title)
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.setStyleSheet("font-size: 20px; font-weight: 600;")
+        apply_heading(heading, size_px=20)
         sub = QLabel(subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setStyleSheet(MUTED_TEXT_QSS)

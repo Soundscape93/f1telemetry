@@ -26,7 +26,7 @@ from .. import paths
 from ..update_check import CheckStatus, releases_page
 from ..user_guide import resolve_guide, resolve_notices
 from ..version import __version__
-from .style import MUTED_TEXT_QSS
+from .style import MUTED_TEXT_QSS, apply_heading
 from .workers import UpdateCheckWorker
 
 _ROSTER_CSV_TEMPLATE = "name,race_number,online_names\n"
@@ -108,7 +108,7 @@ class HelpPage(QWidget):
         layout.setSpacing(8)
 
         title = QLabel(f"F1 Telemetry")
-        title.setStyleSheet("font-size: 20pt; font-weight: 600;")
+        apply_heading(title, size_px=20)
 
         version = QLabel(f"Version {__version__}")
         version.setStyleSheet(MUTED_TEXT_QSS)
@@ -187,14 +187,14 @@ class HelpPage(QWidget):
         folder_row.addStretch(1)
         
         setup_title = QLabel("Setup / Configuration")
-        setup_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
+        apply_heading(setup_title, size_px=18)
         setup_body = QLabel(_SETUP_HTML)
         setup_body.setWordWrap(True)
         setup_body.setStyleSheet(MUTED_TEXT_QSS)
         setup_body.linkActivated.connect(self._on_setup_link)
 
         about_title = QLabel("About")
-        about_title.setStyleSheet("font-size: 14pt; font-weight: 600;")
+        apply_heading(about_title, size_px=18)
         about_body = QLabel(_ABOUT_HTML)
         about_body.setWordWrap(True)
         about_body.setStyleSheet(MUTED_TEXT_QSS)

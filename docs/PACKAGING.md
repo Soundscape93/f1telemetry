@@ -933,17 +933,67 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
   `unpolish`/`polish` pass doesn't force that cached rule to recompute.
 
   So the fix the old note guessed at is right, for a different reason: a label with *no* stylesheet
-  follows the palette natively. **Measured scope (2026-08-06): 27 font-only `setStyleSheet` calls
-  across 15 files** — move them to `QFont`, ideally behind a named helper in `ui/style.py`
-  (`apply_heading(label, …)`), which states the intent instead of repeating a magic string.
+  follows the palette natively.
 
-  Two wrinkles that will bite whoever does it:
-  * **`px` and `pt` are both in use** and are not interchangeable — `setPixelSize` vs
-    `setPointSize`. Converting one to the other silently resizes text on HiDPI panels.
+  **Scope re-measured 2026-08-15 by AST (not grep), and it was larger than recorded.** The old
+  "27 font-only calls across 15 files" was wrong twice: those 27 are not font-*only*, and font-only
+  is not the actionable set. There are **54 `setStyleSheet` calls across 15 files** under `src/ui/`
+  (none anywhere else, and no application-wide stylesheet), which split as:
+
+  | What the call sets | Calls | Verdict |
+  |---|---|---|
+  | Font properties only | 19 | 🔴 freezes the colour |
+  | `font-weight` + `margin-top` captions | 5 | 🔴 |
+  | Widget blocks (`QToolButton`/`QPushButton`/`QListWidget::item`) | 5 | 🔴 |
+  | `background: transparent` labels | 2 | 🔴 |
+  | `"MUTED_TEXT_QSS"` passed as a *literal string* | 2 | 🔴 + a bug of its own |
+  | Muted-only (`color: #8b949e`) | 17 | 🟢 explicit colour, unaffected |
+  | Muted + font | 1 | 🟡 move the font out, keep the colour |
+  | Muted + `font-style` + padding | 2 | 🟢 |
+  | `car_status_graphic` view/tooltip block | 1 | 🟢 |
+
+  **33 calls freeze a text colour, not 27.** The rule is simply *any* stylesheet without an explicit
+  `color:`; a font property is incidental to it. The two earlier numbers are both reproducible and
+  both measure the wrong thing — `grep 'font-'` gives **29**, `grep 'font-size\|font-weight'` gives
+  **27** (it misses the two that are `font-style: italic` only).
+
+  Three wrinkles that will bite whoever does it:
+  * **`px` and `pt` were both in use — A4 standardised the UI on `px`** *(decided 2026-08-15)*.
+    Measured: **11 `px`, 4 `pt`**, the `pt` ones all in `help_page.py` and `laps/detail_page.py`.
+    They were a leftover from when those files were written, not a decision, and because 1pt is
+    1.333px at 96 DPI they rendered *larger* than the rest of the UI — the Help title at ~27px
+    against every other page title's 20px. The four sites were converted to the app's scale
+    (**20px titles, 18px sub-headings, 14px body, 11px small**) rather than to their DPI
+    equivalents, which would have preserved the inconsistency in new units. This is a **visible
+    size change**: the Help title and the lap-detail title shrink to match every other title.
+    `ui/style.py` deliberately offers **no point-size path**, since that is what lets two scales
+    drift apart again; `test/ui/test_styles.py` fails on any `setPointSize` under `src/ui`. One
+    documented exemption: `car_status_graphic.py`'s `QGraphicsSimpleTextItem` labels, which are
+    scene-graph text transformed with the view, not styled widget labels.
+  * **`font-weight: 600` is `QFont.Weight.DemiBold`, which is exactly 600. `setBold(True)` is
+    `Bold` == 700** — a visibly heavier face on every heading in the app, and the most likely way
+    to silently regress this fix. `ui/style.py` exports `HEADING_WEIGHT` so no call site chooses.
   * **`MUTED_TEXT_QSS` labels stay styled.** Their `#8b949e` is a *deliberately fixed* colour that
     reads on both grounds (see `ui/style.py` for why `palette(mid)` was tried and rejected), so
     they are already theme-independent and must not be "fixed". Where a label carries **both** a
     muted colour and a font size, only the font moves out; the colour rule stays.
+
+  **Two latent bugs found by the same measurement** (both a missing `f` prefix, neither is A4):
+  `slider_row.py` passed the *identifier* `"MUTED_TEXT_QSS"` as a stylesheet, so the setup panel's
+  min/max labels had never been muted; and `car_status_graphic.py` had `background: _BACKGROUND`
+  inside a plain string, so the fixed light-grey ground that exists specifically "so the neon reads
+  the same on light & dark mode" had never been applied. Both fixed alongside A4.
+
+  **Done 2026-08-15 except five controls.** 32 label sites moved to `QFont` behind `apply_font` /
+  `apply_heading` / `apply_bold` in `ui/style.py`, with a guard test
+  (`test/ui/test_styles.py`) that fails if a font-bearing stylesheet without an explicit colour
+  reappears. Deliberately deferred: the **five widget blocks** — sidebar, season cards, the two
+  collapse toggles, the Compare button — whose `padding` / `border` / `text-align` have no `QFont`
+  equivalent, and where `QPushButton`'s `text-align` has no widget API at all. **Measure first in
+  the follow-up:** re-applying the same stylesheet string on `colorSchemeChanged`
+  (`w.setStyleSheet(w.styleSheet())`) may force `QStyleSheetStyle` to re-resolve its cached palette
+  and fix all five at once. That is an untested hypothesis, not a plan — measure it before building
+  five bespoke replacements.
 - **pyqtgraph bloat — DONE 2026-08-06 (PRIORITIES → C7), and it was not where the weight was.**
   The contrib hook plus our own `collect_submodules("pyqtgraph")` pulled in `pyqtgraph.examples.*`:
   a demo application with its own `__main__` and ~40 example scripts, unreachable from here (this

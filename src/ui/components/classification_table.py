@@ -67,7 +67,6 @@ def _pos_change_widget(position: int, glyph: str, kind: str) -> QLabel:
     label = QLabel(f"{position}&nbsp;&nbsp;{styled}")
     label.setTextFormat(Qt.TextFormat.RichText)
     label.setContentsMargins(6, 0, 6, 0)
-    label.setStyleSheet("background: transparent;")
     return label
 
 
@@ -76,7 +75,6 @@ def _tyre_widget(pixmap) -> QLabel:
     label = QLabel()
     label.setPixmap(pixmap)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    label.setStyleSheet("background: transparent;")
     return label
 
 

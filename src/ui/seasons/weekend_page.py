@@ -36,7 +36,7 @@ from ..components import (
     tidy_table,
 )
 from ..formatting import slot_label
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
 
 
 def _recorded_label(recorded_at: datetime | None) -> str:
@@ -82,7 +82,7 @@ class WeekendPage(QWidget):
         back = QPushButton("← Season")
         back.clicked.connect(self._on_back)
         self._title = QLabel()
-        self._title.setStyleSheet("font-size: 20px; font-weight: 600")
+        apply_heading(self._title, size_px=20)
         header.addWidget(back)
         header.addSpacing(12)
         header.addWidget(self._title)
@@ -90,7 +90,8 @@ class WeekendPage(QWidget):
         outer.addLayout(header)
 
         sess_caption = QLabel("Sessions")
-        sess_caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        apply_bold(sess_caption)
+        sess_caption.setContentsMargins(0, 8, 0, 0)
         outer.addWidget(sess_caption)
 
         self._assigned_body = QVBoxLayout()
@@ -107,7 +108,7 @@ class WeekendPage(QWidget):
         pick_header.setSpacing(12)
 
         pick_caption = QLabel("Assign a capture")
-        pick_caption.setStyleSheet("font-weight: 600;")
+        apply_bold(pick_caption)
         pick_header.addWidget(pick_caption)
 
         self._show_all_tracks = QCheckBox("Show captures from all tracks (not just this round's)")

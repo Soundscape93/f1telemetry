@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..components import clear_layout
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_font, apply_heading
 from .labels import format_label, season_title
 
 
@@ -40,7 +40,7 @@ class OverviewPage(QWidget):
 
         header = QHBoxLayout()
         title = QLabel("Seasons")
-        title.setStyleSheet("font-size: 20px; font-weight: 600")
+        apply_heading(title, size_px=20)
         new_btn = QPushButton("Create new season")
         new_btn.clicked.connect(self.create_requested)
         header.addWidget(title)
@@ -67,7 +67,7 @@ class OverviewPage(QWidget):
             self._body.addStretch(1)
             heading = QLabel("Create your first season")
             heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            heading.setStyleSheet("font-size: 18px; font-weight: 600")
+            apply_heading(heading, size_px=18)
             blurb = QLabel(
                 "Track your My Team, Driver Career, and Multiplayer seasons with "
                 "F1 Telemetry. Create a season, then assign your captured race weekends to "
@@ -75,7 +75,8 @@ class OverviewPage(QWidget):
             )
             blurb.setAlignment(Qt.AlignmentFlag.AlignCenter)
             blurb.setWordWrap(True)
-            blurb.setStyleSheet(f"font-size: 14px; {MUTED_TEXT_QSS}")
+            apply_font(blurb, size_px=14)
+            blurb.setStyleSheet(MUTED_TEXT_QSS)
             self._body.addWidget(heading)
             self._body.addWidget(blurb)
             self._body.addStretch(1)

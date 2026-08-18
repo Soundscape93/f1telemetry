@@ -31,7 +31,7 @@ from ...protocol.reference import team_display_name, track_name
 from ..components import cell, display_name_fn, fit_table_height, tidy_table
 from ..components.flags import flag_icon
 from ..formatting import race_winner_summary
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
 from .labels import season_title
 
 
@@ -61,7 +61,7 @@ class DetailPage(QWidget):
         back = QPushButton("← Seasons")
         back.clicked.connect(self.overview_requested)
         self._title = QLabel()
-        self._title.setStyleSheet("font-size: 20px; font-weight: 600")
+        apply_heading(self._title, size_px=20)
 
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -73,7 +73,7 @@ class DetailPage(QWidget):
         title_host.setLayout(title_row)
 
         st_caption = QLabel("Player Standings")
-        st_caption.setStyleSheet("font-weight: 600;")
+        apply_bold(st_caption)
 
         header.addWidget(title_host, 3)
         header.addWidget(st_caption, 2)
@@ -86,7 +86,7 @@ class DetailPage(QWidget):
         calendar_layout = QVBoxLayout(calendar_panel)
         calendar_layout.setContentsMargins(0, 0, 0, 0)
         cal_caption = QLabel("Calendar")
-        cal_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
+        apply_bold(cal_caption)
         cal_header = QHBoxLayout()
         cal_header.setContentsMargins(0, 0, 0, 0)
         cal_header.addWidget(cal_caption)
@@ -147,7 +147,7 @@ class DetailPage(QWidget):
         standings_layout.addWidget(self._standings_empty)
 
         ct_caption = QLabel("Constructor Standings")
-        ct_caption.setStyleSheet("font-weight: 600; margin-top: 0px;")
+        apply_bold(ct_caption)
         standings_layout.addWidget(ct_caption)
         self._constructor_table = QTableWidget(0, 3)
         self._constructor_table.setHorizontalHeaderLabels(["Pos", "Team", "Points"])
