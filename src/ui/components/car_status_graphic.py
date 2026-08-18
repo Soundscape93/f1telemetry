@@ -29,7 +29,7 @@ from .car_status import Status, damage_parts, status_colour, tyre_corners
 _VIEWBOX = QRectF(0, 0, 420, 560)
 _NEUTRAL = "#8b949e"      # structural / no-data grey (matches car_status Status.NONE)
 _PANEL_FILL = "#b4bcc8"   # solid-ish light grey for filled structural panels (floor fences)
-_BACKGROUND = "#dfe3ea"  # solid light grey background for the whole widget, so the neon reads the same on light & dark mode
+_BACKGROUND = "#0d1117"   # fixed dark ground, so the neon colour-coding reads the same on a light & dark desktop. a bit darker than the tooltip
 _GAUGE_R = 34
 
 # body regions: (svg id, car_status model key, path d). Two ids may share a model key (sidepods) -
@@ -308,8 +308,8 @@ class CarStatusGraphic(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setStyleSheet(
-            "QGraphicsView { background: _BACKGROUND; border: none; border-radius: 6px; }"
-            "QToolTip { color: #e6edf3; background-color: #1c242e;" \
+            f"QGraphicsView {{ background: {_BACKGROUND}; border: none; border-radius: 6px; }}"
+            "QToolTip { color: #e6edf3; background-color: #1c242e;"
             " border: 1px solid #444c56; padding: 4px 6px; }"
         )
         self.setMinimumSize(230, 300)

@@ -39,7 +39,7 @@ from ..components import (
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
 from ..settings import set_trace_colorblind, trace_colorblind
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_bold, apply_font, apply_heading
 from .comparison import (
     SCOPE_BEST,
     SCOPE_SESSION,
@@ -75,7 +75,7 @@ class DetailPage(QWidget):
         back = QPushButton("← Laps")
         back.clicked.connect(self.overview_requested.emit)
         self._title = QLabel()
-        self._title.setStyleSheet("font-size: 18pt; font-weight: 600;")
+        apply_heading(self._title, size_px=18)
         header.addWidget(back)
         header.addSpacing(12)
         header.addWidget(self._title)
@@ -162,7 +162,8 @@ class DetailPage(QWidget):
         caption_row = QHBoxLayout(caption_host)
         caption_row.setContentsMargins(0, 0, 0, 0)
         caption = QLabel("Telemetry")
-        caption.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        apply_bold(caption)
+        caption.setContentsMargins(0, 0, 0, 0)
         caption_row.addWidget(caption)
         if lap.trace is not None:
             compare = self._build_compare_menu(uid, lap)
@@ -213,7 +214,9 @@ class DetailPage(QWidget):
         button = QToolButton()
         button.setText("Compare ▾")
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setStyleSheet("QToolButton { padding: 2px 6px; }")
+        # No stylesheet - it would freeze the button's text colour at apply time (A4b).
+        # The old "padding: 2px 6px" becomes a minimum size off the natural hint.
+        button.setMinimumSize(button.sizeHint().width() + 12, button.sizeHint().height() + 4)
         menu = QMenu(button)
         self._compare_actions = []
         for scope in (SCOPE_BEST, SCOPE_SESSION, SCOPE_WEEKEND):
@@ -255,7 +258,7 @@ class DetailPage(QWidget):
         box = QVBoxLayout(panel)
         box.setContentsMargins(0, 0, 0, 0)
         cap = QLabel(caption)
-        cap.setStyleSheet("font-weight: 600;")
+        apply_bold(cap)
         box.addWidget(cap)
         box.addWidget(widget)
         box.addStretch(1)
@@ -275,7 +278,7 @@ class DetailPage(QWidget):
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(6)
         cap = QLabel("Car Status")
-        cap.setStyleSheet("font-weight: 600;")
+        apply_bold(cap)
         head.addWidget(cap)
         if tyre_context is not None:
             pixmap = tyre_pixmap(tyre_context.visual_compound, size=16)
@@ -285,12 +288,12 @@ class DetailPage(QWidget):
                 head.addWidget(icon)
             age = tyre_context.age_laps
             age_label = QLabel(f"{age} lap{'s' if age != 1 else ''} old")
-            age_label.setStyleSheet("font-size: 11px;")
+            apply_font(age_label, size_px=11)
             head.addWidget(age_label)
         fuel_text = f"{fuel_in_tank:.1f} kg" if fuel_in_tank is not None else "—"
         prefix = "· Fuel: " if tyre_context is not None else "Fuel: "
         fuel_label = QLabel(prefix + fuel_text)
-        fuel_label.setStyleSheet("font-size: 11px;")
+        apply_heading(fuel_label, size_px=11)
         head.addWidget(fuel_label)
         head.addStretch(1)
         box.addLayout(head)

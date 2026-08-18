@@ -589,13 +589,44 @@ clear, and the app process in the failing run was launched *after* the rule exis
 saying why — the failure is silent, so an unexplained reboot would be declined and the user would
 land in exactly the state it prevents.
 
-**Mechanism inferred, not proven.** Most likely a stale path→rule association cached by the
-firewall service after the exe at that path is replaced. **We ship the remedy, not the theory** —
-and this note deliberately stops short of asserting more than was measured, having twice done the
-opposite. Rejected alternatives: restarting `MpsSvc` from the installer (frequently refuses to
-stop, depends on BFE, briefly drops protection mid-install, and any failure lands on a tester
-machine we cannot debug); `netsh advfirewall reset` (wipes every rule on the system); `gpupdate`
-(irrelevant — this is a local rule, not Group Policy).
+**The mechanism is unnamed — corrected 2026-08-15, and this is the third theory to be withdrawn.**
+This paragraph used to assert "most likely a stale path→rule association cached by the firewall
+service after the exe at that path is replaced". **That is disproven:** clean *first* installs fail
+too, where no previous exe ever existed at that path. **We ship the remedy, not a theory.** What is
+measured is narrow and worth stating exactly:
+
+- **The drop is in WFP, not in this app.** Firewall OFF → the installed build records. Firewall ON
+  with the correct allow rules → silent. The app binds correctly (`Get-NetUDPEndpoint` shows
+  `0.0.0.0:20777` owned by `f1telemetry.exe` during the failing window) and the packets reach the
+  NIC (`pktmon`).
+- **A reboot is the only remedy that has ever worked**, reproducibly, across separate user accounts
+  and devices.
+
+**Falsified, listed so nobody re-derives them:**
+
+| Theory | How it died |
+|---|---|
+| stale path→rule association after the exe is replaced | clean first installs fail, with no previous exe at that path |
+| a firewall *policy change* is what refreshes it | in the failing window, disabling and re-enabling this very rule did **not** fix it, and an unrelated policy touch (create + delete a dummy rule) did **not** either |
+| the rule is written only to the registry, not the live service | `Get-NetFirewallRule` reads the running service and shows it present and `Enabled` straight after install |
+| `ActiveStore` vs `PersistentStore` drift | both stores identical (Allow, Enabled, Dir=In, Protocol=17, program-scoped) |
+| a Block rule outranks the allow | no Block rules for the binary in either store |
+| a stale process holding the port | one bound socket, owned by the running app |
+| a UDP port exclusion conflict | the reserved range is 50000–50059 |
+| rule shape (`localport` etc.) | never isolated — see the three-shapes table below. Not implicated |
+
+**`MpsSvc` cannot be restarted at all** — measured 2026-08-15, and stronger than the "frequently
+refuses to stop" this paragraph used to say. `sc.exe sdshow mpssvc` shows the `BA` ACE carrying no
+`WP` (stop) right, so **nothing stops the Windows Firewall service, even elevated**. A reboot is the
+only way to cycle it, which is a cleaner account of "only a reboot works" than any theory about rule
+caching — but it is an observation about the service, not a mechanism for the drop. Other rejected
+alternatives: `netsh advfirewall reset` (wipes every rule on the system); `gpupdate` (irrelevant —
+this is a local rule, not Group Policy).
+
+**One diagnostic came back inconclusive and was not retried:** a WFP `netevents` capture returned an
+empty XML (74 bytes, 0 `CLASSIFY_DROP`), which cannot distinguish "no drops" from "collection
+captured nothing" — `netevents` needs its keyword/category setting configured separately.
+`pfirewall.log` with `LogBlocked=True` has not been read.
 
 **The bisection that opened it up.** Disabling the Private profile
 (`Set-NetFirewallProfile -Profile Private -Enabled False`) made the installed app record
@@ -640,12 +671,51 @@ receives the same broadcast, so "the game wasn't sending" can never explain a re
 Because of that history, the clean-machine checklist requires the install → restart → record path
 to pass **twice from scratch**, not once.
 
-**Accepted 2026-08-09 on exactly that basis.** Two full clean passes, identical both times: before
-restarting, the installed app received nothing **while the release zip recorded from the same
-broadcast as a control**; closing and reopening the installed app did not help; after restarting,
-it recorded immediately and a `.f1cap` appeared. The control is what makes the result trustworthy —
-it makes "the game wasn't sending" unavailable as an explanation, which is precisely how the three
-earlier false conclusions were reached.
+**Accepted 2026-08-09 on exactly that basis, and C8b closed.** Two full clean passes, identical both
+times: before restarting, the installed app received nothing **while the release zip recorded from
+the same broadcast as a control**; closing and reopening the installed app did not help; after
+restarting, it recorded immediately and a `.f1cap` appeared. The control is what makes the result
+trustworthy — it makes "the game wasn't sending" unavailable as an explanation, which is precisely
+how the three earlier false conclusions were reached.
+
+**The restart is also required after an in-place upgrade, not only after a fresh install.** Tested
+2026-08-09: install v0.8.0 → restart → records; run the *same* installer over the top → **records
+no longer** until Windows is restarted again. So the requirement attaches to *running the
+installer*, in any form. The user guide, the release notes and Setup's own restart page all say so.
+
+**The accepted final invariant for C8b:** a standard user can launch the installed app with **no UAC
+and no firewall prompt**, and **after restarting Windows** recording works, writing captures to that
+user's `%LOCALAPPDATA%\f1telemetry`. The reboot is a documented requirement, not a defect to keep
+chasing.
+
+**What is still not known, stated plainly so nobody re-derives a false answer.** This section used
+to name two candidate triggers that "were never separated, because every test changed both at once":
+(a) the **exe at the rule's path being replaced**, and (b) the **rule being deleted and re-added**.
+**Both are now dead as framed — corrected 2026-08-15:**
+
+- **(a) is falsified.** Clean *first* installs fail, where no previous exe existed at the rule's
+  path. Exe replacement cannot be the trigger, because the failure happens without it.
+- **(b) survives only as a possible trigger, never as a remedy.** Re-adding the rule *late* does not
+  help: in the failing window, disabling and re-enabling the app's own rule changed nothing, and an
+  unrelated policy touch changed nothing. Whatever (b) sets, a second policy write does not clear it.
+
+The `localport` predicate is **not** the cause — that claim was made, was wrong, and is retracted;
+`LocalPort: Any` is kept only because it matches what Windows itself writes from the first-record
+prompt.
+
+**The one variant still un-run**, and it is now *opportunistic rather than a prerequisite*: an exact
+`netsh advfirewall firewall delete rule name="F1 Telemetry (UDP 20777)"` followed by the installer's
+own `add rule` line, then record without rebooting. It differs from what was tested — disable/enable
+reuses the same rule object, delete/add creates a new one — but given that disable/enable *and* a
+dummy-rule policy touch both failed, the odds are low. **It no longer gates C8d**, because C8d was
+deferred on other grounds (see below) and because (a)'s death already answers the question it was
+posed to settle: the reboot attaches to the installer-created rule itself, not to updating.
+
+**Experiment #6 — "run a real v0.7.0 → v0.8.0 upgrade" — is not runnable, and should not be
+re-scheduled.** v0.8.0 is the **first** release that shipped an installer, so there is no earlier
+installer-based release to upgrade from. The nearest available equivalent — running the same
+installer over an existing install — was measured on 2026-08-09 and fails, which is what the
+in-place-upgrade paragraph above records.
 
 **A7 was folded into C8b rather than deferred, and the reason is worth keeping.** A restart
 *request* can be declined, and the failure that follows is silent — which reproduces the exact
@@ -675,6 +745,104 @@ delete-before-add, uninstall cleanup, admin-with-no-override, and the absence of
 **And when it ships:** the clean-instance run must be repeated, checking the *new* invariant —
 installed as admin, then **run as a standard user** with nothing needing elevation. The existing
 checklist item changes meaning rather than disappearing.
+
+### The open question C8b left: should the installer write the firewall rule at all?
+
+**Recorded 2026-08-15, because the trade-off genuinely moved.** When C8b was decided, the installer
+rule was free — it removed a prompt and cost nothing. It is no longer free: it costs a Windows
+restart on **every** install and update. That is a different bargain from the one that was struck,
+so it is written down rather than treated as settled forever.
+
+| | Installer rule + reboot (**current**) | No rule; Windows first-run prompt |
+|---|---|---|
+| A **standard user** can get a rule | ✓ — admin wrote it at install | **✗ — the prompt needs admin credentials** |
+| Silent / unattended install | ✓ | ✗ — nobody to click |
+| `domain` profile covered | ✓ | ✗ — the prompt ticks Private only |
+| Recoverable when it goes wrong | ✓ — re-run the installer | ✗ — a dismissed prompt cannot be recalled |
+| GPO has `DisplayNotification` off | unaffected | **silent drop, and no clue why** |
+| Reboot required | **✗ — every install and update** | ✓ — none |
+
+**The answer for now is keep the rule**, and the decisive row is the first one. C8b's whole target
+model is *installed by an admin, run by a standard user*. In that model the Windows prompt cannot
+produce a rule at all — the standard user gets a credential dialog they cannot satisfy, or (under
+GPO) nothing whatsoever. Dropping the rule does not trade a reboot for a prompt; it trades a
+**documented, requested, one-time reboot** for a **silent, irrecoverable, standard-user-facing
+failure** on exactly the machine this design targets. Every failure mode in the right-hand column is
+silent, and silence is the single thing this entire investigation exists to eliminate. The reboot is
+also mitigated three ways already: Setup asks with a custom label that says why, `USER_GUIDE.md` says
+it in three places, and A7 backstops a user who declines.
+
+**The experiment that would decide it, if it is ever worth deciding:** build the installer with the
+two `netsh` lines removed, install, record. If the prompt-created rule works immediately, the reboot
+is confirmed as attaching specifically to the netsh-written rule rather than to installing as such.
+**That is a reopening of C8b, not a small check** — treat it accordingly.
+
+### C8d — assisted update: designed, and deliberately deferred
+
+**Deferred out of Cycle 4 on 2026-08-15.** `Help → Check for updates` would gain "download the
+installer and launch it". The design below is recorded so it does not have to be re-derived; see
+[`PRIORITIES.md`](PRIORITIES.md) for why it waits and what brings it back.
+
+**Why it waits:** the reboot eats most of the value (C8d removes *browse, find, download, run* and
+leaves *elevate, close, reboot*); it would be the app's **first path that downloads a binary and
+executes it**, which is a new trust boundary in an app that otherwise only reads UDP and files; and
+A4 — a known issue in every release since v0.3.0 — costs the tester group more, more often.
+
+**The flow, if it is built.** Notify (exists) → confirm → download with progress and cancel →
+verify → launch Setup → the app quits. The app **never restarts itself and never touches the
+reboot**; Setup owns that.
+
+- **The warning before launching is mandatory**, and names three things in order: Windows will ask
+  for administrator rights; F1 Telemetry will close; **Windows must restart before recording works
+  again**. Without that third line C8d actively makes things worse, by making updates easier and
+  therefore more frequent, each one landing a user in the silent-failure state.
+- **Downloads go to `%LOCALAPPDATA%\f1telemetry\updates`** via a new `paths.updates_dir()` beside
+  `logs_dir()` — `paths.py` stays the single path authority, `F1TELEMETRY_DATA_DIR` is honoured for
+  free, and *Help → Open data folder* already puts a user in the right place if the launch fails and
+  they must run it by hand. **Not `%TEMP%`**: Windows may clean a ~250 MB download mid-flight, and
+  it is not a path you can talk someone to over a chat window. Never beside the exe — that is
+  Program Files and read-only.
+- **Cleanup is one rule: prune the folder on entry**, before a download starts, plus a best-effort
+  prune at start-up. No timers, no age arithmetic. **Never delete after launching** — Setup is still
+  reading the file, and that race is the trap worth naming. Every unlink is `try`/`except`, since
+  Windows refuses to delete a file in use.
+- **Verification, in order:** the URL comes from the API response and is never user-supplied, HTTPS
+  only → the **asset name** must match `f1telemetry-<tag>-windows-x64-setup.exe` derived from the
+  tag, which is also the version check → **size** against the asset's `size` field (mandatory;
+  catches truncation) → **sha256** against the asset's `digest` field when GitHub supplies one,
+  computed while streaming so it is free, skipped when absent. **No signature check** — the build is
+  unsigned by standing decision, so do not pretend to verify one. Stated honestly: size + digest from
+  the same API buys integrity against corruption, **not** against a compromised GitHub account; only
+  code signing would. **If C8d is built, publishing a `SHA256SUMS` asset from `release.yml` is a
+  precondition, not a follow-up.**
+- **Launch with a plain detached process start.** Inno's Setup re-launches itself elevated because of
+  `PrivilegesRequired=admin`, so UAC appears without the app doing anything special — exactly as
+  double-clicking does. No explicit `runas`/`ShellExecuteW`: an extra code path, harder to test, no
+  benefit. Quit only once the start returns success; on failure show the file location. The whole
+  flow refuses to start while recording or a job runs (`MainWindow._busy()`).
+- **Per build type:** installed Windows → the full flow. **Windows zip → release page only**, because
+  running the installer would silently convert the user to a Program Files install and orphan the zip
+  folder. **Linux tarball → release page only** (no installer artifact exists). **Source/dev → release
+  page only.** Detection is a **marker file the installer drops beside the exe**, checked by
+  presence — reusing the rule F9 established for `resolve_notices` (*presence decides, never
+  `is_frozen()`*): one `[Files]` line in the `.iss`, one Qt-free predicate, testable on Linux.
+  `[InstallDelete]` wipes `_internal`, not `{app}`, so the marker survives upgrades.
+- **Where the code would live:** `src/update_download.py` (Qt-free, injectable `urlopen` exactly like
+  `update_check`), a `ReleaseInfo.assets` field defaulted so the frozen dataclass stays compatible,
+  `UpdateDownloadWorker` in `ui/workers.py` shaped like `ReingestWorker`, and `HelpPage` **emitting**
+  while `MainWindow` owns the worker — it has to, since it owns `_busy()` and the quit decision.
+- **No new no-telemetry detection is needed.** A7 already fires on zero datagrams and names the
+  restart case; it is correct after an assisted update for the same reason it is correct after a
+  manual one. Gating it on "a matching firewall rule exists" was considered and **rejected**: it means
+  parsing `netsh` output or taking a COM dependency, Windows-only and fragile, to drop half of one
+  sentence. **A6** is the open half worth building, not a second hint.
+
+**Worth doing without C8d, and much cheaper (~15 lines in `help_page.py`):** point the update
+dialog's button at the matching setup asset's `browser_download_url` instead of the release page —
+the browser handles the download and SmartScreen — and **say in the dialog that installing an update
+needs administrator rights and a Windows restart**. That second half is worth doing on its own: the
+dialog currently says nothing about the reboot, which is the most important fact about updating this
+app.
 
 ---
 
@@ -765,17 +933,90 @@ Built and verified on the author's Windows 11 boot on 2026-07-25 (clean-machine 
   `unpolish`/`polish` pass doesn't force that cached rule to recompute.
 
   So the fix the old note guessed at is right, for a different reason: a label with *no* stylesheet
-  follows the palette natively. **Measured scope (2026-08-06): 27 font-only `setStyleSheet` calls
-  across 15 files** — move them to `QFont`, ideally behind a named helper in `ui/style.py`
-  (`apply_heading(label, …)`), which states the intent instead of repeating a magic string.
+  follows the palette natively.
 
-  Two wrinkles that will bite whoever does it:
-  * **`px` and `pt` are both in use** and are not interchangeable — `setPixelSize` vs
-    `setPointSize`. Converting one to the other silently resizes text on HiDPI panels.
+  **Scope re-measured 2026-08-15 by AST (not grep), and it was larger than recorded.** The old
+  "27 font-only calls across 15 files" was wrong twice: those 27 are not font-*only*, and font-only
+  is not the actionable set. There are **54 `setStyleSheet` calls across 15 files** under `src/ui/`
+  (none anywhere else, and no application-wide stylesheet), which split as:
+
+  | What the call sets | Calls | Verdict |
+  |---|---|---|
+  | Font properties only | 19 | 🔴 freezes the colour |
+  | `font-weight` + `margin-top` captions | 5 | 🔴 |
+  | Widget blocks (`QToolButton`/`QPushButton`/`QListWidget::item`) | 5 | 🔴 |
+  | `background: transparent` labels | 2 | 🔴 |
+  | `"MUTED_TEXT_QSS"` passed as a *literal string* | 2 | 🔴 + a bug of its own |
+  | Muted-only (`color: #8b949e`) | 17 | 🟢 explicit colour, unaffected |
+  | Muted + font | 1 | 🟡 move the font out, keep the colour |
+  | Muted + `font-style` + padding | 2 | 🟢 |
+  | `car_status_graphic` view/tooltip block | 1 | 🟢 |
+
+  **33 calls freeze a text colour, not 27.** The rule is simply *any* stylesheet without an explicit
+  `color:`; a font property is incidental to it. The two earlier numbers are both reproducible and
+  both measure the wrong thing — `grep 'font-'` gives **29**, `grep 'font-size\|font-weight'` gives
+  **27** (it misses the two that are `font-style: italic` only).
+
+  Three wrinkles that will bite whoever does it:
+  * **`px` and `pt` were both in use — A4 standardised the UI on `px`** *(decided 2026-08-15)*.
+    Measured: **11 `px`, 4 `pt`**, the `pt` ones all in `help_page.py` and `laps/detail_page.py`.
+    They were a leftover from when those files were written, not a decision, and because 1pt is
+    1.333px at 96 DPI they rendered *larger* than the rest of the UI — the Help title at ~27px
+    against every other page title's 20px. The four sites were converted to the app's scale
+    (**20px titles, 18px sub-headings, 14px body, 11px small**) rather than to their DPI
+    equivalents, which would have preserved the inconsistency in new units. This is a **visible
+    size change**: the Help title and the lap-detail title shrink to match every other title.
+    `ui/style.py` deliberately offers **no point-size path**, since that is what lets two scales
+    drift apart again; `test/ui/test_styles.py` fails on any `setPointSize` under `src/ui`. One
+    documented exemption: `car_status_graphic.py`'s `QGraphicsSimpleTextItem` labels, which are
+    scene-graph text transformed with the view, not styled widget labels.
+  * **`font-weight: 600` is `QFont.Weight.DemiBold`, which is exactly 600. `setBold(True)` is
+    `Bold` == 700** — a visibly heavier face on every heading in the app, and the most likely way
+    to silently regress this fix. `ui/style.py` exports `HEADING_WEIGHT` so no call site chooses.
   * **`MUTED_TEXT_QSS` labels stay styled.** Their `#8b949e` is a *deliberately fixed* colour that
     reads on both grounds (see `ui/style.py` for why `palette(mid)` was tried and rejected), so
     they are already theme-independent and must not be "fixed". Where a label carries **both** a
     muted colour and a font size, only the font moves out; the colour rule stays.
+
+  **Two latent bugs found by the same measurement** (both a missing `f` prefix, neither is A4):
+  `slider_row.py` passed the *identifier* `"MUTED_TEXT_QSS"` as a stylesheet, so the setup panel's
+  min/max labels had never been muted; and `car_status_graphic.py` had `background: _BACKGROUND`
+  inside a plain string, so the fixed light-grey ground that exists specifically "so the neon reads
+  the same on light & dark mode" had never been applied. Both fixed alongside A4.
+
+  **A4a done 2026-08-15.** 32 label sites moved to `QFont` behind `apply_font` / `apply_heading` /
+  `apply_bold` in `ui/style.py`, with a guard test (`test/ui/test_styles.py`) that fails if a
+  font-bearing stylesheet without an explicit colour reappears. It left the **five widget blocks** —
+  sidebar, season cards, the two collapse toggles, the Compare button — whose `padding` / `border` /
+  `text-align` have no `QFont` equivalent.
+
+  **A4b done 2026-08-18, four of those five.** Sidebar → item size hints
+  (`fontMetrics().height() + 16`, measured pixel-identical at 33px rows) plus
+  `setViewportMargins(4, 0, 4, 0)`; the two toggles → `setAutoRaise(True)` + `apply_bold` +
+  a minimum height (28px, matching); the Compare button → a minimum size off its natural hint.
+  Each **removes** the stylesheet rather than working around its caching, so the widgets follow the
+  palette natively like every other label.
+
+  **The `colorSchemeChanged` re-apply hypothesis was never confirmed, and was sidestepped rather
+  than relied on.** The theory — that `w.setStyleSheet(w.styleSheet())` would force
+  `QStyleSheetStyle` to re-resolve its cached palette — could not be tested: under the offscreen
+  platform with Fusion a stylesheet'd `QListWidget` recolours correctly on a palette change, so the
+  sandbox never reproduced the symptom and therefore could not test the remedy. Removing the
+  stylesheets made the question moot. **It remains unproven** — do not cite it as a mechanism.
+
+  **The season card is a deliberate, measured exception.** `QPushButton { text-align: left;
+  padding: 12px 14px; }` has no non-QSS equivalent: dropping the sheet gives a 25px-tall *centred*
+  button against the current 43px left-aligned card, `QCommandLinkButton` renders 230px tall, and
+  a `QPushButton` hosting its own layout collapses to a 43×25 size hint because the button's hint
+  ignores its child layout. Against that, **no misbehaviour was ever observed on this widget** on
+  either Linux or Windows. Keeping one documented stylesheet beat a visual regression taken to fix
+  something nobody had seen go wrong.
+
+  **The symptom was Windows-only.** All 32 A4a label sites reproduced and verified on Ubuntu, but
+  the sidebar — the one remaining *visible* case — never misbehaved on Linux and only ever showed
+  on Windows. That matches `app._install_theme_refresh`'s own docstring note that item views can
+  keep their old ground, and it means the "mostly verifiable on the dev box" claim held for labels
+  but not for item views.
 - **pyqtgraph bloat — DONE 2026-08-06 (PRIORITIES → C7), and it was not where the weight was.**
   The contrib hook plus our own `collect_submodules("pyqtgraph")` pulled in `pyqtgraph.examples.*`:
   a demo application with its own `__main__` and ~40 example scripts, unreachable from here (this

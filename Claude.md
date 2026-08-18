@@ -149,6 +149,16 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
     worker's thread. `crash.py` therefore checks the thread and hops to the GUI thread through a
     queued-connection relay, passing only strings — never the exception, whose traceback would pin
     worker frames alive across threads. Any new dialog reachable from a worker needs the same care.
+11. **Never set a stylesheet on a widget whose text must follow the theme — use the `ui/style.py`
+    font helpers.** Any stylesheet hands the widget to `QStyleSheetStyle`, which caches a palette
+    at apply time, so even `"font-size: 20px"` freezes the *current* theme's text colour into the
+    widget and survives the `unpolish`/`polish` refresh. That was A4, a known issue in every
+    release from v0.3.0 to v0.8.0. Use `apply_font` / `apply_heading` / `apply_bold`, and
+    `HEADING_WEIGHT` (`DemiBold` == 600), never `setBold(True)` (== 700). Stylesheets that set
+    `color:` explicitly, like `MUTED_TEXT_QSS`, are fine and stay. **UI text is sized in px on one
+    scale — 20 titles / 18 sub-headings / 14 body / 11 small — and `style.py` has no point-size
+    path**, because mixing the two units is how the Help title drifted 25 % large.
+    `test/ui/test_styles.py` enforces both halves.
 
 ## Conventions
 

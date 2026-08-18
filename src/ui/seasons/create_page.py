@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from ...domain.calendars import calendar_rules, official_calendar
 from ...domain.season import SeasonMode
 from ..components.calendar_picker import CalendarPicker
+from ..style import apply_heading
 from .labels import mode_label
 
 
@@ -44,7 +45,7 @@ class CreatePage(QWidget):
         outer = QVBoxLayout(self)
 
         title = QLabel("Create a new season")
-        title.setStyleSheet("font-size: 20px; font-weight: 600")
+        apply_heading(title, size_px=20)
         outer.addWidget(title)
 
         form = QFormLayout()

@@ -89,23 +89,40 @@ CloseApplications=yes
 RestartApplications=no
 
 ; ---- WINDOWS MUST RESTART BEFORE THE FIREWALL RULE IS EFFECTIVE -------------------------------
-; Measured, repeatedly: install -> press Record immediately = no telemetry, while pktmon confirms
-; the packets are arriving at the NIC; reboot -> Record = works, same game session. The failing
-; window spanned several minutes, so this is not propagation latency that waiting would clear, and
-; the app process in the failing run was launched AFTER the rule existed, so it is not per-process
+; Measured repeatedly, across separate user accounts and devices: install -> press Record
+; immediately = no telemetry, while pktmon confirms the packets are reaching the NIC; reboot ->
+; Record = works, same game session. Firewall OFF -> the installed build records; firewall ON with
+; the correct allow rules -> silent. So the drop is in WFP, not in this app. The failing window
+; spanned several minutes, so it is not propagation latency that waiting would clear, and the app
+; process in the failing run was launched AFTER the rule existed, so it is not per-process
 ; staleness either.
-; Mechanism INFERRED, NOT PROVEN - most likely a stale path->rule association cached by the
-; firewall service after the exe at that path is replaced. We ship the remedy, not the theory.
-; Restarting MpsSvc from the installer was rejected: it frequently refuses to stop, depends on BFE,
-; and briefly drops protection mid-install, with any failure landing on a tester machine we cannot
-; debug. `netsh advfirewall reset` would wipe every rule on the system. gpupdate is irrelevant -
-; this is a local rule, not Group Policy.
+;
+; THE MECHANISM IS UNNAMED. Do not write a theory here again - three have now been wrong.
+; What is measured: the firewall is the drop point, and a reboot is the ONLY remedy that works.
+; FALSIFIED, listed so nobody re-derives them:
+;   - "a stale path->rule association after the exe at that path is replaced" (this comment's own
+;     earlier claim): clean FIRST installs fail too, where no previous exe existed at that path.
+;   - "a firewall policy change is what really refreshes it": in the failing window, disabling and
+;     re-enabling this very rule did NOT fix it, and an unrelated policy touch (create + delete a
+;     dummy rule) did NOT fix it either.
+;   - "the rule is only written to the registry, not to the live service": Get-NetFirewallRule
+;     reads the running service and shows the rule present and Enabled straight after install.
+;   - "ActiveStore vs PersistentStore drift": both stores are identical.
+;   - rule shape (localport etc.): never isolated - see the [Run] note. Not implicated.
+;
+; MpsSvc CANNOT BE RESTARTED, so it is not an available remedy - not "usually refuses to stop",
+; but cannot: `sc.exe sdshow mpssvc` shows the BA ACE carries no WP (stop) right, so nothing stops
+; it even elevated. A reboot is the only way to cycle the service, which is very likely why a
+; reboot is the only thing that works. `netsh advfirewall reset` would wipe every rule on the
+; system; gpupdate is irrelevant - this is a local rule, not Group Policy.
+;
 ; REQUEST, not force: Inno shows the standard restart-now/later page and the user keeps control.
 ; A forced reboot can destroy unsaved work; a mere message is too easy to miss.
-; Every install AND update, not only the first - an update replaces the exe and re-adds the rule,
-; which is exactly the condition suspected of causing the staleness.
+; Every install AND update, not only the first - the requirement attaches to RUNNING THE
+; INSTALLER in any form (measured 2026-08-09 by running the same installer over the top).
 ; This exists to prevent the false bug report it was found as: "I installed it, pressed Record,
-; nothing happened."
+; nothing happened." The no-telemetry hint in src/ui/main_window.py (A7) backstops a user who
+; declines the restart.
 AlwaysRestart=yes
 
 
