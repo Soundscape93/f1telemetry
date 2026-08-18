@@ -16,7 +16,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QProgressDialog,
@@ -133,10 +134,18 @@ class MainWindow(QMainWindow):
         body.setSpacing(0)
 
         self._sidebar = QListWidget()
-        self._sidebar.addItems(_SECTIONS)
         self._sidebar.setFixedWidth(170)
         self._sidebar.setFrameShape(QFrame.Shape.NoFrame)
-        self._sidebar.setStyleSheet("QListWidget::item { padding: 8px 4px; }")
+        # Row metrics without a stylesheet. Any stylesheet hands the widget to QStyleSheetStyle,
+        # which caches a palette at apply time - which is why these labels stayed white on a light
+        # theme and black on a dark one (A4b). The size hint reproduces the old
+        # "padding: 8px 4px" exactly: 8px above and below the text, 4px either side.
+        row_height = self._sidebar.fontMetrics().height() + 16
+        for name in _SECTIONS:
+            item = QListWidgetItem(name)
+            item.setSizeHint(QSize(0, row_height))
+            self._sidebar.addItem(item)
+        self._sidebar.setViewportMargins(4, 0, 4, 0)
         body.addWidget(self._sidebar)
         body.addWidget(_line(QFrame.Shape.VLine))
 

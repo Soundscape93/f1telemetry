@@ -33,7 +33,7 @@ from ...protocol.reference import track_name
 from ..components import cell, clear_layout, fit_table_height, tidy_table
 from ..components.tyres import tyre_pixmap
 from ..formatting import format_lap_time, slot_label
-from ..style import MUTED_TEXT_QSS, apply_heading
+from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
 
 
 def _recorded_label(recorded_at: datetime | None) -> str:
@@ -139,7 +139,11 @@ class OverviewPage(QWidget):
         toggle.setArrowType(
             Qt.ArrowType.DownArrow if toggle.isChecked() else Qt.ArrowType.RightArrow
         )
-        toggle.setStyleSheet("QToolButton { font-weight: 600; border: none; padding: 4px 0; }")
+        # No stylesheet - it would freeze the button's text colour at apply time (A4b).
+        # border: name -> setAutoRaise, font-weight: 600 -> apply_bold, padding -> minimum height.
+        toggle.setAutoRaise(True)
+        apply_bold(toggle)
+        toggle.setMinimumHeight(toggle.sizeHint().height() + 4)
         toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         header.addWidget(toggle)
         header.addStretch(1)

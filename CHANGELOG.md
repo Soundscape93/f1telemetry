@@ -26,9 +26,10 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   Help's "Setup / Configuration" and "About" headings change by less than a pixel.
 
 ### Fixed
-- **Switching the system between light and dark now recolours the text immediately.** Page titles,
-  headings and captions used to keep the *previous* theme's colour until the app was restarted —
-  the known issue carried in every release since v0.3.0.
+- **Switching the system between light and dark now recolours the whole window immediately.**
+  Page titles, headings, captions and the left sidebar used to keep the *previous* theme's colour
+  until the app was restarted — the known issue carried in every release since v0.3.0. The sidebar
+  was the last and most visible case, and showed only on Windows.
 - **The setup panel's slider min/max labels are the muted grey they were always meant to be.** They
   were never styled at all: the code passed the *name* of the colour setting instead of its value.
 - **The car-status graphic sits on its intended fixed light-grey background again**, so the
@@ -44,12 +45,6 @@ or stored moved, so existing captures, sessions and standings are unaffected.
   the final classification, if the machine slept mid-session. Nothing can recover that — the data
   never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
   classification show a reconstructed result instead.
-- Switching the light/dark theme while the app is open still leaves **five controls** the wrong
-  colour: the left sidebar, the season cards, the two "collapse" toggles on Laps and the weekend
-  page, and the lap-detail **Compare** button. Their styling carries padding, borders and alignment
-  that a font setting cannot express, so they need individual replacements and are a deliberate
-  follow-up. Every title, heading, caption and body label now recolours live; restarting the app
-  still fixes the remaining five.
 - Dashboard, Sessions, Analytics and Bug report pages are placeholders.
 - The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 

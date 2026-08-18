@@ -232,7 +232,11 @@ class WeekendPage(QWidget):
         toggle.setArrowType(
             Qt.ArrowType.DownArrow if toggle.isChecked() else Qt.ArrowType.RightArrow
         )
-        toggle.setStyleSheet("QToolButton { font-weight: 600; border: none; padding: 4px 0; }")
+        # No stylesheet - it would freeze the button's text colour at apply time (A4b).
+        # border: none -> setAutoRaise, font-weight: 600 -> apply_bold, padding -> minimum height.
+        toggle.setAutoRaise(True)
+        apply_bold(toggle)
+        toggle.setMinimumHeight(toggle.sizeHint().height() + 4)
         toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         unassign = QPushButton("Unassign")
         unassign.clicked.connect(partial(self._unassign, session.session_uid))
