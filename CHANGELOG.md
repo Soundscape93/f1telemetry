@@ -19,6 +19,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.8.1 — 2026-08-18
+
 ### Changed
 - **Headings are now one consistent size across the app.** Four of them were sized in a different
   unit to everything else, which quietly made them larger: the **Help** page title and the
