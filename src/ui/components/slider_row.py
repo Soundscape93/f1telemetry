@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_bold
 
 # --- slider rail + value-marker styling ------------------------------
 _RAIL_H = 6         # slider rail thickness (px)
@@ -98,19 +98,19 @@ class SetupSliderRow(QWidget):
         min_label = QLabel(min_text)
         min_label.setFixedWidth(EDGE_W)
         min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        min_label.setStyleSheet("MUTED_TEXT_QSS")
+        min_label.setStyleSheet(MUTED_TEXT_QSS)
 
         bar = SliderMarkerBar(fraction)
 
         max_label = QLabel(max_text)
         max_label.setFixedWidth(EDGE_W)
         max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        max_label.setStyleSheet("MUTED_TEXT_QSS")
+        max_label.setStyleSheet(MUTED_TEXT_QSS)
 
         value_label = QLabel(value_text)
         value_label.setFixedWidth(VALUE_W)
         value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        value_label.setStyleSheet("font-weight: 600;")
+        apply_bold(value_label)
 
         row.addWidget(name_label)
         row.addWidget(min_label)

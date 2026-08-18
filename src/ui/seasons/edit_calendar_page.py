@@ -20,7 +20,7 @@ from ...domain.calendars import (
 )
 from ...protocol.reference import track_name
 from ..components.calendar_picker import CalendarPicker
-from ..style import MUTED_TEXT_QSS
+from ..style import MUTED_TEXT_QSS, apply_heading
 from .labels import season_title
 
 
@@ -52,7 +52,7 @@ class EditCalendarPage(QWidget):
         back = QPushButton("← Season")
         back.clicked.connect(self._cancel)
         self._title = QLabel()
-        self._title.setStyleSheet("font-size: 20px; font-weight: 600")
+        apply_heading(self._title, size_px=20)
         header.addWidget(back)
         header.addSpacing(12)
         header.addWidget(self._title)

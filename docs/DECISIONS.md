@@ -456,6 +456,30 @@ what would trigger revisiting it.
 - **PySide6 + PyQtGraph.** Chosen over a web stack / NiceGUI / DearPyGui for the analytics-heavy
   workload and the existing Python investment; the hosted-web future is uncertain and would be
   additive later, reusing the UI-agnostic domain/storage.
+- **Fonts go through `ui/style.py`, never through a stylesheet** *(decided 2026-08-15, A4)*.
+  Setting **any** stylesheet on a widget hands its painting to `QStyleSheetStyle`, which resolves
+  and *caches* a palette for that widget at apply time. A label styled only
+  `"font-size: 20px; font-weight: 600"` therefore freezes the **old theme's** default text colour
+  into itself — despite never asking for a colour — and the `unpolish`/`polish` pass in
+  `app._install_theme_refresh` does not force it to recompute. That was A4: a live light/dark
+  switch left every heading in the previous theme's colour until restart, in every release from
+  v0.3.0 to v0.8.0. So: **`apply_font` / `apply_heading` / `apply_bold`, and no stylesheet on a
+  widget whose text should follow the palette.** A stylesheet that sets `color:` **explicitly** is
+  fine and stays: the cached palette never reaches the text. `test/ui/test_styles.py` is the gate —
+  it fails on any font-bearing stylesheet that does not set a colour, so this cannot re-accumulate
+  silently. The helpers also settle `font-weight: 600` as `QFont.Weight.DemiBold`, never
+  `setBold(True)`, which is 700 and would thicken every heading in the app.
+- **UI text is sized in pixels, on one scale: 20px titles, 18px sub-headings, 14px body, 11px
+  small** *(decided 2026-08-15, alongside A4)*. A4 found 11 `px` sizes mixed with 4 `pt` ones, the
+  `pt` ones a leftover rather than a decision — and since 1pt is 1.333px at 96 DPI they rendered
+  *larger* than everything around them, which is how the Help page title ended up a quarter bigger
+  than every other page title. They were converted to the scale above, not to their DPI
+  equivalents, because matching pixel-for-pixel would have preserved the inconsistency in new
+  units. **`ui/style.py` offers no point-size path at all**: a second unit is precisely what let
+  the two drift apart, so re-adding one should require a reason good enough to write down here.
+  The gate fails on any `setPointSize` under `src/ui`, with one documented exemption —
+  `car_status_graphic.py`'s `QGraphicsSimpleTextItem` labels are scene-graph text transformed with
+  the view, not styled widget labels, so the widget scale does not apply to them.
 - **Single window; pages swap in a `QStackedWidget`; drill-downs are nested stacks.** Avoids a
   pile of top-level windows. Modal dialogs are fine for discrete actions (delete confirm, file
   picker); full surfaces are pages, not windows.
@@ -641,8 +665,19 @@ what would trigger revisiting it.
   an early black-box-on-hover artifact was fixed via the viewport `setStyleSheet`, not by disabling the glow.
   *Two Qt fill gotchas learned + relied on:* an open path is implicitly closed when filled (so genuine
   2-point straight strokes are fill-safe and may share a filled path, but a curved/kinked "open" shape must
-  live in `_OUTLINES`); and the `background: transparent` viewport shows through a too-faint fill, which is
+  live in `_OUTLINES`); and the viewport ground shows through a too-faint fill, which is
   why the floor fences use `_PANELS`' solid fill rather than the `_STRUCTURAL` wash.
+
+  **`_BACKGROUND` is a fixed dark grey, and until 2026-08-18 it was never applied at all** — the
+  stylesheet was a plain string containing the literal text `background: _BACKGROUND`, so Qt
+  dropped the declaration and the viewport had been effectively transparent for its whole life
+  (which is what the "gotcha" above was really describing). With the colour actually reaching the
+  widget, the *light* grey it named turned out to read badly: the whole point of the graphic is
+  neon-on-dark, and a pale slab washed the glow out. It is now `#0d1117`, the canvas colour of the
+  same palette family as `MUTED_TEXT` and this widget's tooltip — deliberately a step *darker* than
+  the tooltip's `#1c242e`, so the tooltip still reads as a surface floating above the panel rather
+  than merging into it. It stays **fixed rather than theme-derived** for the original reason: the
+  colour-coding must mean the same thing on a light and a dark desktop.
 - **2c colour thresholds are three separate rules, not one (with tyre temps keyed by compound).**
   Researched against F1 24/25 community data; where the game's exact values are undocumented we use a
   clearly-labelled tunable fallback. (1) **Monotonic wear/damage, tyre + engine:** reuse the existing HUD

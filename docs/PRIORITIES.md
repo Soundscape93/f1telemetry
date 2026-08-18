@@ -160,8 +160,9 @@ is in *Recently closed*.
   buys the least and risks the most. **It keeps its own P3 row** — closing Cycle 3 does *not* close
   the C block, and a deferred item with no row reads as a forgotten one.
 
-**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4**, then the E-block
-surfaces (E1/E2, E3, E5) in whatever order they earn.
+**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4** — **done
+2026-08-15**, less the five controls now tracked as **A4b** — then the E-block surfaces (E1/E2, E3,
+E5) in whatever order they earn.
 
 **C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
 after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
@@ -176,6 +177,14 @@ C8d entry in P3 for the full reasoning and for what brings it back.
   is: `colorSchemeChanged` fires on Ubuntu too, so most of it is verifiable on the dev box.
   **Its root cause was misdiagnosed in the docs until 2026-08-06** — see PACKAGING → Phase 1 known
   issues for the corrected mechanism and the measured scope.
+
+  **Done 2026-08-15**, on `fix/theme-switch-text-colour`. Re-measuring by AST first was worth it:
+  the real scope was **33 colour-freezing calls, not the recorded 27**, and the recorded figure was
+  not even counting font-only calls. 32 label sites moved to `QFont` behind named helpers in
+  `ui/style.py`; the fix also turned up two never-applied stylesheets (a missing `f` prefix in
+  `slider_row.py` and in `car_status_graphic.py`). A guard test now fails if a font-bearing
+  stylesheet without an explicit colour reappears, so this cannot silently come back the way it
+  accumulated. **A4b** carries the five remaining controls — see its row in P2.
 
 **Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
 surfaces: translating a UI that is still growing means translating it twice.
@@ -206,7 +215,8 @@ re-run under WAL on 2026-08-05 and passes.
 | B2 | League capture import from a shared folder | **done 2026-08-04** | ROADMAP → Capture compression; DECISIONS → Storage |
 | B3 | `recorded_by` is plumbed but never set | **done 2026-08-04** (one field on B2's import prompt) | ROADMAP → Capture compression |
 | B4 | Locate a moved capture by content hash | **done 2026-08-03** | ROADMAP → Capture compression; DECISIONS → Storage |
-| A4 | Windows light/dark switch leaves text miscoloured | open — **Cycle 4, first item** | PACKAGING → Phase 1 known issues |
+| A4 | Windows light/dark switch leaves text miscoloured | **done 2026-08-15** — Cycle 4; 32 of 37 sites, five controls left as **A4b** | PACKAGING → Phase 1 known issues |
+| A4b | The same freeze on five *controls*: sidebar, season cards, 2 collapse toggles, Compare button | open — Cycle 4, after the E-block unless it blocks something | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |

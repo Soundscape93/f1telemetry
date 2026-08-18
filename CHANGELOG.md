@@ -19,6 +19,40 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Changed
+- **Headings are now one consistent size across the app.** Four of them were sized in a different
+  unit to everything else, which quietly made them larger: the **Help** page title and the
+  **lap detail** title were bigger than the equivalent title on every other page, and now match.
+  Help's "Setup / Configuration" and "About" headings change by less than a pixel.
+
+### Fixed
+- **Switching the system between light and dark now recolours the text immediately.** Page titles,
+  headings and captions used to keep the *previous* theme's colour until the app was restarted —
+  the known issue carried in every release since v0.3.0.
+- **The setup panel's slider min/max labels are the muted grey they were always meant to be.** They
+  were never styled at all: the code passed the *name* of the colour setting instead of its value.
+- **The car-status graphic sits on its intended fixed light-grey background again**, so the
+  colour-coded parts read the same on a light and a dark theme. That background was being passed by
+  name rather than by value, so it never reached the widget.
+
+**Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
+or stored moved, so existing captures, sessions and standings are unaffected.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Switching the light/dark theme while the app is open still leaves **five controls** the wrong
+  colour: the left sidebar, the season cards, the two "collapse" toggles on Laps and the weekend
+  page, and the lap-detail **Compare** button. Their styling carries padding, borders and alignment
+  that a font setting cannot express, so they need individual replacements and are a deliberate
+  follow-up. Every title, heading, caption and body label now recolours live; restarting the app
+  still fixes the remaining five.
+- Dashboard, Sessions, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.8.0 — 2026-08-09
 
 **Re-ingest needed: no** — `PIPELINE_VERSION` is unchanged and nothing about how captures are read
