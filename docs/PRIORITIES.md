@@ -160,9 +160,22 @@ is in *Recently closed*.
   buys the least and risks the most. **It keeps its own P3 row** — closing Cycle 3 does *not* close
   the C block, and a deferred item with no row reads as a forgotten one.
 
-**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4** — **done
-2026-08-15**, with **A4b** closing the last controls on 2026-08-18 — then the E-block surfaces
-(E1/E2, E3, E5) in whatever order they earn.
+**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item was **A4** — **done
+2026-08-15**, with **A4b** closing the last controls on 2026-08-18. Both shipped as **v0.8.1**
+(label `patch`, A4 + A4b alone), released on its own rather than grouped: everything behind it is
+large, so grouping would have held a five-release-old known issue behind a multi-week rework.
+
+**The rest of Cycle 4 is the E-block, and its order is now decided — 2026-08-18: E1/E2 → E3 → E5.**
+Not "in whatever order they earn", which is what this line used to say. These three are what make
+this a *full app* rather than one with placeholder sidebar entries, and **E1/E2 is next** —
+picked up in its own session, deliberately not the same one that closed A4.
+
+**A6 and E7 are explicitly held until the E-block is complete — decided 2026-08-18.** Neither is
+dropped and neither is forgotten, which is why this is written down: A6 reads as due (it is
+"new 2026-08-08" and "pairs naturally with A5"), and E7 has a small, tempting remainder. But
+recorder observability and a constant-range verification are **polish on a working app**, while
+Dashboard, Sessions, Analytics and Bug report are still placeholders a user can click into. App
+completeness first; instrument it afterwards.
 
 **C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
 after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
@@ -219,7 +232,11 @@ re-run under WAL on 2026-08-05 and passes.
 | A4 | Windows light/dark switch leaves text miscoloured | **done 2026-08-15** — Cycle 4; 32 of 37 sites, five controls left as **A4b** | PACKAGING → Phase 1 known issues |
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
-| E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
+| E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
+| E1 | Sessions surface | open — **Cycle 4, next item**, with E2 inside it | ROADMAP → Other surfaces |
+| E2 | Deleted-sessions manager | open — **Cycle 4, inside E1**; store side already built | ROADMAP → Other surfaces |
+| E3 | Analytics surface | open — **Cycle 4, after E1/E2** | ROADMAP → Other surfaces |
+| E5 | Bug report page | open — **Cycle 4, last of the E-block** | ROADMAP → Other surfaces |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -401,6 +418,27 @@ up opportunistically rather than scheduled.
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 ## Recently closed
 
+- **A4 + A4b — the live light/dark switch, and the guard that stops it coming back.** A4 done
+  2026-08-15 on `fix/theme-switch-text-colour`, A4b done 2026-08-18; **shipped together as
+  v0.8.1**, the first items of Cycle 4 and the end of a known issue carried in **every release
+  since v0.3.0**.
+  **Re-measuring by AST before touching anything is what made it tractable**, and is the reusable
+  lesson: the real scope was **33 colour-freezing calls, not the 27 the docs recorded**, and the
+  recorded figure had not even been counting the same thing. 32 label sites moved to `QFont`
+  behind named helpers in `ui/style.py`; A4b carried the five remaining **controls** (sidebar plus
+  three buttons), and the season card was **measured and then deliberately left as it was**.
+  **The root cause had been misdiagnosed in the docs until 2026-08-06** and the corrected
+  mechanism is the thing worth not re-deriving: setting *any* stylesheet hands a widget to
+  `QStyleSheetStyle`, which caches a palette **at apply time**, so a label styled only
+  `font-size` carries the old theme's text colour despite never asking for a colour. No
+  palette-derived colour exists anywhere in the codebase.
+  **Two never-applied stylesheets fell out of the work** — a missing `f` prefix in
+  `slider_row.py` and in `car_status_graphic.py`, so the setup panel's min/max labels had never
+  been muted and the car-status background had never been set. Both were passing the *name* of a
+  colour setting instead of its value, which is a bug class worth recognising on sight.
+  **A guard test now fails if a font-bearing stylesheet without an explicit colour reappears**, so
+  this cannot silently re-accumulate the way it did over five releases. `MUTED_TEXT_QSS` stays
+  styled on purpose — its `#8b949e` is deliberately fixed and reads on both grounds.
 - **Kill mid-record → recovers on next launch. Verified 2026-08-09** during the v0.8.0 clean-test
   runs, where it is a checklist item. It had been open since 2026-08-07 only because **Windows
   Sandbox cannot record** (a VM with internet but no route to the home network, so the PS5 never
@@ -787,15 +825,18 @@ up opportunistically rather than scheduled.
 
 ## Deferred, with reasons
 
-- **E1 Sessions surface + E2 deleted-sessions manager → after Cycle 3.** Not the small view it
-  looks like: it means building the Sessions view, linking parts of it to the Laps view, and then
-  *reworking the existing Seasons view*, which would inherit data from both. That is a
-  cross-surface rework, so it waits until the release process is settled. (E2's store side is
-  already done — `deleted_uids` / `is_deleted` / `restore` — so only its UI is pending, and it
-  most likely lives inside E1.)
-- **E3 Analytics → after Cycle 3.** Large, and it wants a season of accumulated data behind it.
-- **E5 Bug report page → after Cycle 3.** Currently a placeholder in `_SECTIONS`; most of what it
-  would do (open logs, show version) the Help page already does.
+- **E1/E2, E3 and E5 are no longer deferred — moved into Cycle 4 on 2026-08-18.** Their stated
+  reason here was "after Cycle 3", and Cycle 3 is closed, so leaving the project's *next* item
+  filed under *Deferred* was reading as forgotten. They now have P2 rows and an order. What was
+  written here is still true of the work and is worth keeping: **E1/E2 is not the small view it
+  looks like** — it means building the Sessions view, linking parts of it to the Laps view, and
+  then *reworking the existing Seasons view*, which would inherit data from both, so it is a
+  cross-surface rework rather than one page. **E2's store side is already built**
+  (`deleted_uids` / `is_deleted` / `restore`), so on paper only its UI is pending and it most
+  likely lives inside E1 — **verify that against the code before planning around it.** **E3** is
+  large and wants a season of accumulated data behind it. **E5** is a placeholder in `_SECTIONS`
+  and most of what it would do (open logs, show version) the Help page already does, which is why
+  it is last rather than first.
 - **B5 reconstructed-points Option 3 → P3.** Less urgent than it looked: A2 shows the Final
   Classification arrives 5–6× per session, so reconstruction is rare, and v0.4.2 removed its main
   cause. Belongs with league-management (per-league scoring tables) when that happens.
