@@ -21,6 +21,7 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write            # pushes the tag
     outputs:
@@ -61,6 +62,10 @@ jobs:
 
   # Called directly instead of relying on the tag push: a tag pushed with the default
   # GITHUB_TOKEN does NOT trigger `on: push: tags` workflows (GitHub's recursion guard).
+  #
+  # No timeout-minutes: GitHub does not allow it on a job that `uses:` a reusable workflow. The
+  # bound lives on each job inside release.yml instead - which is why the apt hardening had to go
+  # there rather than being wrapped from this side.
   release:
     needs: tag
     if: needs.tag.outputs.tag != ''

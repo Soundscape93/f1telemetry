@@ -36,6 +36,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.base.ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write            # pushes the bump commit to the PR's head branch
     steps:
