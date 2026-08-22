@@ -10,7 +10,6 @@ hydrates a single lap's trace on demand.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from functools import partial
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -32,17 +31,8 @@ from ...domain.season import slot_for_session
 from ...protocol.reference import track_name
 from ..components import cell, clear_layout, fit_table_height, tidy_table
 from ..components.tyres import tyre_pixmap
-from ..formatting import format_lap_time, slot_label
+from ..formatting import format_lap_time, recorded_label, slot_label
 from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
-
-
-def _recorded_label(recorded_at: datetime | None) -> str:
-    """Local-time 'YYYY-MM-DD HH:MM' for a recorded_at (UTC-aware -> local), or en em dash."""
-    if recorded_at is None:
-        return "—"
-    if recorded_at.tzinfo is not None:
-        recorded_at = recorded_at.astimezone()
-    return recorded_at.strftime("%Y-%m-%d %H:%M")
 
 
 class OverviewPage(QWidget):
@@ -150,7 +140,7 @@ class OverviewPage(QWidget):
 
         count = f"{len(laps)} lap" + ("s" if len(laps) != 1 else "")
         best_str = f"  ·  best {format_lap_time(best)}" if best else ""
-        meta = QLabel(f"{count}{best_str}  ·  {_recorded_label(session.recorded_at)}")
+        meta = QLabel(f"{count}{best_str}  ·  {recorded_label(session.recorded_at)}")
         meta.setStyleSheet(MUTED_TEXT_QSS)
         header.addWidget(meta)
         vbox.addLayout(header)

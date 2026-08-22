@@ -23,6 +23,11 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   read past it. It is stored from now on, and appears wherever a session is summarised. Sessions
   already in your database show it only after a re-ingest, and a session with no AI in it has no
   difficulty to show.
+- **The Sessions page is real.** It was a placeholder; it now lists every session you've
+  recorded, newest first, as foldable cards you can filter by track or session. Expanding one
+  shows what the session was, its winner, its fastest lap and the AI difficulty it ran at, and
+  opening it shows the full classification with the capture it came from. Sessions can be
+  deleted from here too, with the same guard the weekend picker uses.
 
 ### Fixed
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a

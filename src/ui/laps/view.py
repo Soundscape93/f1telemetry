@@ -45,11 +45,6 @@ class LapsView(QWidget):
         if self._stack.currentWidget() is self._overview:
             self._overview.reload()
 
-    def refresh(self) -> None:
-        """Re-query the overview if it's the visible page (called after an ingest completes)."""
-        if self._stack.currentWidget() is self._overview:
-            self._overview.reload()
-
     def invalidate_caches(self) -> None:
         """Drop derived caches after an ingest/re-ingest changed the stored laps.
         

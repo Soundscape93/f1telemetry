@@ -6,7 +6,6 @@ of assignable captures filtered to the round's track. Roster-aware for LEAGUE se
 
 from __future__ import annotations
 
-from datetime import datetime
 from functools import partial
 
 from PySide6.QtCore import Qt, Signal
@@ -36,22 +35,9 @@ from ..components import (
     display_name_fn,
     tidy_table,
 )
-from ..formatting import slot_label
+from ..formatting import recorded_label, slot_label
 from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
 from .labels import season_title
-
-
-def _recorded_label(recorded_at: datetime | None) -> str:
-    """Local-time 'YYYY-MM-DD HH:MM' for a session's recorded_at, or an em dash if unset.
-
-    ``recorded_at`` is stored as UTC; a tz-aware value is converted to local time, while a
-    naive value (older rows) is shown as-is.
-    """
-    if recorded_at is None:
-        return "—"
-    if recorded_at.tzinfo is not None:
-        recorded_at = recorded_at.astimezone()
-    return recorded_at.strftime("%Y-%m-%d %H:%M")
 
 
 class WeekendPage(QWidget):
@@ -311,7 +297,7 @@ class WeekendPage(QWidget):
             self._capture_table.setItem(i, 0, first)
             self._capture_table.setItem(i, 1, cell(track_name(session.track_id)))
             self._capture_table.setItem(i, 2, cell(str(drivers)))
-            self._capture_table.setItem(i, 3, cell(_recorded_label(session.recorded_at)))
+            self._capture_table.setItem(i, 3, cell(recorded_label(session.recorded_at)))
             self._capture_table.setItem(i, 4, cell(str(session.session_uid)))
 
     @staticmethod
