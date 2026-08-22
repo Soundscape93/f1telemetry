@@ -159,6 +159,32 @@ class SeasonStore:
                 .order_by(SeasonAssignmentRow.round_number)
             ).all()
             return [(r.round_number, int(r.session_uid)) for r in rows]
+
+    def assignment_for(self, session_uid: int) -> tuple[int, int] | None:
+        """The ``(season_id, round_number)`` a session is placed in, or None if unassigned.
+        
+        The reverse of ``assignments_for_season``: that answers "what is in this season?", this
+        answers "where does this session live?" - the question a delete guard, and any
+        sessions-centric surface, has to ask. A session has at most one assignment
+        (``assign_session`` moves rather than duplicates), so this is a single row.
+        """
+        with self._Session() as db:
+            row = db.scalar(
+                select(SeasonAssignmentRow).where(
+                    SeasonAssignmentRow.session_uid == str(session_uid))
+            )
+            return None if row is None else (row.season_id, row.round_number)
+
+    def assigned_uids(self) -> set[int]:
+        """Every session uid placed in a round, across **all** seasons.
+        
+        The capture picker needs this rather than on season's assignments: a session assigned
+        to another round - or another season entirely - must still be assigned when it turns
+        up in a diffrent round's candidate list. That it did not is the bug this fixes.
+        """
+        with self._Session() as db:
+            return {int(uid) for uid in
+                    db.scalars(select(SeasonAssignmentRow.session_uid)).all()}
         
     # --- combined read -----------------------------------------------------------------
 
