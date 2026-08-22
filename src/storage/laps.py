@@ -72,7 +72,7 @@ class LapStore:
                     write_trace(str(self._trace_dir / trace_rel), lap.trace)
                 db.add(self._to_row(uid, lap, trace_rel))
 
-    def delete(self, session_uid: str) -> None:
+    def delete(self, session_uid: str) -> int:
         """Delete a session's laps (rows + trace files). Returns how many lap rows were removed."""
         uid = str(session_uid)
         session_dir = self._trace_dir / uid

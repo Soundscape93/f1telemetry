@@ -24,6 +24,17 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   already in your database show it only after a re-ingest, and a session with no AI in it has no
   difficulty to show.
 
+### Fixed
+- **Deleting a session can no longer remove one that is assigned to a season round.** From a
+  round's capture picker it was possible to right-click a session belonging to a *different*
+  round — same track, or with *Show captures from all tracks* ticked — and delete it, which
+  silently dropped that result from the standings. Sessions already placed in a round are now
+  marked in the picker, and deleting one is refused with a message naming the season and round
+  to unassign it from first.
+- **Deleting a session now removes its laps and their saved traces too.** They were left behind
+  on every delete: invisible in the app, but still in the database and still taking up disk
+  space under `lap_traces/`.
+
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 3. The new column is added silently on
 startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty stored
 until the guided re-ingest re-reads their captures. Everything else about them is unaffected.

@@ -91,8 +91,13 @@ class SessionStore:
         results are removed; the underlying capture in ``captures/`` is kept. A tombstone is
         recorded so re-ingesting that capture skips this session rather than resurrecting it
         (see ``DeletedSessionRow`` / ``restore``). Any season assignment for this uid lives in
-        the separate ``season_assignments`` table (no FK) and is not touched here - callers
-        delete only unassigned sessions, so there is nothing to clean up.
+        the separate ``season_assignments`` table (no FK) and is not touched here.
+
+        **This is the primitive, not the guard**: it will happily delete a session that is
+        assigned to a round, and it does not remove the session's laps or traces. Callers go
+        through ``pipeline.delete_session``, which refuses an assigned session and takes the
+        laps with it. This used to claim "callers delete only unassigned sessions, so there is
+        nothing to clean up" - an invariant the UI did not actually keep.
         """
         with self._Session.begin() as db:
             row = db.get(SessionRow, str(session_uid))

@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
     
     def _build_pages(self) -> None:
         """Build the sidebar and the stacked content area with pages for each section."""
-        self._seasons_view = SeasonsView(self._season_store, self._session_store)
+        self._seasons_view = SeasonsView(self._season_store, self._session_store, lap_store=self._lap_store)
         self._stack.addWidget(_PlaceholderPage(
             "Dashboard", "The recent sessions, laps, and analytics will be shown here."))
         self._stack.addWidget(self._seasons_view)

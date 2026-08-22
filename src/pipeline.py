@@ -827,3 +827,67 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
     )
     log.info("Import finished: %s", summary)
     return summary
+
+
+# --- deleting a stored session --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DeleteOutcome:
+    """What one guarded delete did, or refused to do and why."""
+
+    deleted: bool
+    session_uid: int
+    season_id: int | None = None
+    round_number: int | None = None
+    laps_removed: int = 0
+
+    @property
+    def refused_assigned(self) -> bool:
+        """Whether the delete was refused because the session sits in a season round.
+        
+        The one case a caller must tell apart fom an ordinary miss: both leave ``deleted``
+        False, but only this one is worth reporting - and only this one is fixable by the user
+        (unassing, then delete).
+        """
+        return not self.deleted and self.season_id is not None
+
+
+def delete_session(session_uid: int, session_store: SessionStore, season_store, * ,
+                   lap_store=None) -> DeleteOutcome:
+    """Delete a stored session and its laps, refusing while it is assigned to a season round.
+
+    The single write point for deleting a session, and the enforcer of the invariant
+    ``SessionStore.delete``'s docstring used to merely assert. It lives here rather than on the
+    store because the guard needs the *season* aggregate, and a store must not import a sibling
+    store (repository-per-aggregate) - so this sits with the other multi-store orchestration,
+    beside ``reingest_all`` and ``import_captures``.
+
+    **Refuses rather than cleans up.** ``season_assignments`` is deliberately not FK'd to
+    ``sessions`` (core invariant #4) precisely so a re-ingest cannot wipe a manual round
+    placement; a delete must not either. Dropping the assignment on the way out would silently
+    remove a result from the standings, and delete's whole premise - the capture survives, so
+    the session can come back - would not hold for the placement, which nothing would restore.
+    Refusing costs the user one Unassign click and is reversible; cleanup is not.
+
+    Laps go with the session. Nothing else calls ``LapStore.delete``, so without this a deleted
+    session left its lap rows and its Parquet traces under ``lap_traces/<uid>/`` forever -
+    invisible, because the laps overview iterates *stored* sessions, but still on disk.
+    ``lap_store`` is optional only so a caller that has none (tests, a future headless path) can
+    still delete; pass it wherever one exists.
+    """
+    uid = int(session_uid)
+    placement = season_store.assignment_for(uid)
+    if placement is not None:
+        season_id, round_number = placement
+        log.info("Refusing to delete session %s: assigned to season %s round %s", 
+                 uid, season_id, round_number)
+        return DeleteOutcome(deleted=False, session_uid=uid,
+                             season_id=season_id, round_number=round_number)
+
+    if not session_store.delete(uid):
+        log.info("Delete: no stored session %s", uid)
+        return DeleteOutcome(deleted=False, session_uid=uid)
+
+    laps_removed = lap_store.delete(str(uid)) if lap_store is not None else 0
+    log.info("Deleted session %s (%d lap row(s), traces removed)", uid, laps_removed)
+    return DeleteOutcome(deleted=True, session_uid=uid, laps_removed=laps_removed)
