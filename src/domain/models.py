@@ -313,6 +313,9 @@ class SessionResult:
         game_mode: int          # raw mode id; see reference.game_mode_name (used to bucket sessions into mode-based windows)
         player_vehicle_index: int   # which car is in the roster is the player's
 
+        # AI difficulty rating (0..110) from the Session packet; 0 means "not captured" - either stored before PIPELINE_VERSION 3 or a session with no AI.
+        ai_difficulty: int = 0
+
         # The ordered session types that make up this weekend (from the Session packet's
         # weekend_structure array, truncated to num_sessions_in_weekend). Empty for rows saved
         # before it was captured. Both the Sprint Race and the Grand Prix report session_type

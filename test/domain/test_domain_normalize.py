@@ -16,6 +16,8 @@ from f1telemetry.src.domain.normalizer import (
     normalize_session,
 )
 from f1telemetry.src.protocol.enums import Formula, ResultStatus, SessionType, Weather
+from f1telemetry.src.protocol.v2025 import structs as s25
+from f1telemetry.src.protocol.v2026 import structs as s26
 
 
 def _header(**kwargs) -> SimpleNamespace:
@@ -58,13 +60,14 @@ class NormalizeParticipantsTest(unittest.TestCase):
 
 class NormalizeSessionTest(unittest.TestCase):
     """Test cases for normalizing session data."""
-    def _packet(self):
+    def _packet(self, packet_format=2026, ai_difficulty=95):
         """Build a fake session packet for testing."""
         return SimpleNamespace(
-            header=_header(session_uid=12345, packet_format=2026, player_car_index=3),
+            header=_header(session_uid=12345, packet_format=packet_format, player_car_index=3),
             season_link_identifier=100, weekend_link_identifier=200, session_link_identifier=300,
             track_id=7, session_type=int(SessionType.RACE), formula=int(Formula.F1_MODERN),
             weather=int(Weather.CLEAR), game_mode=28, total_laps=5, track_length=5891,
+            ai_difficulty=ai_difficulty,
             # fixed-length 12 array in the wire struct; only the first num_sessions are real
             num_sessions_in_weekend=9,
             weekend_structure=[1, 10, 11, 12, 15, 5, 6, 7, 15, 0, 0, 0],
@@ -100,6 +103,28 @@ class NormalizeSessionTest(unittest.TestCase):
         s = normalize_session(self._packet())
         self.assertEqual(s.track_length_m, 5891)
         self.assertEqual((s.sector2_start_m, s.sector3_start_m), (1234.5, 3456.0))
+
+    def test_ai_difficulty_carried_from_both_formats(self):
+        """AI difficulty reaches the scaffold, and reads the same in 2025 and 2026 streams."""
+        for packet_format in (2025, 2026):
+            with self.subTest(packet_format=packet_format):
+                s = normalize_session(self._packet(packet_format=packet_format, ai_difficulty=95))
+                self.assertEqual(s.ai_difficulty, 95)
+
+    def test_ai_difficulty_zero_survives(self):
+        """A no-AI session reports 0; it is carried as 0, which readers treat as 'not captured'."""
+        self.assertEqual(normalize_session(self._packet(ai_difficulty=0)).ai_difficulty, 0)
+
+    def test_ai_difficulty_named_identically_in_both_wire_structs(self):
+        """What makes the format-independence real: neither struct renames the field.
+
+        normalize_session reads ``packet.ai_difficulty`` with no format branch, so a rename on
+        either side would fail at ingest, not here - unless this test catches it first.
+        """
+        for structs in (s25, s26):
+            with self.subTest(structs=structs.__name__):
+                names = {name for name, *_ in structs.PacketSessionData._fields_}
+                self.assertIn("ai_difficulty", names)
 
 
 class BuildTraceTest(unittest.TestCase):
