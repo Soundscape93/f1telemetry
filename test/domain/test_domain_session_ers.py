@@ -94,6 +94,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 game_mode=28,
                 total_laps=2,
                 num_sessions_in_weekend=0,
+                ai_difficulty=95,
                 weekend_structure=[0] * 12,
                 track_length=5000.0,
                 sector_2_lap_distance_start=1500.0,

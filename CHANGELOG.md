@@ -18,6 +18,16 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+### Added
+- **Sessions now record the AI difficulty they were run at.** The game has always sent it; the app
+  read past it. It is stored from now on, and appears wherever a session is summarised. Sessions
+  already in your database show it only after a re-ingest, and a session with no AI in it has no
+  difficulty to show.
+
+**Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 3. The new column is added silently on
+startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty stored
+until the guided re-ingest re-reads their captures. Everything else about them is unaffected.
+
 
 ## v0.8.1 — 2026-08-18
 

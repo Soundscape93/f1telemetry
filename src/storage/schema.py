@@ -42,6 +42,8 @@ class SessionRow(Base):
     total_laps: Mapped[int]           # total laps in the session
     game_mode: Mapped[int]            # raw mode id -> reference.game_mode_name; buckets sessions into mode-based windows
     player_vehicle_index: Mapped[int]  # index of the player's vehicle in the participants list
+    # AI difficulty rating (0..110) from the Session packet; 0 means "not captured" - either stored before PIPELINE_VERSION 3 or a session with no AI.
+    ai_difficulty: Mapped[int] = mapped_column(default=0, server_default=text("'0'"))
     # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
     # (both report session_type 15). Additive column - [] for rows saved before it existed.
     weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))

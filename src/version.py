@@ -17,4 +17,5 @@ __version__ = "0.8.1"
 # Bump only when ingest output changes (see docs/PACKAGING.md "DB migration & pipeline-version").
 # 2: classification entries carry ``is_ai`` (AI vs human), so league standings stop confusing
 # drivers with the same race number
-PIPELINE_VERSION = 2
+# 3: sessions carry ``ai_difficulty`` from the Session packet; rows ingested before this read 0
+PIPELINE_VERSION = 3

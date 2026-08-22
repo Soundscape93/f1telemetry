@@ -233,8 +233,8 @@ re-run under WAL on 2026-08-05 and passes.
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
-| E1 | Sessions surface | open — **Cycle 4, next item**, with E2 inside it | ROADMAP → Other surfaces |
-| E2 | Deleted-sessions manager | open — **Cycle 4, inside E1**; store side already built | ROADMAP → Other surfaces |
+| E1 | Sessions surface | open — **planned in full 2026-08-20**, not started; with E2 inside it | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E2 | Deleted-sessions manager | open — **planned in full 2026-08-20**, inside E1; store side partly built | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
 | E3 | Analytics surface | open — **Cycle 4, after E1/E2** | ROADMAP → Other surfaces |
 | E5 | Bug report page | open — **Cycle 4, last of the E-block** | ROADMAP → Other surfaces |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
