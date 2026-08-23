@@ -23,8 +23,10 @@ from f1telemetry.src.ui.formatting import (
     race_winner_summary,
     recorded_label,
     session_fastest_lap,
+    session_leader,
     weather_label,
 )
+from f1telemetry.test.domain.test_seasons import make_session
 
 
 def _entry(position=1, status=ResultStatus.FINISHED, total=0.0, penalties=0, laps=57, best=0,
@@ -295,6 +297,38 @@ class RecordedLabelTest(unittest.TestCase):
         """Stored as UTC; a tz-aware value must be shown in the viewer's local time."""
         utc = datetime(2026, 8, 9, 21, 2, tzinfo=timezone.utc)
         self.assertEqual(recorded_label(utc), utc.astimezone().strftime("%Y-%m-%d %H:%M"))
+
+class SessionLeaderTest(unittest.TestCase):
+    """Every session has a 'winner' - a practice or quali session's is whoever ended up P1."""
+
+    def _session(self, name="Leclerc"):
+        leader = _entry(position=1)
+        leader.driver_name = name
+        return SimpleNamespace(classification=SimpleNamespace(winner=leader))
+
+    def test_returns_the_leader(self):
+        self.assertEqual(session_leader(self._session("Leclerc")), "Leclerc")
+
+    def test_no_classification_is_none(self):
+        self.assertIsNone(session_leader(SimpleNamespace(classification=None)))
+
+    def test_empty_classification_is_none(self):
+        empty = SimpleNamespace(classification=SimpleNamespace(winner=None))
+        self.assertIsNone(session_leader(empty))
+
+    def test_name_of_is_injectable(self):
+        self.assertEqual(session_leader(self._session("Player"), name_of=lambda e: "Kevin"),
+                         "Kevin")
+
+    def test_works_on_a_real_non_race_classification(self):
+        """Against the real dataclass rather than a stand-in.
+
+        ``Classification.winner`` is ``entries[0]``, and nothing in ``session_leader`` branches
+        on session type - which is the whole point of the helper. This is also the test that
+        would have caught the stand-in drifting from the real object's interface.
+        """
+        quali = make_session(1, SessionType.QUALIFYING_3, winner="Pole")
+        self.assertEqual(session_leader(quali), "Pole")
 
 
 if __name__ == "__main__":

@@ -288,3 +288,18 @@ def session_fastest_lap(session, name_of=lambda entry: entry.driver_name) -> str
         return None
     best = min(timed, key=lambda entry: entry.best_lap_time_ms)
     return f"{name_of(best)} — {format_lap_time(best.best_lap_time_ms)}"
+
+
+def session_leader(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """The name at the top of the classification, whatever the session type.
+    
+    Every session has one: a race has a winner, and a practice or qualifying session has whoever
+    ended up P1. ``Classification.winner`` is already "the first-place entry" rather than
+    anything race-specific, so this is a thin wrapper over it - what a caller *labels* it is the
+    caller's business. Distinct from :func:`race_winner_summary`, which is races-only and adds
+    the team, and which the seasons detail page still wants.
+    """
+    if session.classification is None:
+        return None
+    leader = session.classification.winner
+    return None if leader is None else name_of(leader)
