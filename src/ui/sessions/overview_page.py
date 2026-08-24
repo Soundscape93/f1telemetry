@@ -250,7 +250,7 @@ class OverviewPage(QWidget):
         message (which names the season and round) has already been shown by the shared helper.
         """
         if not confirm_and_delete(self, session_uid, self._sessions, self._seasons,
-                                  lap_store=self._laps):
+                                  lap_store=self._lap_store):
             return
         self.sessions_changed.emit()
         self.reload()
