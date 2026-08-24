@@ -199,6 +199,11 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
   `LapTrace` analytics stay desktop-bound regardless of any web future.
+  **Fuel-corrected lap time lands here, not on the session detail** *(2026-08-24)*: E1's chart shows
+  raw *observed* lap time by stint, which mixes tyre degradation with fuel burn-off. Correcting for
+  it is a derived metric needing a track/car-dependent kg→seconds coefficient and an uncertainty
+  story — Analytics' remit. The input is already stored (`fuel_in_tank`, per lap, fully populated),
+  so this is analysis work, not ingest work.
 - **Dashboard** — recent sessions / summaries (the record header already lives above it).
 
 ## Packaging (before sharing a built app with colleagues)

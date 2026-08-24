@@ -237,11 +237,13 @@ re-run under WAL on 2026-08-05 and passes.
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
-| E1 | Sessions surface | **in progress** — planned 2026-08-20; branches 0-1 merged, branch 2 on `feature/sessions-surface` | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E1 | Sessions surface | **in progress** — branches 0-1 merged; **detail-view layout specified 2026-08-24**, branch 2 split into 2a (built) / 2b / 2c | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
 | E2 | Deleted-sessions manager | open — **planned in full 2026-08-20**, inside E1 (branches 3-4, not started); store side partly built | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
 | E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.8.2 release** so it shares one re-ingest | the note below |
+| E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
+| E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -267,6 +269,44 @@ forecast no longer covers the transition that actually happened; and they are a 
 across a session. Ground truth, no session-type filtering, no accuracy caveat, and it sets up a
 real weather timeline later. Dry is `CLEAR` / `LIGHT_CLOUD` / `OVERCAST`, wet is `LIGHT_RAIN` /
 `HEAVY_RAIN` / `STORM`; both present → mixed, otherwise keep the snapshot.
+
+**E15 — the Event packets are already in every capture, unparsed.** Found 2026-08-24 while
+checking what the E1 session detail view could actually show. `session/assembler.py` dispatches on
+ten packet ids and **`PacketId.EVENT` is not one of them**, so every event the game sends is
+decoded past. The recorder writes *every* datagram unfiltered, so the data is on disk already —
+decoding one real capture gives:
+
+    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10 · SEND/SSTA/RTMT 5 …
+
+`OVTK` carries the overtaking and overtaken vehicle indices; `PENA` carries penalty type,
+infringement, vehicle index, **lap number** and time. `reference.PENALTY_NAMES` and
+`INFRINGEMENT_NAMES` already exist and are unused — the *display* half is written.
+
+**This is recoverable retroactively**: a re-ingest of existing captures fills it in, with no
+re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should **land with E14** and
+share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
+`Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
+
+**Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
+E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates
+tyre degradation with fuel burn-off (~1.1-1.3 kg/lap, so later stints run lighter and look faster).
+E1 states the caveat rather than correcting for it — a correction needs a track- and car-dependent
+kg→seconds coefficient, and guessing one silently would replace an honest raw number with an
+estimate.
+
+**No ingest work is needed**: `fuel_in_tank` is already stored per lap, 406 of 406 populated. What
+it needs is the estimation method and a way to show its uncertainty, which is Analytics' remit, not
+session detail's. See DECISIONS → UI and ROADMAP → Analytics.
+
+**E16 — game-mode ids for 2026.** `game_mode 78` is **Driver Career '26**, established from
+observation 2026-08-24: every "Driver Career with the 2026 cars" recording carries it, checked in
+the database against the session detail view. It is **not in the UDP specification** — EA has not
+documented the '26 mode ids — so `GAME_MODE_NAMES` renders it `Unknown game mode (78)` today.
+Add it, labelled as observed rather than specified.
+
+**Still unknown: My Team '26**, because there is no My Team '26 recording yet. Add that id the
+same way once one exists. For contrast, Grand Prix Multiplayer "Championship" (the league, also on
+2026 cars) already reports `Online Custom` correctly — so only the *career* modes shifted.
 
 Shaped exactly like the `ai_difficulty` branch: assembler → `SessionResult` → `SessionRow` → both
 mappings → **`PIPELINE_VERSION` 3→4**. **Before the release**: `## Unreleased` already says
