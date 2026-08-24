@@ -765,7 +765,7 @@ what would trigger revisiting it.
   **(b) Stint-relative, not absolute race lap.** Degradation is a function of stint age, so every
   stint restarts at stint lap 1 and the axis runs to the longest stint; that is what makes two
   compounds comparable. The real race lap goes in the tooltip.
-- **On the pace chart, out-laps are plotted but excluded from the y-axis range** *(decided
+- **The pace chart's y-range excludes both pit laps and is capped at 8 s** *(decided
   2026-08-24)*. This is what makes the stint-relative axis viable at all. Measured across every
   50%-distance race in the database, the first lap of each *post-pit* stint carries **+14 to +37 s**
   (the game bundles the pit loss into it). On an absolute axis those spikes sit at different x
@@ -775,6 +775,29 @@ what would trigger revisiting it.
   marker with the true time in the tooltip — measured data is never hidden, only kept from
   dictating the scale. **Stint 1 lap 1 is not excluded**: it is a race start, a much milder
   +2 to +3 s, and sometimes faster than the stint median.
+
+  **Revised 2026-08-24, during implementation, on two further measurements.**
+  **(a) The in-lap comes out of the range too.** Measured across every stint in the database, an
+  in-lap runs a median **+3.68 s** over its own stint median (min −0.88, max +32.15) — the same
+  order as the 1–3 s degradation signal the chart exists to show. On Shanghai Race 2 the in-lap
+  (lap 13, 1:44.165 against a 1:39.004 next-worst) is the single lap setting the whole scale;
+  removing it takes that chart from a 9.7 s span to 4.1 s. Unlike the out-lap, which is structural
+  and certain, the in-lap is **inferred**: a stint ending immediately before the next one begins
+  means the stop happened between them. The contiguity check makes it conservative — where laps are
+  missing around the stop it declines to claim, as in `11708585…`, whose stint 2 ends at lap 18
+  while the next opens at 22 — so it can under-report but never mislabel.
+  **(b) The remaining spread is capped at 8 s, anchored at the fastest lap.** No rule can classify
+  an incident lap, and they wreck the scale exactly as an out-lap does: one race here spans 49.7 s
+  on four laps in the 120–140 s range. Ordinary variance stays well inside 8 s across every session
+  measured, so the cap costs a consistent driver nothing — 23 of 34 chartable sessions sit under it
+  untouched — and rescues a chaotic one. It is anchored at the fast end because the fastest lap is
+  the reference every other lap is read against. The padding is taken from the capped span, not the
+  raw one, or a 40 s spread would burn a quarter of the window on dead air below the fastest lap.
+  The cost, stated: on Melbourne `14435457…` the cap clips the whole two-lap opening stint, whose
+  90.5/91.7 s laps sit ~10 s off a 80.8 s best — and that spread is mostly fuel burn-off, the very
+  thing the caption warns about. Every clipped lap is still plotted at the top edge with a triangle
+  marker and its real time in the tooltip: 33 of 375 timed laps (8.8%), of which 14 are out-laps
+  already off the scale by rule.
 - **The lap-time chart is "observed lap time by stint", and the fuel caveat is stated rather than
   corrected for** *(decided 2026-08-24)*. A stint-relative overlay conflates tyre degradation with
   **fuel burn-off**: the car sheds ~1.1-1.3 kg per lap, so a later stint is partly faster because it

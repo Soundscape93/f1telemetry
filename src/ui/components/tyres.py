@@ -36,6 +36,18 @@ _TYRE_EDGE = "#111114"
 _RIM = "#5a5a60"
 
 
+def compound_style(visual_compound: int | None) -> tuple[str, str] | None:
+    """The ``(letter, colour)`` for a visual compound, or None if it isn't one we know.
+
+    The public read of ``_COMPOUND_STYLE``, so everything needing the game's compound colours - the
+    tyre icon here, the session detail's stint charts - shares one table instead of redefining it.
+    The colour is a ``#rrggbb`` string, usable as a Qt colour or a pyqtgraph pen.
+    """
+    if visual_compound is None:
+        return None
+    return _COMPOUND_STYLE.get(int(visual_compound))
+
+
 def _draw(painter: QPainter, dim: float, letter: str, colour: str) -> None:
     """Paint one tyre into a ``dim``×``dim`` square."""
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -66,7 +78,7 @@ def tyre_pixmap(visual_compound: int, size: int = 22) -> QPixmap | None:
 
     Rendered at 2× and tagged with a device-pixel ratio so it stays crisp on HiDPI displays.
     """
-    style = _COMPOUND_STYLE.get(int(visual_compound))
+    style = compound_style(visual_compound)
     if style is None:
         return None
     letter, colour = style

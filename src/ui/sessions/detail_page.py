@@ -70,11 +70,26 @@ from ..style import (
     apply_bold,
     apply_heading
 )
+from .stint_charts import StintCharts
+from .tyre_stints import split_tyre_stints
 
 _MID_ROW_MAX_H = 500            # the Laps / Penalties row is capped; those two boxes scroll inside it
 _LAPS_TABLE_MAX_H = 440         # _MID_ROW_MAX_H less the box's heading and margins
 _ICON_SIZE = QSize(22, 22)          # the Laps box's compound icon, same as the laps overview
 _TRACK_MAP_MIN_H = 160          # enough for the outline to read at a glance, not enough to dominate
+_NO_STINTS = ("No tyre stint ran long enough to chart — a stint needs at least two laps on one set "
+              "of tyres.")
+# Stated, never silently corrected for. A stint-relative overlay conflates tyre degradation with
+# fuel burn-off, and the shared axis puts that difference exactly where a reader will credit it to
+# the tyre. A correction needs a track- and car-dependent kg->seconds coefficient, so picking one
+# here would swap an honest raw number for a confident estimate on a page whose job is "what
+# actually happened". Fuel-corrected lap time is an Analytics (E3) item (DECISIONS -> UI).
+_FUEL_CAVEAT = ("Observed lap times, not tyre performance: the car sheds roughly 1.1–1.3 kg of fuel "
+                "a lap, so a later stint is partly quicker because it is lighter, not only because "
+                "of the compound or the tyre's condition. No fuel correction is applied here. "
+                "The scale holds the closest 8 seconds to your fastest racing lap — laps into and "
+                "out of the pits are left out of it — so anything slower draws clipped at the top "
+                "edge; hover it for the real time.")
 
 
 class DetailPage(QWidget):
@@ -154,6 +169,7 @@ class DetailPage(QWidget):
         laps = self._stored_laps(session)
         self._body.addWidget(self._top_row(session, slot, label, laps))
         self._body.addWidget(self._middle_row(session, laps))
+        self._body.addWidget(self._charts_row(laps))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
@@ -178,6 +194,26 @@ class DetailPage(QWidget):
         return _row(_box("Laps", self._laps_table(session, laps)),
                     _box("Penalties", self._penalties_panel(session), scroll=True),
                     max_height=_MID_ROW_MAX_H)
+
+    def _charts_row(self, laps) -> QWidget:
+        """The stacked pace and tyre-life charts, under the laps.
+
+        One box rather than two: the charts share a single x-axis inside one pyqtgraph layout, so a
+        stint lap reads straight down from wear to pace, and two boxes would put a frame through the
+        middle of that. Uncapped in height - the widget fixes its own, and the page scrolls.
+
+        A session with no chartable stint gets an honest sentence instead of an empty plot: a single
+        flying lap in dry qualifying genuinely has no stint to draw.
+        """
+        stints = split_tyre_stints(laps)
+        if not stints:
+            return _box("Pace and tyre life", _muted_label(_NO_STINTS))
+        host = QWidget()
+        box = QVBoxLayout(host)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addWidget(StintCharts(stints))
+        box.addWidget(_muted_label(_FUEL_CAVEAT))
+        return _box("Pace and tyre life", host)
 
     # --- boxes -----------------------------------------------------------------------------------
     def _details_grid(self, session, slot, label: str, laps) -> QWidget:

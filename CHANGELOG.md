@@ -40,6 +40,16 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   now named instead of showing an unknown mode id.
 - **Circuit outline** in the details box, and the session type in the
   classification box title.
+- **The session detail page now charts pace and tyre life per stint.** Under your laps, two
+  full-width graphs share one stint-relative axis — tyre life above, observed lap time below — so
+  every stint restarts at stint lap 1 and two compounds can be read against each other directly.
+  Stints are worked out from the tyres themselves, so a set change shows up even where the game's
+  tyre-age counter is unreliable, and each point's tooltip carries the real lap number along with
+  the wear on all four wheels. Lap times are what you actually drove and are not corrected for
+  fuel: a later stint is partly quicker simply because the car is lighter. The scale holds the
+  closest 8 seconds to your fastest racing lap and leaves out the laps into and out of the pits,
+  so the real one-to-three second degradation stays readable; anything slower is still drawn,
+  clipped to the top edge, with its true time on hover.
 
 ### Fixed
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a
