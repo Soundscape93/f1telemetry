@@ -29,6 +29,24 @@ from PySide6.QtGui import QFont
 MUTED_TEXT = "#8b949e"              # muted / secondary text; reads on both light and dark grounds
 MUTED_TEXT_QSS = f"color: {MUTED_TEXT};"   # drop-in replacement for "color: palette(mid);"
 
+# Lap-time and position highlights, fixed like MUTED_TEXT so they read on both grounds. These
+# reach the UI as an explicit ``color:`` - either a stylesheet that states it outright or
+# ``setForeground`` - which is the one kind A4 leaves alone (see the module docstring).
+#
+# FASTEST_LAP is the fastest lap of the *whole session*; PERSONAL_BEST is the player's own
+# fastest when it is not also the session's. Keeping them here rather than per-surface is the
+# point: a fastest lap has to look the same in the Sessions detail, the Laps box, the Laps
+# surface and the Sessions overview, or the colour stops meaning anything.
+FASTEST_LAP = "#2f81f7"        # blue
+PERSONAL_BEST = "#3fb950"      # green
+POSITION_GAIN = PERSONAL_BEST    # green, same as personal best
+POSITION_LOSS = "#f85149"      # red
+
+# Drop-in stylesheet for the session's fastest lap, paired with the colour above exactly as
+# MUTED_TEXT_QSS is with MUTED_TEXT. A stylesheet is only needed where the widget is a QLabel;
+# inside a table the colour goes on the item via setForeground, which needs no stylesheet at all.
+FASTEST_LAP_QSS = f"color: {FASTEST_LAP};"
+
 # Every stylesheet these helpers replaced said ``font-weight: 600``. QFont.Weight.DemiBold *is*
 # 600; setBold(True) is Bold == 700, a visibly heavier face on every heading in the app. Exported
 # so no call site has to make that choice.

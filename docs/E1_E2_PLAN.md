@@ -164,6 +164,19 @@ season+round picker with its own validation (track match? slot already filled? m
 which is a feature with its own design questions, not a widget. It lands more safely once the
 surface exists to host it.
 
+**Out — E1d, Seasons routing into a weekend-filtered Sessions overview.** *Decided 2026-08-24,
+after E1's detail view was specified.* The intended end state: double-clicking a round in a
+season's calendar opens the **Sessions overview filtered to that weekend**, in weekend running
+order (P1, P2, … Race), each session showing its classification and opening the Sessions detail
+page. The round-centric weekend page then shrinks and is eventually retired.
+
+Recorded here because it changes what E1's surfaces are *for*, but it is **not E1 work** — it is
+blocked behind both deferrals below, in a forced order: **E1c** (or league weekends read worse
+than they do today), then the filtered overview, then **E1b** (the weekend page is the only writer
+of `season_assignments`), then removal. The full reasoning, and the one piece of information that
+has no home yet — the weekend page's *pending* / *skipped* slot rows, which a list of stored
+sessions cannot express — is in PRIORITIES → E1d.
+
 **Out — E1c, league display names.** The weekend page resolves them via `display_name_fn(roster)`,
 and `SeasonRosterFiles.roster_for` needs a season plus `rounds_with_results`, which hydrates every
 session in the season — not something to run on the GUI thread while painting a list. Sessions v1
@@ -339,9 +352,17 @@ rendered as the ▲/▼ glyph in the classification table one box to the right, 
 completed means something in every session type. **When E15 lands, this cell becomes real
 overtakes.**
 
+The box also carries the **circuit outline** below the grid, filling the space a four-row grid
+leaves beside a twenty-row classification. It is the player's fastest lap via `TrackMap.set_trace`,
+**not** the canonical median line - see DECISIONS for the measurement behind that. When the session
+has no Motion data a plain stretch takes the space instead, so the layout never leaves a hole where
+a map should be.
+
 #### Top-right — final classification
 
-`build_classification_table(session, is_sprint_race=slot.is_sprint_race)`, unchanged from 2a.
+`build_classification_table(session, is_sprint_race=slot.is_sprint_race)`, unchanged from 2a. The
+box title names the session type (`Final classification · Race`) because it is screenshotted and
+shared on its own.
 **Must not grow a duplicate table.**
 
 **Equal box heights need a decision, and it is a layout risk.** The details grid is 4 rows; the

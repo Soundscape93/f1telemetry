@@ -19,6 +19,7 @@ from pathlib import Path
 from PySide6.QtGui import QFont
 
 from f1telemetry.src.ui.style import (
+    FASTEST_LAP_QSS,
     HEADING_WEIGHT,
     MUTED_TEXT_QSS,
     apply_bold,
@@ -122,6 +123,8 @@ _PT_EXEMPT = frozenset({"components/car_status_graphic.py"})
 _CONSTS = {
     "MUTED_TEXT_QSS": MUTED_TEXT_QSS,
     "style.MUTED_TEXT_QSS": MUTED_TEXT_QSS,
+    "FASTEST_LAP_QSS": FASTEST_LAP_QSS,
+    "style.FASTEST_LAP_QSS": FASTEST_LAP_QSS,
 }
 
 

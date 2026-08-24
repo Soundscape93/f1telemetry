@@ -18,10 +18,16 @@ from f1telemetry.src.ui.formatting import (
     format_position_change,
     format_race_time,
     is_race,
+    lap_gap_label,
+    laps_completed_label,
     non_race_result,
+    player_best_lap_ms,
+    player_points_label,
     race_result,
     race_winner_summary,
     recorded_label,
+    session_best_lap_ms,
+    session_context_label,
     session_fastest_lap,
     session_leader,
     weather_label,
@@ -329,6 +335,133 @@ class SessionLeaderTest(unittest.TestCase):
         """
         quali = make_session(1, SessionType.QUALIFYING_3, winner="Pole")
         self.assertEqual(session_leader(quali), "Pole")
+
+def _player(position=1, points=25, num_laps=29, team_id=1, num_penalties=0, penalties=0,
+            best=0, status=ResultStatus.FINISHED):
+        return SimpleNamespace(position=position, points=points, num_laps=num_laps, team_id=team_id,
+                           is_player=True, is_ai=False, num_penalties=num_penalties,
+                           penalties_time_s=penalties, best_lap_time_ms=best,
+                           result_status=status, driver_name="Me")
+
+
+def _rival(best=0, is_player=False):
+    return SimpleNamespace(best_lap_time_ms=best, is_player=is_player, is_ai=True,
+                           driver_name="Rival")
+
+
+def _sess(session_type=SessionType.RACE, entries=(), total_laps=29, game_mode=78,
+          reconstructed=False):
+    classification = SimpleNamespace(entries=tuple(entries), is_reconstructed=reconstructed)
+    return SimpleNamespace(session_type=session_type, total_laps=total_laps,
+                           game_mode=game_mode, classification=classification)
+
+
+class PlayerPointsLabelTest(unittest.TestCase):
+    """Points are gated to races because the stored value is wrong everywhere else."""
+
+    def test_race_shows_the_stored_points(self):
+        self.assertEqual(player_points_label(_sess(entries=[_player(points=25)])), "25")
+
+    def test_practice_is_an_em_dash_even_though_points_are_stored(self):
+        """Real captures carry points 25 on a Practice 1 row - a carried-over championship
+        figure. Rendering it would state a number that is simply untrue."""
+        session = _sess(SessionType.PRACTICE_1, entries=[_player(points=25)])
+        self.assertEqual(player_points_label(session), "\u2014")
+
+    def test_qualifying_is_an_em_dash(self):
+        session = _sess(SessionType.QUALIFYING_1, entries=[_player(points=8)])
+        self.assertEqual(player_points_label(session), "\u2014")
+
+    def test_reconstructed_race_shows_the_estimate_like_the_table_does(self):
+        session = _sess(entries=[_player(position=1, points=0)], reconstructed=True)
+        self.assertEqual(player_points_label(session), "~25")
+
+    def test_reconstructed_sprint_uses_the_sprint_table(self):
+        session = _sess(entries=[_player(position=1, points=0)], reconstructed=True)
+        self.assertEqual(player_points_label(session, is_sprint_race=True), "~8")
+
+    def test_no_player_entry_is_an_em_dash(self):
+        self.assertEqual(player_points_label(_sess(entries=[_rival()])), "\u2014")
+
+
+class LapsCompletedLabelTest(unittest.TestCase):
+    def test_race_shows_completed_over_total(self):
+        self.assertEqual(laps_completed_label(_sess(entries=[_player(num_laps=29)])), "29 / 29")
+
+    def test_race_count_comes_from_the_classification_not_the_stored_rows(self):
+        """A recording that started late stores fewer laps than were driven (27 vs 29 in real
+        captures); the classification is the truth of what happened."""
+        session = _sess(entries=[_player(num_laps=29)])
+        self.assertEqual(laps_completed_label(session, stored_laps=27), "29 / 29")
+
+    def test_practice_shows_a_bare_count_because_total_laps_is_meaningless(self):
+        """Real practice rows carry total_laps 1 against 7 laps actually run."""
+        session = _sess(SessionType.PRACTICE_1, entries=[_player(num_laps=7)], total_laps=1)
+        self.assertEqual(laps_completed_label(session), "7")
+
+    def test_falls_back_to_the_stored_count_when_the_game_reported_none(self):
+        session = _sess(entries=[_player(num_laps=0)])
+        self.assertEqual(laps_completed_label(session, stored_laps=4), "4 / 29")
+
+
+class LapGapLabelTest(unittest.TestCase):
+    def test_gap_to_my_own_best(self):
+        self.assertEqual(lap_gap_label(82249, 81046), "+1.203")
+
+    def test_the_reference_lap_itself_is_an_em_dash(self):
+        self.assertEqual(lap_gap_label(81046, 81046), "\u2014")
+
+    def test_an_untimed_lap_is_an_em_dash(self):
+        self.assertEqual(lap_gap_label(None, 81046), "\u2014")
+        self.assertEqual(lap_gap_label(0, 81046), "\u2014")
+
+    def test_no_reference_is_an_em_dash(self):
+        self.assertEqual(lap_gap_label(82249, None), "\u2014")
+
+
+class PlayerBestLapTest(unittest.TestCase):
+    def _laps(self, *times):
+        return [SimpleNamespace(lap_time_ms=t) for t in times]
+
+    def test_picks_the_lowest(self):
+        self.assertEqual(player_best_lap_ms(self._laps(82249, 81046, 81458)), 81046)
+
+    def test_ignores_untimed_laps(self):
+        self.assertEqual(player_best_lap_ms(self._laps(None, 0, 81046)), 81046)
+
+    def test_no_timed_laps_is_none(self):
+        self.assertIsNone(player_best_lap_ms(self._laps(None, 0)))
+        self.assertIsNone(player_best_lap_ms([]))
+
+
+class SessionBestLapMsTest(unittest.TestCase):
+    def test_lowest_non_zero_across_the_field(self):
+        session = _sess(entries=[_player(best=81500), _rival(best=81046)])
+        self.assertEqual(session_best_lap_ms(session), 81046)
+
+    def test_zero_is_no_time_set(self):
+        session = _sess(entries=[_rival(best=0), _player(best=81500)])
+        self.assertEqual(session_best_lap_ms(session), 81500)
+
+    def test_nobody_set_a_time_is_none(self):
+        self.assertIsNone(session_best_lap_ms(_sess(entries=[_rival(best=0)])))
+
+    def test_no_classification_is_none(self):
+        self.assertIsNone(session_best_lap_ms(SimpleNamespace(classification=None)))
+
+
+class SessionContextLabelTest(unittest.TestCase):
+    def test_team_mode_and_slot(self):
+        session = _sess(entries=[_player(team_id=1)], game_mode=78)
+        label = session_context_label(session, "Race")
+        self.assertIn(team_display_name(1), label)
+        self.assertIn("Driver Career '26", label)
+        self.assertTrue(label.endswith("Race"))
+
+    def test_no_player_entry_still_renders(self):
+        session = _sess(entries=[_rival()], game_mode=7)
+        self.assertEqual(session_context_label(session, "Qualifying 3"),
+                         "Online Custom  ·  Qualifying 3")
 
 
 if __name__ == "__main__":

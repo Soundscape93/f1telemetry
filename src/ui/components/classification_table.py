@@ -31,17 +31,20 @@ from ..formatting import (
     is_race,
     non_race_result,
     race_result,
+    session_best_lap_ms,
 )
 from ...domain.roster import LeagueRoster, league_display_name
 from ...protocol.enums import ResultStatus
 from ...protocol.reference import team_display_name
-from ..style import MUTED_TEXT
+from ..style import FASTEST_LAP, MUTED_TEXT, POSITION_GAIN, POSITION_LOSS
 from .flags import flag_icon
-from .tables import cell, fit_table_height, tidy_table
+from .tables import cell, fit_columns, fit_table_height, tidy_table
 from .tyres import tyre_pixmap
 
-# Position-change colours (Pos triangle). Chosen to read on both light and dark palettes.
-_POS_COLORS = {"gain": "#3fb950", "loss": "#f85149"}
+# Position-change colours (Pos triangle), from the shared palette in ``ui/style`` so the
+# gain-green is the same green the session detail uses for a personal-best lap.
+_POS_COLORS = {"gain": POSITION_GAIN, "loss": POSITION_LOSS}
+
 
 # How often the Time cell flips between the race time and the penalty badge.
 _ALTERNATE_MS = 2000
@@ -114,14 +117,19 @@ def _wire_penalty_alternation(
 
 
 def build_classification_table(
-    session, name_of=lambda entry: entry.driver_name, is_sprint_race: bool = False
-) -> QTableWidget:
+    session, name_of=lambda entry: entry.driver_name, is_sprint_race: bool = False, 
+    scrollable: bool = False) -> QTableWidget:
     """Return a classification table for one session (no surrounding chrome).
 
     ``name_of`` resolves each entry's shown name; it defaults to the entry's own driver name.
     ``is_sprint_race`` (from the weekend context) picks the Sprint points table when estimating
     points for a reconstructed race - the two share ``SessionType.RACE`` and can't be told apart
     from the session alone.
+
+    ``scrollable`` leaves the table's height to its container instead of freezing it to fit every row.
+    The default (False) is the sized-to-context behaviour every existing caller relies on;
+    the session detail page passes True because it puts the table in a height-capped box beside a
+    much shorter details grid, and a 20-row table would otherwise decide that row's height.
     """
     race_session = is_race(session.session_type)
     reconstructed = session.classification is not None and session.classification.is_reconstructed
@@ -137,6 +145,8 @@ def build_classification_table(
     entries = session.classification.entries if session.classification else []
     winner = next((e for e in entries if e.position == 1), entries[0] if entries else None)
     table.setRowCount(len(entries))
+    # The session's fastest lap time is painted blue, the same blue the detail page uses
+    fastest_ms = session_best_lap_ms(session)
 
     penalty_cells: list[tuple[QTableWidgetItem, str, str]] = []
     for i, entry in enumerate(entries):
@@ -151,7 +161,10 @@ def build_classification_table(
             table.setCellWidget(i, 0, _pos_change_widget(entry.position, glyph, kind))
             table.setItem(i, 3, cell(format_grid(entry.grid_position)))
             table.setItem(i, 4, cell(str(entry.num_pit_stops)))
-            table.setItem(i, 5, cell(format_lap_time(entry.best_lap_time_ms)))
+            best_item = cell(format_lap_time(entry.best_lap_time_ms))
+            if fastest_ms and entry.best_lap_time_ms == fastest_ms:
+                best_item.setForeground(QColor(FASTEST_LAP))
+            table.setItem(i, 5, best_item)
             time_str = race_result(entry, winner)
             time_item = cell(time_str)
             table.setItem(i, 6, time_item)
@@ -166,9 +179,15 @@ def build_classification_table(
             pixmap = tyre_pixmap(compound) if compound is not None else None
             if pixmap is not None:
                 table.setCellWidget(i, 3, _tyre_widget(pixmap))
-            table.setItem(i, 4, cell(non_race_result(entry, session.session_type)))
+                best_item = cell(format_lap_time(entry.best_lap_time_ms))
+                if fastest_ms and entry.best_lap_time_ms == fastest_ms:
+                    best_item.setForeground(QColor(FASTEST_LAP))
+                table.setItem(i, 4, best_item)
             table.setItem(i, 5, cell(format_lap_gap(entry, winner)))
 
     _wire_penalty_alternation(table, penalty_cells)
-    fit_table_height(table)
+    # DRIVER and TEAM take the spare width; POS/GRID/STOPS/BEST/TIME/PTS stay as narrow as their contents.
+    fit_columns(table, stretch={1, 2})
+    if not scrollable:
+        fit_table_height(table)
     return table

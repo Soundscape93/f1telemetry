@@ -16,7 +16,7 @@ so they line up with the classification order.
 from __future__ import annotations
 
 from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType, Weather
-from ..protocol.reference import team_display_name
+from ..protocol.reference import game_mode_name, team_display_name
 
 # Position-change glyphs (race Pos cell): filled triangles read closer to the game than
 # the arrowhead code points, and bold cleanly. Em dash = no change / unknown grid.
@@ -303,3 +303,106 @@ def session_leader(session, name_of=lambda entry: entry.driver_name) -> str | No
         return None
     leader = session.classification.winner
     return None if leader is None else name_of(leader)
+
+
+def _player_entry(session):
+    """The player's classification entry, or None.
+    
+    Iterates the entries rather than using ``Classification.player`` so this module keeps working
+    on any object that merely exposes ``entries`` - which is what the unit tests build, and what
+    every other helper already assumes.
+    """
+    entries = session.classification.entries if session.classification else ()
+    return next((entry for entry in entries if entry.is_player), None)
+
+
+def session_best_lap_ms(session) -> int | None:
+    """The fastest lap of the whole session in milliseconds, or None if nobody set one.
+
+    The raw counterpart to :func:`session_fastest_lap`, which formats a driver + time for display.
+    The detail page needs the bare number to decide whether *my* fastest lap is also the
+    session's - i.e. whether it is painted blue or green.
+
+    ``0`` means "no time set", so this is a min over the non-zero entries (see
+    :func:`session_fastest_lap` for why that matters).
+    """
+    entries = session.classification.entries if session.classification else ()
+    timed = [entry.best_lap_time_ms for entry in entries if entry.best_lap_time_ms]
+    return min(timed) if timed else None
+
+
+def player_best_lap_ms(laps) -> int | None:
+    """The fastest of the player's own stored laps in milliseconds, or None if none is timed."""
+    timed = [lap.lap_time_ms for lap in laps if lap.lap_time_ms]
+    return min(timed) if timed else None
+
+
+def lap_gap_label(lap_time_ms: int | None, best_ms: int | None) -> str:
+    """The Laps box's Gap cell: a gap to the driver's own personal best, not the sessions.
+    
+    An em dash for the reference lap itself, for a lap with no time, and when there is no
+    reference. Two laps that tie on the best time both read as the reference - honest, and rare
+    enough not to be worth breaking the tie arbitrarily.
+    """
+    if not lap_time_ms or not best_ms or lap_time_ms == best_ms:
+        return _EM_DASH
+    return format_gap((lap_time_ms - best_ms) / 1000)
+
+
+def player_points_label(session, is_sprint_race: bool = False) -> str | None:
+    """The details grid's points cell - the player's points, or an em dash outside a race.
+
+    **The gate is a correctness fix, not a tidiness one.** The stored value is only meaningful for
+    a race: checked against real captures, ``PRACTICE_1`` player rows carry ``points 25`` and
+    ``QUALIFYING_1`` rows carry ``25`` and ``8``, because the game reports a carried-over
+    championship figure in the Final Classification packet on non-race session types. Printing it
+    would state a number that is simply untrue.
+
+    A **reconstructed** race has no official points, so it shows the same muted ``~N`` estimate the
+    classification table shows rather than a bare ``0`` - the two are on screen together and must
+    not disagree.
+    """
+    if not is_race(session.session_type):
+        return _EM_DASH
+    player = _player_entry(session)
+    if player is None:
+        return _EM_DASH
+    if session.classification is not None and session.classification.is_reconstructed:
+        estimate = estimate_points(player.position, player.result_status, is_sprint_race)
+        return _EM_DASH if estimate is None else f"~{estimate}"
+    return str(player.points)
+
+
+def laps_completed_label(session, stored_laps: int = 0) -> str:
+    """The details grid's laps cell: ``29 / 29`` in a race, a bare count elsewhere.
+
+    A stand-in for on-track overtakes, which are not stored - the game sends them as ``OVTK``
+    Event packets and the assembler never reads Event packets at all (PRIORITIES -> E15). This
+    cell becomes real overtakes once that lands.
+
+    Two data facts shape it. The count comes from the classification's ``num_laps`` rather than
+    from the stored lap rows, because a recording that started late stores fewer laps than were
+    actually driven (real captures show 27 stored against 29 completed). And the ``/ total`` only
+    appears for races: ``total_laps`` is the *race* distance and is meaningless elsewhere - real
+    practice sessions carry ``total_laps 1`` against 7 laps actually run.
+    """
+    player = _player_entry(session)
+    completed = player.num_laps if player is not None and player.num_laps else stored_laps
+    if is_race(session.session_type) and session.total_laps > 0:
+        return f"{completed} / {session.total_laps}"
+    return str(completed)
+
+
+def session_context_label(session, session_label: str) -> str:
+    """The details grid's context cell: team, game mode and session type.
+
+    ``session_label`` is the caller's already-resolved slot label, because only the weekend
+    context can tell a Sprint Race from a Grand Prix (core invariant #5).
+    """
+    bits = []
+    player = _player_entry(session)
+    if player is not None:
+        bits.append(team_display_name(player.team_id))
+    bits.append(game_mode_name(session.game_mode))
+    bits.append(session_label)
+    return "  ·  ".join(bits)
