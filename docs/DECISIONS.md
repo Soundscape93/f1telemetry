@@ -727,15 +727,42 @@ what would trigger revisiting it.
   line plots `100 − max(wear)` across the four corners. The worst corner is what forces the stop,
   so it is the strategy-relevant number; a mean smooths away exactly the signal being looked for.
   Per-wheel values go in the tooltip, so nothing is lost.
-- **Tyre stints are split on wear *dropping*, never on `tyre_age_laps`** *(decided 2026-08-24)*.
-  Age is unreliable at the lap boundary — the Car Status snapshot straddles the game's increment,
-  giving runs like `age 0, 2, 2, 4, 4` inside one stint — and a naive age-based split turned one
-  27-lap race into fourteen stints. Cumulative wear is monotonic within a stint and resets to ~0 on
-  a new set, so a drop is the reliable boundary. Details and the raw evidence in TELEMETRY_NOTES.
+- **Tyre stints are split on wear *dropping* or the age counter *resetting*, never on age
+  increments** *(decided 2026-08-24)*. Age is unreliable at the lap boundary — the Car Status
+  snapshot straddles the game's increment, giving runs like `age 0, 2, 2, 4, 4` inside one stint —
+  and a naive age-based split turned one 27-lap race into fourteen stints. Cumulative wear is
+  monotonic within a stint and resets to ~0 on a new set, so a drop is the reliable boundary.
+  Details and the raw evidence in TELEMETRY_NOTES.
+
+  **Revised 2026-08-24, during implementation: a *fall* in `tyre_age_laps` is a second boundary.**
+  Wear alone can miss a set change. In a career practice session a tyre-saving programme is followed
+  by a qualifying simulation on a **fresh set of the same compound**, and the new set's first wear
+  reading can be *higher* than the old set's last: `10198131…` (Jeddah P1) reads 9.51, then 15.92,
+  then 17.97 across the change. Compound unchanged, wear never drops, so the two runs merged into
+  one curve claiming a single set had worn 9.51 → 17.97 — a straightforwardly false statement about
+  what happened. A fall in the age counter is the missing signal, and it is **not** the rule warned
+  against above: that concerns age *increments*, which the snapshot mangles. Only a fresh set can
+  put a lower number there. Verified across all 406 stored laps — it adds exactly one stint
+  boundary, and changes one session of 54. The two tests are complementary, not redundant: 26 of the
+  27 age falls already coincide with a wear drop, and 4 wear drops have no age fall.
 - **A tyre stint is drawn only from 2 laps up, in every session type** *(decided 2026-08-24)*.
   Chosen so wet qualifying and longer quali runs still get a chart, accepting that a single-timed-lap
   dry qualifying gets none. It also earns its keep as a data filter: pit in-laps produce single-lap
   artefact stints from stale readings, and this rule drops them without a special case.
+
+  **Confirmed 2026-08-24 against how the sessions are actually driven, after measuring what the rule
+  removes.** Splitting runs correctly showed the minimum drops far more outside races than the
+  original wording implied — by session type: RACE 3 of 25 runs dropped, PRACTICE_1 3 of 12,
+  PRACTICE_2 2 of 8, PRACTICE_3 4 of 5, QUALIFYING_1 5 of 8, QUALIFYING_2 6 of 8, QUALIFYING_3 5 of
+  10. That reads alarming and is not: it matches how the sessions are driven. **Dry qualifying is
+  one flying lap per session**, so there is no stint to draw and nothing is lost; a **wet** session
+  runs longer, so Suzuka's Q1/Q2/Q3 do get both charts. **P1 and P3 are practice programmes and own
+  quali sims** — one or two laps, then back to the garage — so they are correctly not charted.
+  **P2 is where the race simulations are driven** (Suzuka, Sakhir, Melbourne here), and those
+  sessions do get their charts, which is the case that matters. A one-lap graph carries no
+  information at all — it is a single point, with no degradation to show — so the floor stays at 2.
+  Three was considered and rejected: the longer practice simulation runs are exactly the non-race
+  case worth charting, and some are two laps.
 - **No synthetic 100% starting point on the tyre-life chart** *(decided 2026-08-24)*. The first
   stored sample of stint 1 already reads ~4% wear — there is no 100% sample in the data. The y-axis
   runs 0–100% so a stint starting at 95.7% reads as "near 100" on its own; drawing an invented

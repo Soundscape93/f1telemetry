@@ -205,13 +205,45 @@ def stint_series(stint: TyreStint, value_of: Callable[[StintLap], float],
 
 # --- reading one stored lap ----------------------------------------------------------------------
 def _starts_new_stint(lap, previous) -> bool:
-    """Whether ``lap`` begins a new set: the worst wheel's wear dropped, or the compound changed.
+    """Whether ``lap`` begins a new set: wear dropped, the age counter fell, or the compound changed.
 
-    Strict ``<``, with no tolerance. Checked against every lap-to-lap wear drop in the real database
-    - thirty of them: the smallest is a ``-0.0`` float artefact that strict ``<`` already rejects,
-    and every other one is a genuine set change. A tolerance would only be a rule nobody measured.
+    Strict ``<`` on the wear, with no tolerance. Checked against every lap-to-lap wear drop in the
+    real database - thirty of them: the smallest is a ``-0.0`` float artefact that strict ``<``
+    already rejects, and every other one is a genuine set change. A tolerance would only be a rule
+    nobody measured.
     """
-    return _max_wear(lap) < _max_wear(previous) or _compound(lap) != _compound(previous)
+    return (_max_wear(lap) < _max_wear(previous)
+            or _age_reset(lap, previous)
+            or _compound(lap) != _compound(previous))
+
+
+def _age_reset(lap, previous) -> bool:
+    """Whether the tyre-age counter *fell*, which only a fresh set can do.
+
+    Narrow on purpose, and not a contradiction of TELEMETRY_NOTES. That warns against deriving
+    boundaries from age *increments* - the Car Status snapshot straddles the game's own increment,
+    so one stint reads ``0, 2, 2, 4, 4`` and a "must increment by one" rule turned a 27-lap race
+    into fourteen stints. A *fall* is a different signal: nothing but a new set puts a lower number
+    there.
+
+    It earns its place because wear alone can miss a set change. In ``10198131...`` (Jeddah P1) a
+    tyre-saving practice programme on softs is followed by a qualifying simulation on a fresh set of
+    the same compound, and the new set's first reading is *higher* than the old set's last - 17.97
+    against 15.92. Compound unchanged, wear never drops, so the two runs merged into one curve
+    claiming a single set had worn 9.51 -> 15.92 -> 17.97, which is simply not what happened.
+
+    Checked across every stored lap: this adds exactly one boundary, that one. 26 of the 27 age
+    falls in the database already coincide with a wear drop, and 4 wear drops have no age fall, so
+    neither test subsumes the other.
+    """
+    now, before = _age(lap), _age(previous)
+    return now is not None and before is not None and now < before
+
+
+def _age(lap) -> int | None:
+    """The stored tyre age, or None - never coerced to 0, which would read as a reset."""
+    context = lap.tyre_context
+    return context.age_laps if context is not None else None
 
 
 def _place_on_axis(group: list, follows_pit: bool) -> tuple[StintLap, ...]:

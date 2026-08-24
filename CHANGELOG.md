@@ -43,8 +43,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 - **The session detail page now charts pace and tyre life per stint.** Under your laps, two
   full-width graphs share one stint-relative axis — tyre life above, observed lap time below — so
   every stint restarts at stint lap 1 and two compounds can be read against each other directly.
-  Stints are worked out from the tyres themselves, so a set change shows up even where the game's
-  tyre-age counter is unreliable, and each point's tooltip carries the real lap number along with
+  Stints are worked out from the tyres themselves — the wear resetting, the compound changing, or a fresh set
+  showing up in the age counter — so a set change is caught even where any one of those signals is unreliable on its
+  own and each point's tooltip carries the real lap number along with
   the wear on all four wheels. Lap times are what you actually drove and are not corrected for
   fuel: a later stint is partly quicker simply because the car is lighter. The scale holds the
   closest 8 seconds to your fastest racing lap and leaves out the laps into and out of the pits,

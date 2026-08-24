@@ -166,6 +166,30 @@ class TestSplitTyreStints(unittest.TestCase):
     def test_no_laps_gives_no_stints(self):
         self.assertEqual(split_tyre_stints([]), ())
 
+    def test_a_fresh_set_of_the_same_compound_splits_on_the_age_reset(self):
+        """Jeddah P1 (10198131…): a tyre-saving practice programme on softs, then a qualifying
+        simulation on a fresh set of the same compound. The new set's first reading is *higher* than
+        the old set's last, so the compound is unchanged and wear never drops - the age counter
+        falling is the only thing that says a new set went on.
+        """
+        laps = [_lap(1, _S, 9.51, 94781, age=0),
+                _lap(2, _S, 15.92, 96212, age=1),
+                _lap(3, _S, 17.97, 92696, age=0)]   # fresh set, and wear reads higher, not lower
+        stints = split_tyre_stints(laps, min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints],
+                         [(1, 2), (3, 3)])
+
+    def test_the_one_lap_programme_is_dropped_rather_than_folded_into_the_run_before_it(self):
+        """The same session at the real minimum. The one-lap qualifying sim can't be charted, but it
+        is no longer absorbed into the tyre-saving run as though one set had worn 9.51 -> 17.97.
+        """
+        laps = [_lap(1, _S, 9.51, 94781, age=0),
+                _lap(2, _S, 15.92, 96212, age=1),
+                _lap(3, _S, 17.97, 92696, age=0)]
+        stints = split_tyre_stints(laps)
+        self.assertEqual(len(stints), 1)
+        self.assertEqual([lap.lap_number for lap in stints[0].laps], [1, 2])
+
 
 class TestStintRelativeAxis(unittest.TestCase):
 
