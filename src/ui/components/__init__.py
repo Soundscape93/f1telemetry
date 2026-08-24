@@ -16,6 +16,7 @@ from .slider_row import SetupSliderRow, SliderMarkerBar
 from .tables import build_kv_table, cell, clear_layout, fit_table_height, tidy_table
 from .trace_plot import TracePlot
 from .track_map import TrackMap
+from .weather import WeatherIcon
 
 __all__ = [
     "CarStatusGraphic",
@@ -32,5 +33,6 @@ __all__ = [
     "fit_table_height",
     "tidy_table",
     "TracePlot",
-    "TrackMap"
+    "TrackMap",
+    "WeatherIcon",
 ]

@@ -274,6 +274,24 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
   names through `display_name_fn` (captured public alias first, roster `online_names` fallback)
   injected into `race_winner_summary` and the classification tables built via `components/`.
+- **`sessions/`** — the Sessions surface (E1), same thin-container pattern as `seasons/`:
+  `view.py` (`SessionsView`) owns a `QStackedWidget` and wires navigation signals; pages never
+  reference siblings. `overview_page.py` lists every stored session as foldable cards, newest
+  first, with a track/session filter — one query, no `LapStore` read — and a compact summary line
+  (session, winner, fastest lap, weather icon, AI difficulty) plus a shared delete.
+  `detail_page.py` is the per-session page: a header (track, slot label, recorded time, weather ·
+  laps · uid, and the **source capture** resolved via `CaptureStore.for_session` +
+  `resolve_capture_path`), then a 4×2 details grid, the shared
+  `components.build_classification_table`, a clickable laps box, a penalties box, and a stacked
+  pair of charts (tyre life and lap times) sharing one **stint-relative** x-axis. `sessions_changed` is the non-navigation signal, re-emitted for `MainWindow` to
+  fan out exactly as `SeasonsView` does.
+  **Two cross-cutting rules live here.** Points are rendered only for race/sprint sessions because
+  the stored value is a carried-over championship figure on every other type (DECISIONS → UI);
+  and a lap row emits `lap_requested(uid, lap_number)` upward, which `MainWindow` turns into a
+  sidebar switch plus `LapsView.show_lap` — a **cross-surface** hop, since the no-sibling rule
+  forbids the page reaching `LapsView` itself. `LapsView.show_lap` stores a pending target that
+  `showEvent` consumes, because `showEvent` otherwise resets to the overview and would clobber the
+  navigation.
 - **`laps/`** — the Laps surface, same thin-container pattern as `seasons/`: `view.py` (`LapsView`)
   owns a `QStackedWidget` of two pages and wires their navigation signals. `overview_page.py` lists
   foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →

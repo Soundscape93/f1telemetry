@@ -702,6 +702,92 @@ what would trigger revisiting it.
   Car Status) and reads it in `normalize_tyre_context` / `normalize_car_damage` at the line. Pre-2c rows
   load with zero-temp defaults; a re-ingest populates them.
 
+- **The session detail view shows points only for races and sprints — because the stored value is
+  wrong elsewhere** *(decided 2026-08-24, E1 branch 2b)*. This looks like a presentation choice and
+  is not. Checked against the real database: `PRACTICE_1` player rows carry `points 25`, and
+  `QUALIFYING_1` rows carry `25` and `8`. The game reports a carried-over championship figure in
+  the Final Classification packet for non-race sessions, so rendering it would state a number that
+  is simply untrue. The cell is gated on `is_race(session_type)` (with `slot.is_sprint_race` for
+  the sprint table) and shows an em dash otherwise.
+- **`Laps completed` stands in for overtakes until E15** *(decided 2026-08-24)*. On-track overtakes
+  are not stored — `OVTK` events exist in every capture but the assembler never reads Event packets
+  (PRIORITIES → E15). The cell shows `laps I completed / total laps` meanwhile. Chosen over
+  *positions gained*, which is not the same thing (it nets out on-track passes against pit-stop and
+  retirement shuffles) **and** is already rendered as the ▲/▼ glyph in the classification table
+  beside it. **When E15 lands this cell becomes real overtakes** — it is a placeholder with a named
+  successor, not a permanent field.
+- **The penalties box has two states, not one** *(decided 2026-08-24)*. Only the aggregate is
+  stored (`num_penalties`, `penalties_time_s` on the player's classification entry — real: eight
+  rows currently carry `1 penalty / +3s`); type and lap are not. So a clean session shows
+  `No penalties were recorded for this session.`, and a penalised one shows the aggregate **plus** a
+  muted `Per-penalty detail (type and lap) isn't stored yet.` A single empty state would print "no
+  penalties" for a session that demonstrably had one — the box would be lying rather than merely
+  incomplete.
+- **Tyre life is the worst wheel, not the mean of four** *(decided 2026-08-24, E1 branch 2c)*. The
+  line plots `100 − max(wear)` across the four corners. The worst corner is what forces the stop,
+  so it is the strategy-relevant number; a mean smooths away exactly the signal being looked for.
+  Per-wheel values go in the tooltip, so nothing is lost.
+- **Tyre stints are split on wear *dropping*, never on `tyre_age_laps`** *(decided 2026-08-24)*.
+  Age is unreliable at the lap boundary — the Car Status snapshot straddles the game's increment,
+  giving runs like `age 0, 2, 2, 4, 4` inside one stint — and a naive age-based split turned one
+  27-lap race into fourteen stints. Cumulative wear is monotonic within a stint and resets to ~0 on
+  a new set, so a drop is the reliable boundary. Details and the raw evidence in TELEMETRY_NOTES.
+- **A tyre stint is drawn only from 2 laps up, in every session type** *(decided 2026-08-24)*.
+  Chosen so wet qualifying and longer quali runs still get a chart, accepting that a single-timed-lap
+  dry qualifying gets none. It also earns its keep as a data filter: pit in-laps produce single-lap
+  artefact stints from stale readings, and this rule drops them without a special case.
+- **No synthetic 100% starting point on the tyre-life chart** *(decided 2026-08-24)*. The first
+  stored sample of stint 1 already reads ~4% wear — there is no 100% sample in the data. The y-axis
+  runs 0–100% so a stint starting at 95.7% reads as "near 100" on its own; drawing an invented
+  anchor point would be fabricating a measurement. Relatedly, stint offsets are computed from real
+  lap *numbers*, never from list index: lap numbers are not contiguous (a red flag or a dropped lap
+  leaves a gap), and an index axis would silently close that gap and misplace everything after it.
+- **The pace and tyre-life charts are stacked full-width on a shared *stint-relative* x-axis**
+  *(decided 2026-08-24, superseding the left/right split agreed earlier the same day)*. Two
+  decisions in one, both measured rather than assumed:
+  **(a) Stacked, not side by side.** The default window is `resize(900, 600)`, so a half-width plot
+  is ~320 px — roughly **8 px per lap** over a 38-lap race, too tight to pick out a single slow lap.
+  Full-width gives ~18 px/lap. It also matches `trace_plot.py`'s existing idiom (stacked plots
+  sharing one axis) and lets wear fall-off and pace fall-off be read on one vertical line.
+  **(b) Stint-relative, not absolute race lap.** Degradation is a function of stint age, so every
+  stint restarts at stint lap 1 and the axis runs to the longest stint; that is what makes two
+  compounds comparable. The real race lap goes in the tooltip.
+- **On the pace chart, out-laps are plotted but excluded from the y-axis range** *(decided
+  2026-08-24)*. This is what makes the stint-relative axis viable at all. Measured across every
+  50%-distance race in the database, the first lap of each *post-pit* stint carries **+14 to +37 s**
+  (the game bundles the pit loss into it). On an absolute axis those spikes sit at different x
+  positions and read as "that's the stop"; on a stint-relative axis they all stack at x = 1, so an
+  auto-scaled y-axis would span ~37 s and squash the real 1–3 s degradation signal into ~5% of the
+  plot height. So the range is derived from the representative laps and out-laps draw as a clipped
+  marker with the true time in the tooltip — measured data is never hidden, only kept from
+  dictating the scale. **Stint 1 lap 1 is not excluded**: it is a race start, a much milder
+  +2 to +3 s, and sometimes faster than the stint median.
+- **The lap-time chart is "observed lap time by stint", and the fuel caveat is stated rather than
+  corrected for** *(decided 2026-08-24)*. A stint-relative overlay conflates tyre degradation with
+  **fuel burn-off**: the car sheds ~1.1-1.3 kg per lap, so a later stint is partly faster because it
+  is lighter, not only because of the compound — and the shared axis puts that difference exactly
+  where a reader will credit it to the tyre. Three consequences: **(a)** the chart is titled
+  *observed lap time by stint*, never "tyre performance" or "degradation"; **(b)** the caveat is
+  captioned in the UI; **(c)** **no fuel correction is applied here**, because a correction needs a
+  track- and car-dependent kg→seconds coefficient, and picking one silently would swap an honest raw
+  number for a confident estimate on a page whose job is "what actually happened".
+- **Fuel-corrected lap time is an Analytics (E3) item, not session detail** *(decided 2026-08-24)*.
+  The data is ready — `fuel_in_tank` is stored per lap, 406 of 406 populated, so this needs no new
+  ingest — but it is a *derived, corrected* metric needing a coefficient, an estimation method and a
+  way to express its uncertainty, and Analytics is where cross-session derived work already belongs.
+  Session detail stays raw observed fact. If it ever reaches this chart it must be an explicit
+  opt-in toggle, never the default, so the raw number is always what you see first.
+- **A lap row in the session detail opens on a *single* click, unlike the laps overview's
+  double-click** *(decided 2026-08-24)*. In the laps overview the row is also a fold target, so the
+  first click is already spoken for; in the session detail the row's only job is to open the lap.
+  Recorded here because the inconsistency is deliberate and will otherwise be reported as a bug.
+- **The fastest-lap blue and personal-best green are shared tokens in `ui/style.py`** *(decided
+  2026-08-24)*. `FASTEST_LAP_BLUE = "#2f81f7"` for the session's fastest lap and
+  `PERSONAL_BEST = "#3fb950"` for my own fastest when it is not the session's, used identically on
+  the session detail, the laps box, the Laps view and the Sessions overview. The green is the
+  `_POS_COLORS` gain-green promoted out of `classification_table.py`, where it was private. Both
+  set `color:` explicitly, which is the one kind of stylesheet A4 leaves alone.
+
 ## Localization
 
 *Decided 2026-08-06, before any string was touched. The work itself is PRIORITIES → G block,

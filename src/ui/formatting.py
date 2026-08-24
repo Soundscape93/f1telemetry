@@ -15,7 +15,7 @@ so they line up with the classification order.
 
 from __future__ import annotations
 
-from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType
+from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType, Weather
 from ..protocol.reference import team_display_name
 
 # Position-change glyphs (race Pos cell): filled triangles read closer to the game than
@@ -40,6 +40,15 @@ _STATUS_LABELS = {
     ResultStatus.DISQUALIFIED: "DSQ",
     ResultStatus.NOT_CLASSIFIED: "NC",
     ResultStatus.INACTIVE: "DNS"
+}
+
+_WEATHER_LABELS = {
+    Weather.CLEAR: "Clear",
+    Weather.LIGHT_CLOUD: "Light cloud",
+    Weather.OVERCAST: "Overcast",
+    Weather.LIGHT_RAIN: "Light rain",
+    Weather.HEAVY_RAIN: "Heavy rain",
+    Weather.STORM: "Storm"
 }
 
 
@@ -233,3 +242,64 @@ def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str
         return None
     return f"{name_of(winner)} / {team_display_name(winner.team_id)}"
 
+
+def weather_label(weather) -> str:
+    """'Clear' / 'Light rain' for a Weather value, tolerant of a raw int from ``safe_enum``.
+    
+    Enums are stored as raw ints (core invariant #9), so a value newer than our enum arrives
+    here as a plain int rather than a member - it must render as something, not crash.
+    """
+    label = _WEATHER_LABELS.get(weather)
+    if label is not None:
+        return label
+    name = getattr(weather, "name", None)
+    return name.replace("_", " ").capitalize() if name else str(weather)
+
+
+def recorded_label(recorded_at) -> str:
+    """Local-time 'YYYY-MM-DD HH:MM' for a session's ``recorded_at``, or an em dash if unset.
+
+    Stored as UTC: a tz-aware value is converted to local time, a naive one (older rows) shown
+    as-is. Shared, because it had already been copied into the laps overview and the weekend
+    page before the sessions surface would have made it a fourth copy.
+    """
+    if recorded_at is None:
+        return "\u2014"
+    if recorded_at.tzinfo is not None:
+        recorded_at = recorded_at.astimezone()
+    return recorded_at.strftime("%Y-%m-%d %H:%M")
+
+
+def session_fastest_lap(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """The session's fastest lap as ``Driver - M:SS.mmm``, or None if unavailable.
+
+    Reads the classification's own ``best_lap_time_ms``, so a caller listing every session stays
+    at one query - no ``LapStore`` hydration, which would also only ever cover the player's car.
+
+    ``0`` means "no time set", not "instant lap", which is why this is a min over the non-zero
+    entries: a plain ``min`` would report a driver who never completed a lap as the fastest of
+    the session. Entries arrive in finishing order, so a tie resolves to the higher-placed
+    driver.
+    """
+    if session.classification is None:
+        return None
+    timed = [e for e in session.classification.entries if e.best_lap_time_ms]
+    if not timed:
+        return None
+    best = min(timed, key=lambda entry: entry.best_lap_time_ms)
+    return f"{name_of(best)} — {format_lap_time(best.best_lap_time_ms)}"
+
+
+def session_leader(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """The name at the top of the classification, whatever the session type.
+    
+    Every session has one: a race has a winner, and a practice or qualifying session has whoever
+    ended up P1. ``Classification.winner`` is already "the first-place entry" rather than
+    anything race-specific, so this is a thin wrapper over it - what a caller *labels* it is the
+    caller's business. Distinct from :func:`race_winner_summary`, which is races-only and adds
+    the team, and which the seasons detail page still wants.
+    """
+    if session.classification is None:
+        return None
+    leader = session.classification.winner
+    return None if leader is None else name_of(leader)

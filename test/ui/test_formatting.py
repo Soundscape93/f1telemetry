@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+
+from datetime import datetime, timedelta, timezone
  
-from f1telemetry.src.protocol.enums import ResultStatus, SessionType
+from f1telemetry.src.protocol.enums import ResultStatus, SessionType, Weather
 from f1telemetry.src.protocol.reference import team_display_name
 from f1telemetry.src.ui.formatting import (
     compound_for_lap,
@@ -19,7 +21,12 @@ from f1telemetry.src.ui.formatting import (
     non_race_result,
     race_result,
     race_winner_summary,
+    recorded_label,
+    session_fastest_lap,
+    session_leader,
+    weather_label,
 )
+from f1telemetry.test.domain.test_seasons import make_session
 
 
 def _entry(position=1, status=ResultStatus.FINISHED, total=0.0, penalties=0, laps=57, best=0,
@@ -230,6 +237,98 @@ class EstimatePointsTest(unittest.TestCase):
                        ResultStatus.INACTIVE):
             self.assertIsNone(estimate_points(1, status))
             self.assertIsNone(estimate_points(1, status, is_sprint_race=True))
+
+
+class SessionFastestLapTest(unittest.TestCase):
+    """The overview's fastest-lap line - read from the classification, never from LapStore."""
+
+    def _session(self, *times, names=None):
+        names = names or [f"D{i}" for i in range(len(times))]
+        entries = [SimpleNamespace(driver_name=name, best_lap_time_ms=ms)
+                   for name, ms in zip(names, times)]
+        return SimpleNamespace(classification=SimpleNamespace(entries=entries))
+
+    def test_picks_the_lowest_non_zero_time(self):
+        s = self._session(68000, 67500, 69000, names=["Alonso", "Norris", "Sainz"])
+        self.assertEqual(session_fastest_lap(s), "Norris — 1:07.500")
+
+    def test_zero_is_no_time_set_not_the_fastest_lap(self):
+        """A plain min would report a driver who never set a lap as fastest of the session."""
+        s = self._session(0, 68000, names=["DidNotRun", "Norris"])
+        self.assertEqual(session_fastest_lap(s), "Norris — 1:08.000")
+
+    def test_all_zero_is_none(self):
+        self.assertIsNone(session_fastest_lap(self._session(0, 0)))
+
+    def test_no_classification_is_none(self):
+        self.assertIsNone(session_fastest_lap(SimpleNamespace(classification=None)))
+
+    def test_no_entries_is_none(self):
+        self.assertIsNone(session_fastest_lap(self._session()))
+
+    def test_tie_goes_to_the_earlier_entry(self):
+        """Entries arrive in finishing order, so a tie resolves to the higher-placed driver."""
+        s = self._session(67500, 67500, names=["Leader", "Chaser"])
+        self.assertEqual(session_fastest_lap(s), "Leader — 1:07.500")
+
+    def test_name_of_is_injectable(self):
+        s = self._session(67500, names=["Player"])
+        self.assertEqual(session_fastest_lap(s, name_of=lambda e: "Kevin"), "Kevin — 1:07.500")
+
+
+class WeatherLabelTest(unittest.TestCase):
+    def test_known_members(self):
+        self.assertEqual(weather_label(Weather.CLEAR), "Clear")
+        self.assertEqual(weather_label(Weather.LIGHT_RAIN), "Light rain")
+
+    def test_unknown_raw_int_still_renders(self):
+        """Enums are stored as raw ints (invariant #9); a newer value must not crash a label."""
+        self.assertEqual(weather_label(99), "99")
+
+
+class RecordedLabelTest(unittest.TestCase):
+    def test_none_is_an_em_dash(self):
+        self.assertEqual(recorded_label(None), "—")
+
+    def test_naive_value_is_shown_as_is(self):
+        self.assertEqual(recorded_label(datetime(2026, 8, 9, 21, 2)), "2026-08-09 21:02")
+
+    def test_aware_value_converts_to_local(self):
+        """Stored as UTC; a tz-aware value must be shown in the viewer's local time."""
+        utc = datetime(2026, 8, 9, 21, 2, tzinfo=timezone.utc)
+        self.assertEqual(recorded_label(utc), utc.astimezone().strftime("%Y-%m-%d %H:%M"))
+
+class SessionLeaderTest(unittest.TestCase):
+    """Every session has a 'winner' - a practice or quali session's is whoever ended up P1."""
+
+    def _session(self, name="Leclerc"):
+        leader = _entry(position=1)
+        leader.driver_name = name
+        return SimpleNamespace(classification=SimpleNamespace(winner=leader))
+
+    def test_returns_the_leader(self):
+        self.assertEqual(session_leader(self._session("Leclerc")), "Leclerc")
+
+    def test_no_classification_is_none(self):
+        self.assertIsNone(session_leader(SimpleNamespace(classification=None)))
+
+    def test_empty_classification_is_none(self):
+        empty = SimpleNamespace(classification=SimpleNamespace(winner=None))
+        self.assertIsNone(session_leader(empty))
+
+    def test_name_of_is_injectable(self):
+        self.assertEqual(session_leader(self._session("Player"), name_of=lambda e: "Kevin"),
+                         "Kevin")
+
+    def test_works_on_a_real_non_race_classification(self):
+        """Against the real dataclass rather than a stand-in.
+
+        ``Classification.winner`` is ``entries[0]``, and nothing in ``session_leader`` branches
+        on session type - which is the whole point of the helper. This is also the test that
+        would have caught the stand-in drifting from the real object's interface.
+        """
+        quali = make_session(1, SessionType.QUALIFYING_3, winner="Pole")
+        self.assertEqual(session_leader(quali), "Pole")
 
 
 if __name__ == "__main__":

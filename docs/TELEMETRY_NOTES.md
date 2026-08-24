@@ -196,6 +196,95 @@ single missing lap number bracketed by a slow lap is a red-flag restart and is e
 several consecutive laps missing, usually with the Final Classification gone too, is lost telemetry.
 Only the second one is a bug.
 
+## `tyre_age_laps` is unreliable at the lap boundary — split stints on wear
+
+*Found 2026-08-24 while specifying the E1 tyre-life chart.*
+
+`LapTyreContext.age_laps` comes from Car Status snapshotted as the car crosses the line, and the
+snapshot straddles the game's own increment. Inside a **single** stint the stored sequence looks
+like this (session `11708585…`, laps 1-9, one set of mediums):
+
+    lap 1 age 0 | lap 2 age 2 | lap 3 age 2 | lap 4 age 4 | lap 5 age 4 | lap 6 age 5 …
+
+Age both jumps by 2 and repeats. **Do not derive stint boundaries from it.** A rule of
+"new stint when age does not increment by exactly 1" turns that 27-lap race into **fourteen**
+stints.
+
+**Use cumulative wear instead.** `LapRow.tyre_wear` is monotonically non-decreasing within a stint
+and resets to ~0 on a new set, so a *drop* in wear (or a compound change) is the reliable boundary.
+That rule gives the correct 3 stints for `14435457…` and matches the classification's own
+`tyre_stints`.
+
+Two related traps in the same data:
+
+- **Pit laps leave single-lap artefact stints.** In `11708585…` laps 19-20 are absent and lap 21
+  reports the *old* compound at 49.8% wear — a stale in-lap reading — before lap 22 starts the
+  fresh set. Any stint rule will emit a 1-lap stint there. The E1 chart's "minimum 2 laps per
+  stint" rule drops it without a special case.
+- **Lap numbers are not contiguous.** Plot against lap number, never list index (see also the
+  red-flag note above).
+
+Coverage is good: **406 of 406** stored laps carry `tyre_wear`, `tyre_age_laps` and
+`tyre_visual_compound`.
+
+## The pit out-lap carries the whole pit loss (+14 to +37 s)
+
+*Measured 2026-08-24 across every 50%-distance race in the database.* The game does not split pit
+time across the in-lap and out-lap: the **first lap of each post-pit stint** absorbs it.
+
+    comp 18  laps 3-20   stintlap1 119.594s   median-rest 82.737s   delta +36.857s
+    comp 18  laps 14-29  stintlap1 112.245s   median-rest 91.487s   delta +20.758s
+    comp 17  laps 22-29  stintlap1 107.636s   median-rest 88.814s   delta +18.822s
+
+This matters for any per-stint pace chart: the interesting degradation signal is **1-3 s**, so an
+auto-scaled y-axis that includes out-laps compresses it to near-invisibility — badly so on a
+stint-relative axis, where every out-lap lands on the same x position. Derive the range from the
+representative laps and let out-laps clip (DECISIONS → UI).
+
+**The race start is not the same case.** Stint 1 lap 1 runs only +2 to +3 s over its stint median,
+and is sometimes *faster* (low fuel, fresh tyres, no pit loss) — so it needs no exclusion.
+
+## Event packets are captured but never parsed
+
+*Found 2026-08-24.* `session/assembler.py` dispatches on ten packet ids; **`PacketId.EVENT` (3) is
+not among them**, so every event the game sends is decoded past. The recorder appends *every*
+datagram unfiltered, so the data is already on disk in every capture ever made.
+
+Decoding one real capture (`20260705_132157.f1cap.gz`, 905 699 packets) gives, by packet id:
+
+    0 MOTION 102238 · 1 SESSION 10238 · 2 LAP_DATA 102266 · 3 EVENT 9629 · 4 PARTICIPANTS 1030
+    5 CAR_SETUPS 10240 · 6 CAR_TELEMETRY 102251 · 7 CAR_STATUS 102233 · 8 FINAL_CLASS 22
+    10 CAR_DAMAGE 51125 · 11 SESSION_HISTORY 102549 · 12 TYRE_SETS 102267 · 13 MOTION_EX 102252
+    15 LAP_POSITIONS 5110 · 16 CAR_TELEMETRY_2 102249
+
+and within those EVENT packets, by event code:
+
+    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10
+    SEND 5 · SSTA 5 · RTMT 5 · LGOT 3 · SCAR 3 · RDFL 1 · CHQF 1
+
+`OVTK` carries the overtaking and overtaken vehicle indices (on-track passes, the real thing — not
+net positions gained). `PENA` carries penalty type, infringement, vehicle index, **lap number** and
+time. Both are what PRIORITIES → **E15** would ingest, and because the packets are already
+captured, **a re-ingest recovers them retroactively — no re-recording**.
+
+Also unparsed and worth knowing about: **`TYRE_SETS` (id 12)**, ~102k packets per capture, which
+carries per-set wear and remaining life directly. The E1 tyre-life chart does not need it (per-lap
+`tyre_wear` is enough), but it is the better source if that chart ever grows.
+
+## Game mode ids: the 2026 career modes are undocumented
+
+*Observed 2026-08-24.* `game_mode 78` is **Driver Career '26** — every "Driver Career with the 2026
+cars" recording carries it, confirmed in the database against the session detail view. It is **not
+in the UDP specification**; EA has not published the '26 mode ids, and `GAME_MODE_NAMES` stops at
+30/75/127, so it currently renders `Unknown game mode (78)`.
+
+- **My Team '26 is still unknown** — no My Team '26 recording exists yet. Capture one, read the
+  value, add it.
+- **Grand Prix Multiplayer "Championship"** (league racing, also on 2026 cars) reports
+  `Online Custom` correctly, so only the *career* mode ids shifted.
+
+Record these as **observed**, not specified — see PRIORITIES → E16.
+
 ## Track ids worth remembering
 Imola is **27** (in the 2025 calendar); Madrid is **42** (new in 2026, replaces Imola in that
 calendar). `official_calendar(year)` encodes the preset order for each.

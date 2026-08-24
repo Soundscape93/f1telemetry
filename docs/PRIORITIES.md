@@ -165,8 +165,12 @@ is in *Recently closed*.
 (label `patch`, A4 + A4b alone), released on its own rather than grouped: everything behind it is
 large, so grouping would have held a five-release-old known issue behind a multi-week rework.
 
-**The rest of Cycle 4 is the E-block, and its order is now decided — 2026-08-18: E1/E2 → E3 → E5.**
-Not "in whatever order they earn", which is what this line used to say. These three are what make
+**Cycle 4 closed with A4b — corrected 2026-08-24.** It contained A4 and A4b and nothing else,
+and both shipped as v0.8.1. An earlier version of this line placed the whole E-block inside
+Cycle 4; that was wrong, and the E1/E2/E3/E5 rows below no longer say it.
+
+**The E-block is the work after it, and its order is decided — 2026-08-18: E1/E2 → E3 → E5.**
+Not "in whatever order they earn", which is what that line used to say. These three are what make
 this a *full app* rather than one with placeholder sidebar entries, and **E1/E2 is next** —
 picked up in its own session, deliberately not the same one that closed A4.
 
@@ -233,10 +237,13 @@ re-run under WAL on 2026-08-05 and passes.
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
-| E1 | Sessions surface | open — **planned in full 2026-08-20**, not started; with E2 inside it | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
-| E2 | Deleted-sessions manager | open — **planned in full 2026-08-20**, inside E1; store side partly built | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
-| E3 | Analytics surface | open — **Cycle 4, after E1/E2** | ROADMAP → Other surfaces |
-| E5 | Bug report page | open — **Cycle 4, last of the E-block** | ROADMAP → Other surfaces |
+| E1 | Sessions surface | **in progress** — branches 0-1 merged; **detail-view layout specified 2026-08-24**, branch 2 split into 2a (built) / 2b / 2c | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E2 | Deleted-sessions manager | open — **planned in full 2026-08-20**, inside E1 (branches 3-4, not started); store side partly built | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
+| E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
+| E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.8.2 release** so it shares one re-ingest | the note below |
+| E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
+| E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -245,6 +252,66 @@ re-run under WAL on 2026-08-05 and passes.
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
 difference between the 2025 and 2026 cars is **tyre pressure**. Remaining (small) work is to
 verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
+
+**E14 — a session that ran both dry and wet.** `ui/components/weather.py` already draws the icon
+(`weather.MIXED`); nothing selects it yet. `SessionResult.weather` is a single value, and the
+assembler's `self._scaffold = normalize_session(packet)` is last-write-wins, so what is stored is
+the condition at the *end* of the session.
+
+**Not from `weatherForecastSamples`** — evaluated 2026-08-24 and rejected, for three reasons that
+would otherwise be rediscovered. The samples are weekend-wide (each carries its own
+`session_type`, and Sprint Race and Grand Prix both report 15, so a sprint weekend cannot be
+filtered cleanly — invariant #5); past offsets roll off as the session runs, so the last packet's
+forecast no longer covers the transition that actually happened; and they are a *forecast*, which
+`forecast_accuracy` may mark Approximate.
+
+**Do this instead:** accumulate the distinct `weather` values the Session packets actually report
+across a session. Ground truth, no session-type filtering, no accuracy caveat, and it sets up a
+real weather timeline later. Dry is `CLEAR` / `LIGHT_CLOUD` / `OVERCAST`, wet is `LIGHT_RAIN` /
+`HEAVY_RAIN` / `STORM`; both present → mixed, otherwise keep the snapshot.
+
+**E15 — the Event packets are already in every capture, unparsed.** Found 2026-08-24 while
+checking what the E1 session detail view could actually show. `session/assembler.py` dispatches on
+ten packet ids and **`PacketId.EVENT` is not one of them**, so every event the game sends is
+decoded past. The recorder writes *every* datagram unfiltered, so the data is on disk already —
+decoding one real capture gives:
+
+    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10 · SEND/SSTA/RTMT 5 …
+
+`OVTK` carries the overtaking and overtaken vehicle indices; `PENA` carries penalty type,
+infringement, vehicle index, **lap number** and time. `reference.PENALTY_NAMES` and
+`INFRINGEMENT_NAMES` already exist and are unused — the *display* half is written.
+
+**This is recoverable retroactively**: a re-ingest of existing captures fills it in, with no
+re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should **land with E14** and
+share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
+`Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
+
+**Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
+E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates
+tyre degradation with fuel burn-off (~1.1-1.3 kg/lap, so later stints run lighter and look faster).
+E1 states the caveat rather than correcting for it — a correction needs a track- and car-dependent
+kg→seconds coefficient, and guessing one silently would replace an honest raw number with an
+estimate.
+
+**No ingest work is needed**: `fuel_in_tank` is already stored per lap, 406 of 406 populated. What
+it needs is the estimation method and a way to show its uncertainty, which is Analytics' remit, not
+session detail's. See DECISIONS → UI and ROADMAP → Analytics.
+
+**E16 — game-mode ids for 2026.** `game_mode 78` is **Driver Career '26**, established from
+observation 2026-08-24: every "Driver Career with the 2026 cars" recording carries it, checked in
+the database against the session detail view. It is **not in the UDP specification** — EA has not
+documented the '26 mode ids — so `GAME_MODE_NAMES` renders it `Unknown game mode (78)` today.
+Add it, labelled as observed rather than specified.
+
+**Still unknown: My Team '26**, because there is no My Team '26 recording yet. Add that id the
+same way once one exists. For contrast, Grand Prix Multiplayer "Championship" (the league, also on
+2026 cars) already reports `Online Custom` correctly — so only the *career* modes shifted.
+
+Shaped exactly like the `ai_difficulty` branch: assembler → `SessionResult` → `SessionRow` → both
+mappings → **`PIPELINE_VERSION` 3→4**. **Before the release**: `## Unreleased` already says
+*Re-ingest needed: yes*, so one re-ingest covers this and `ai_difficulty` together; afterwards it
+costs users a second one.
 
 ## P3 — later / opportunistic
 
@@ -326,7 +393,7 @@ the open half worth building, not a second hint.
 dialog's button at the matching setup asset's `browser_download_url` rather than the release page,
 and **say in the dialog that installing an update needs administrator rights and a Windows restart**.
 The second half stands on its own — the dialog currently says nothing about the reboot, which is the
-most important fact about updating this app. It can ride along with any Cycle 4 release.
+most important fact about updating this app. It can ride along with any release.
 
 **The open question C8b left: should the installer write the firewall rule at all?** Recorded
 2026-08-15 because the trade-off genuinely moved — when C8b was decided the rule was free, and it now
@@ -825,7 +892,8 @@ up opportunistically rather than scheduled.
 
 ## Deferred, with reasons
 
-- **E1/E2, E3 and E5 are no longer deferred — moved into Cycle 4 on 2026-08-18.** Their stated
+- **E1/E2, E3 and E5 are no longer deferred — un-deferred 2026-08-18; not Cycle 4 work
+  (corrected 2026-08-24).** Their stated
   reason here was "after Cycle 3", and Cycle 3 is closed, so leaving the project's *next* item
   filed under *Deferred* was reading as forgotten. They now have P2 rows and an order. What was
   written here is still true of the work and is worth keeping: **E1/E2 is not the small view it

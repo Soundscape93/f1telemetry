@@ -40,7 +40,9 @@ from .workers import ImportWorker, IngestWorker, RecorderWorker, ReingestWorker,
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
+from ..storage.captures import CaptureStore
 from .seasons import SeasonsView
+from .sessions import SessionsView
 from .laps import LapsView
 from .help_page import HelpPage
 from .style import MUTED_TEXT_QSS, apply_heading
@@ -106,6 +108,9 @@ class MainWindow(QMainWindow):
         # The UI reads lap/traces on the GUI thread from its own LapStore (same DB file and
         # trace_dir the IngestWorker writes to). Consumed by the LapsView; disposed on close.
         self._lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+        # The sessions detail page resolves "which capture did this come from?" on the GUI
+        # thread; the workers keep building their own short-lived stores on their own threads.
+        self._capture_store = CaptureStore(self._db_url)
 
         self.setCentralWidget(self._build_central())
 
@@ -187,8 +192,10 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(_PlaceholderPage(
             "Dashboard", "The recent sessions, laps, and analytics will be shown here."))
         self._stack.addWidget(self._seasons_view)
-        self._stack.addWidget(_PlaceholderPage(
-            "Sessions", "The sessions will be listed here, with details and lap times."))
+        self._sessions_view = SessionsView(self._session_store, self._season_store,
+                                           capture_store=self._capture_store,
+                                           lap_store=self._lap_store)
+        self._stack.addWidget(self._sessions_view)
         self._laps_view = LapsView(self._session_store, self._lap_store)
         # Deleting a session's stored results changes which laps exist, so the laps surface's
         # canonical track-map cache has to go the same way it does after an ingest. The weekend
@@ -347,6 +354,8 @@ class MainWindow(QMainWindow):
         current = self._stack.currentWidget()
         if current is self._seasons_view:
             self._seasons_view.refresh()
+        elif current is self._sessions_view:
+            self._sessions_view.refresh()
         elif current is self._laps_view:
             self._laps_view.refresh()
 
@@ -817,6 +826,7 @@ class MainWindow(QMainWindow):
         self._session_store.close()
         self._season_store.close()
         self._lap_store.close()
+        self._capture_store.close()
         super().closeEvent(event)
 
 
