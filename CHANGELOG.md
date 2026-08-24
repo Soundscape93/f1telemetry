@@ -51,6 +51,11 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 - **Deleting a session now removes its laps and their saved traces too.** They were left behind
   on every delete: invisible in the app, but still in the database and still taking up disk
   space under `lap_traces/`.
+- **A race's opening lap is no longer dropped when the grid sits far past the timing line.** On some
+  circuits the standing-start slot is a few hundred metres beyond the start/finish line — COTA's
+  pole is the furthest, and Jeddah was enough to trigger it — and lap 1 was being discarded as
+  though the recording had been started mid-lap. The race just had no opening lap, with nothing said
+  about it. Affected races get their lap 1 back on the re-ingest this release already asks for.
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 3. The new column is added silently on
 startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty stored

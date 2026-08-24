@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 
 from f1telemetry.src.protocol.enums import Formula, PacketId, ResultStatus, SessionType, Weather
-from f1telemetry.src.session.assembler import assemble
+from f1telemetry.src.session.assembler import _MAX_LAP_START_DISTANCE_M, assemble
 
 
 def _hdr(pid, uid, frame=0, player=0):
@@ -234,16 +234,52 @@ class InLapDroppedTest(unittest.TestCase):
 
 
 class DistanceGuardTest(unittest.TestCase):
-    """A lap that starts far from the line is not emitted, even if Session History has a time for it,"""
+    """The guard that keeps a mid-lap join out of the results, and what it must not catch."""
+
     def test_lap_starting_far_from_line_is_not_emitted(self):
-        """The first lap starts far from the line, so it is not emitted, even though Session History has a time for it."""
+        """A lap joined well past the line is dropped, even though Session History has a time for it.
+
+        Derived from the constant rather than pinned to a number: a fixture sitting on the exact
+        threshold is how a later widening of the bound went unnoticed.
+        """
         stream = [session_pkt(1), participants_pkt(1)]
-        stream += frames(1, 1, [250, 1500, 3000])
+        stream += frames(1, 1, [_MAX_LAP_START_DISTANCE_M + 100, 1500, 3000])
         stream += frames(1, 2, [5, 1500, 3000])           # trailing, starts near line
         stream.append(sh_pkt(1, [_lap_entry(90000, 0x0F),
                                  _lap_entry(85000, 0x0F)]))
         (race,) = list(assemble(stream))
         self.assertEqual([l.lap_number for l in race.laps], [2])
+
+    def test_a_standing_start_from_a_distant_grid_slot_is_kept(self):
+        """A race's lap 1 begins at its grid slot, which can sit a long way past the timing line.
+
+        The bound is set by pole, not by the back of the grid: the grid queues *backwards* from P1
+        towards the line, so a slot further down sits nearer to it — and on a circuit where pole is
+        already close, the lower slots fall behind the line entirely and their lap 1 starts from a
+        few metres, well inside the guard. So the deepest case on the calendar is P1 at COTA, about
+        323 m. Measured here: Jeddah 246.5 m, Shanghai 175.7 m.
+
+        These are real opening laps, not mid-lap joins, and a bound that clips them loses the race
+        start silently — the session simply has no lap 1.
+        """
+        for start_m in (175.7, 246.5, 323.0):
+            with self.subTest(grid_slot_m=start_m):
+                stream = [session_pkt(1), participants_pkt(1)]
+                stream += frames(1, 1, [start_m, 1500, 3000])
+                stream += frames(1, 2, [5, 1500, 3000])
+                stream.append(sh_pkt(1, [_lap_entry(90000, 0x0F),
+                                         _lap_entry(85000, 0x0F)]))
+                (race,) = list(assemble(stream))
+                self.assertEqual([l.lap_number for l in race.laps], [1, 2])
+
+    def test_the_bound_clears_the_deepest_known_grid_slot(self):
+        """COTA's pole slot is the furthest past the line on the calendar, about 323 m.
+
+        Pinned because the reason for the number is circuit geometry, not anything visible in the
+        code — so a later tightening that looks harmless would go back to dropping race starts with
+        nothing to say so.
+        """
+        self.assertGreater(_MAX_LAP_START_DISTANCE_M, 323)
 
 
 class TimingDetailTest(unittest.TestCase):
