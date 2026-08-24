@@ -742,6 +742,19 @@ what would trigger revisiting it.
   anchor point would be fabricating a measurement. Relatedly, stint offsets are computed from real
   lap *numbers*, never from list index: lap numbers are not contiguous (a red flag or a dropped lap
   leaves a gap), and an index axis would silently close that gap and misplace everything after it.
+- **The session detail's track map is the driven fastest lap, not the canonical median line**
+  *(decided 2026-08-24)*. The Laps surface draws the weekend's median racing line via
+  `TrackLayoutProvider`; the session detail draws the player's fastest lap through
+  `TrackMap.set_trace`. Two measured reasons: the provider walks every Motion lap of the whole
+  weekend, ~1 s of Parquet reading on the GUI thread before its cache warms, against ~10 ms for
+  one lap; and it lives in `ui/laps/`, which the Sessions surface must not import from. The
+  fastest lap specifically, because an out-lap or a spin would draw an excursion as if it were the
+  circuit. If this ever needs the median, the honest fix is moving the provider into
+  `ui/components/` and giving it a home on the window - not a cross-surface import.
+- **The classification box names the session type in its own title** *(decided 2026-08-24)*.
+  It duplicates the page header, which normally argues against it - but the box is screenshotted
+  and shared on its own, and a results table that doesn't say which session it is has lost the
+  thing that makes it readable to someone who wasn't there.
 - **The pace and tyre-life charts are stacked full-width on a shared *stint-relative* x-axis**
   *(decided 2026-08-24, superseding the left/right split agreed earlier the same day)*. Two
   decisions in one, both measured rather than assumed:

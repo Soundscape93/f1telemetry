@@ -44,6 +44,12 @@ class TrackMap(QWidget):
             return
         
         self._pg = pg
+        # Antialiasing is a *global* pyqtgraph option, and TracePlot sets it on construction. This
+        # map is drawn on surfaces that build no TracePlot (the session detail), where it would
+        # otherwise render aliased - the outline's quality must not depend on whether some other
+        # chart happened to be built first. Set here rather than at app start because pyqtgraph is
+        # imported lazily, so that it stays optional.
+        pg.setConfigOptions(antialias=True)
         self._widget = pg.PlotWidget()
         self._widget.setFixedSize(_SIZE, _SIZE)
         self._widget.setMenuEnabled(False)

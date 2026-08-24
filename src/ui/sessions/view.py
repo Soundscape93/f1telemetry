@@ -22,6 +22,7 @@ class SessionsView(QWidget):
     """Browse every stored session and drill into one session's classification."""
 
     sessions_changed = Signal()
+    lap_requested = Signal(str, int)  # session uid (str, uint64-safe), lap_number
 
     def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
                  parent=None):
@@ -34,6 +35,9 @@ class SessionsView(QWidget):
         self._detail.overview_requested.connect(self._show_overview)
         self._overview.sessions_changed.connect(self.sessions_changed)
         self._detail.sessions_changed.connect(self.sessions_changed)
+        # Not navigation within this surface: opening a lap's telemetry means leaving Sessions
+        # entirely, which only the window can do (pages never reference sibling surfaces)
+        self._detail.lap_requested.connect(self.lap_requested)
 
         self._stack = QStackedWidget()
         for page in (self._overview, self._detail):

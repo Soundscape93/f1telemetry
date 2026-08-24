@@ -243,6 +243,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.8.2 release** so it shares one re-ingest | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview | open — **decided 2026-08-24**; blocked on **E1c**, then **E1b** | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
@@ -286,6 +287,48 @@ infringement, vehicle index, **lap number** and time. `reference.PENALTY_NAMES` 
 re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should **land with E14** and
 share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
 `Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
+
+**Lap-context indicators for the Laps box — banked 2026-08-24, ride with the E14/E15 re-ingest.**
+Requested while reviewing the E1 detail view: mark **in-laps / out-laps** and **safety-car laps**
+in the session's lap list, because those laps are slow for reasons that have nothing to do with
+pace and currently read as if the driver simply lost time. Also the input the pace chart's out-lap
+handling infers today from lap-time magnitude (DECISIONS → UI) — with a stored flag it could stop
+inferring.
+
+**Not free, and not Event-packet work.** Pit status and driver status are per-frame fields on
+**Lap Data**, and safety-car state is on the **Session** packet; neither is on `LapRow`, and the
+assembler snapshots neither at the lap boundary. So this is additive lap columns plus a
+`PIPELINE_VERSION` bump — which is exactly why it should land in the **same re-ingest as E14 and
+E15** rather than asking the user a third time.
+
+**E1d — Seasons opens the weekend in Sessions, not in its own round page.** *Decided
+2026-08-24.* Double-clicking a round in a season's calendar should open the **Sessions overview
+filtered to that weekend**, in weekend running order (P1, P2, … Race), with each session's
+classification shown below it, and each session opening the Sessions detail page. The round-centric
+weekend page shrinks and eventually goes.
+
+**Chosen over the cheaper inverse** (keeping the weekend page and having it link into Sessions
+detail), because the flow a user expects is "open the round → see that weekend's sessions", and the
+Sessions surface is where sessions belong.
+
+**It is blocked, and the order is forced.** The weekend page does four jobs and only *one* of them
+— rendering classification tables — is duplicated in Sessions:
+
+1. **E1c first — league display names.** The weekend page resolves them via
+   `display_name_fn(roster)`; Sessions uses the raw `driver_name`. Routing there before E1c would
+   make league weekends read *worse* than they do today, which is the opposite of the point.
+2. **Then the filtered overview itself** — a weekend/round filter plus a mode that shows the
+   classification under each card. Note this gives the Sessions overview two display modes
+   depending on how it was reached; that is a real cost, accepted deliberately.
+3. **Then E1b — session-centric assignment.** The weekend page is the *only* path that writes
+   `season_assignments`. It cannot be removed until assignment has somewhere else to live.
+4. **Only then** can the weekend page be retired.
+
+**One thing has no home yet and must not be dropped silently:** the weekend page's *pending* and
+*skipped* slot rows. `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
+weekend where P3 was skipped shows it as "Skipped" rather than merely absent. A filtered list of
+*stored* sessions cannot express a session that does not exist — the filtered overview needs to
+carry this over explicitly, or the information is lost.
 
 **Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
 E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates

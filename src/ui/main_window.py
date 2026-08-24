@@ -201,6 +201,9 @@ class MainWindow(QMainWindow):
         # canonical track-map cache has to go the same way it does after an ingest. The weekend
         # page can't reach the laps view itself - pages never reference siblings (PRIORITIES -> A1).
         self._seasons_view.sessions_changed.connect(self._laps_view.invalidate_caches)
+        # Same rule, the other direction: a lap row on the Session detail page opens the lap's
+        # telemetry, which lives on a diffrent surface. Only the window owns both.
+        self._sessions_view.lap_requested.connect(self._show_lap)
         self._stack.addWidget(self._laps_view)
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
@@ -358,6 +361,15 @@ class MainWindow(QMainWindow):
             self._sessions_view.refresh()
         elif current is self._laps_view:
             self._laps_view.refresh()
+
+    def _show_lap(self, session_uid: str, lap_number: int) -> None:
+        """Switch to the Laps surface and open one lap, from the Sessions detail page.
+
+        Both halves are needed and neither is optional. ``LapsView.show_lap`` only moves that
+        surface's *own* stack to its detail page; without the sidebar row changing, the window's
+        stack stays on Sessions and the click does nothing visible at all."""
+        self._sidebar.setCurrentRow(_SECTIONS.index("Laps"))
+        self._laps_view.show_lap(session_uid, lap_number)
 
     def _check_capabilities(self) -> None:
         """Log what this build can do, and say so once when a piece is missing.

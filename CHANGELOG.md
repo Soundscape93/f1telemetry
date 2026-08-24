@@ -30,6 +30,16 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   the capture it came from. Every session has a winner, including practice and qualifying, where
   it's whoever ended up P1. Sessions can be deleted from here too, with the same guard the
   weekend picker uses.
+- **The session detail page now shows how the session actually went.** Alongside the final
+  classification it lists your finishing position, points, the session's fastest lap, laps
+  completed, the AI difficulty, the conditions, the team and mode you were driving, and every lap
+  you drove with its tyre and its gap to your own best. Clicking a lap opens its telemetry.
+  Points appear only for races and sprints — the game reports a meaningless carried-over figure
+  for practice and qualifying. Penalties are shown when the game recorded them, though the type
+  and lap of each one aren't stored yet. Sessions recorded in Driver Career on the 2026 cars are
+  now named instead of showing an unknown mode id.
+- **Circuit outline** in the details box, and the session type in the
+  classification box title.
 
 ### Fixed
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a
