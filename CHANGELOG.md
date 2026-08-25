@@ -40,6 +40,18 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   now named instead of showing an unknown mode id.
 - **Circuit outline** in the details box, and the session type in the
   classification box title.
+- **The session detail page now charts pace and tyre life per run.** Under your laps, two
+  full-width graphs share one stint-relative axis — tyre life above, observed lap time below — so
+  every run restarts at lap 1 and two compounds can be read against each other directly. Runs are
+  worked out from the car itself: fresh tyres show up as the wear resetting, the compound changing
+  or the age counter going back to zero, and a trip back to the garage shows up in the fuel load —
+  so two runs on the *same* set of tyres, which practice and qualifying are full of, are no longer
+  drawn as one continuous line. Each point's tooltip carries the real lap number and the wear on
+  all four wheels. Lap times are what you actually drove and are not corrected for fuel: a later
+  run is partly quicker simply because the car is lighter. The pace scale is always 8 seconds,
+  starting just under your quickest lap, so a run whose laps are within a few tenths reads as the
+  dead heat instead of being stretched to fill the graph — and anything outside that window
+  is still drawn, clipped to the nearer edge, with its true time on hover.
 
 ### Fixed
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a
@@ -51,6 +63,11 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 - **Deleting a session now removes its laps and their saved traces too.** They were left behind
   on every delete: invisible in the app, but still in the database and still taking up disk
   space under `lap_traces/`.
+- **A race's opening lap is no longer dropped when the grid sits far past the timing line.** On some
+  circuits the standing-start slot is a few hundred metres beyond the start/finish line — COTA's
+  pole is the furthest, and Jeddah was enough to trigger it — and lap 1 was being discarded as
+  though the recording had been started mid-lap. The race just had no opening lap, with nothing said
+  about it. Affected races get their lap 1 back on the re-ingest this release already asks for.
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 3. The new column is added silently on
 startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty stored

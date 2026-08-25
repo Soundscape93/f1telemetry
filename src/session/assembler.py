@@ -53,7 +53,14 @@ from ..protocol.enums import PacketId
 
 # A cleanly caputred lap begins near the start line. A lap whose sample is well past
 # it was joined mid-way (started recording) or is an out-lap, so no clean trace is kept.
-_MAX_LAP_START_DISTANCE_M = 200  # meters
+#
+# The bound has to clear a standing start: the grid sits some way past the timing line, and how far
+# is set by pole rather than by the back of the grid — the grid queues backwards from P1 towards the
+# line, so lower slots sit nearer it, and where pole is already close they fall behind the line and
+# start their lap 1 from a few metres. The deepest slot on the calendar is P1 at COTA, about 323 m;
+# measured in these captures, Jeddah is 246.5 m and Shanghai 175.7 m. 200 dropped those opening laps
+# silently. 350 clears COTA while still meaning "at the start" - about a tenth of a Monaco lap.
+_MAX_LAP_START_DISTANCE_M = 350  # meters
 
 _LAP_VALID_BIT = 0x08  # bit 3 of lap_valid_bit_flags = whole lap valid
 

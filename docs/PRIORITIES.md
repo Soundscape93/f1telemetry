@@ -245,6 +245,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview | open — **decided 2026-08-24**; blocked on **E1c**, then **E1b** | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
+| E17 | Store `driver_status` / `pit_status` from Lap Data | open — **found 2026-08-25** while fixing the E1 pace charts; **not part of E15** | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -340,6 +341,28 @@ estimate.
 **No ingest work is needed**: `fuel_in_tank` is already stored per lap, 406 of 406 populated. What
 it needs is the estimation method and a way to show its uncertainty, which is Analytics' remit, not
 session detail's. See DECISIONS → UI and ROADMAP → Analytics.
+
+**E17 — `driver_status` is in Lap Data, and is not E15.** Found 2026-08-25 while fixing the
+session pace/tyre charts. `LapData` already carries `driver_status` (0 = in garage, 1 = flying lap,
+2 = in lap, 3 = out lap, 4 = on track), `pit_status` and `pit_lane_timer_active`, and the assembler
+already decodes that packet — it simply reads past those fields. **Keep this separate from E15**,
+which is Event-packet ingest (`PENA` / `OVTK`): different packet, no Event work, and the two share
+nothing but a re-ingest.
+
+Why it matters: the charts need to know where one *run* ends and the next begins, and in practice
+and qualifying a single set of tyres often does several runs. No tyre signal separates those — two
+fresh sets of the same compound both report `age 0`, the same compound, and rising wear. The
+shipped fix infers the garage visit from `fuel_in_tank` (a lap burns 1.06-1.96 kg and fuel cannot
+be added on track; measured 22 detections in practice/quali against 1 in 322 race transitions), and
+that is a **proxy**. `driver_status` says it outright, and would also make the out-lap flag exact
+instead of inferred from position-in-run.
+
+The garage frames sit in laps that are never emitted (an in-lap has no Session History time, an
+out-lap starts too far past the line), so the useful shape is a flag computed in the assembler —
+"was the car in the garage between the end of the last emitted lap and the start of this one" —
+rather than a raw per-lap status. Needs a new column, a `PIPELINE_VERSION` bump and a re-ingest, so
+bundle it with **E14/E15** and pay for one re-ingest. Fuel then becomes the fallback for rows
+ingested before the bump.
 
 **E16 — game-mode ids for 2026.** `game_mode 78` is **Driver Career '26**, established from
 observation 2026-08-24: every "Driver Career with the 2026 cars" recording carries it, checked in
