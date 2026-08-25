@@ -204,6 +204,48 @@ C8d entry in P3 for the full reasoning and for what brings it back.
   accumulated. **A4b** carried the five remaining controls and closed on 2026-08-18 — see its
   row in P2.
 
+**Release shape from here — decided 2026-08-25.** Written down because the grouping is driven by
+the **re-ingest prompt**, not by what feels finished, and that is not obvious from the item rows.
+
+| Release | Contents | Label | Re-ingest |
+|---|---|---|---|
+| **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (`driver_status`) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → 3 |
+| **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — 3 → 4 |
+| **v0.11.0** | **E1c** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework) | `minor` | no |
+
+**The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
+and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
+means "your stored data is older than the current pipeline" — it does not count features — so
+**anything that lands before v0.9.0 ships rides that same prompt at no extra cost**. Only work
+landing *after* the release costs a second one. So the question is never "does this need a bump",
+it is "how long am I willing to hold the release".
+
+**Why E14 and E17 are in, and E15 is out.** E14 is small: accumulate the distinct `weather` values
+the Session packets report; `weather.MIXED` already exists and nothing selects it. E17 is small and
+has its consumer already built — it replaces the fuel-load proxy that E1 branch 2c shipped, so it
+closes a documented limitation rather than adding surface. **E15 is the long pole**: the assembler
+dispatches on ten packet ids and `EVENT` is not among them, so it means routing the packet, parsing
+the event union, modelling, storing and surfacing it. Including it would let E15 set the release
+date and hold a finished Sessions surface for weeks to save one prompt. **If E14 or E17 turns out
+bigger than it looks once opened, cut it rather than hold the release** — a second prompt is a mild
+cost, a stalled release is not.
+
+**Why `minor`, not `patch`.** PACKAGING's rule is that the label reflects the *group*, so one minor
+feature among several patch fixes makes the release minor. v0.9.0 ships a whole new surface;
+v0.10.0 ships new user-visible capability (overtakes, per-penalty detail), which is a feature and
+not a fix.
+
+**Why the Seasons rework is not `major`.** It retires the round-centric weekend page, which is a
+real breaking change to the UI — but `major` in this repo means **1.0.0**, and a 0.x line carries no
+stability promise, so a breaking change there is conventionally still minor. 1.0.0 is better spent
+on the milestone this project actually names: the point where the app can be handed to a colleague
+without caveats. Revisit it then, not at a view rework.
+
+**E16 is not in this table on purpose.** It needs no bump — `game_mode` is stored as a raw int
+(invariant #9), so it is a `GAME_MODE_NAMES` lookup entry and nothing more — and its code half is
+already done and already in `## Unreleased` (`78: "Driver Career '26"`). Its open remainder, My Team
+'26, is not code: it is waiting for a capture from that mode to exist.
+
 **Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
 surfaces: translating a UI that is still growing means translating it twice.
 
@@ -243,7 +285,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.8.2 release** so it shares one re-ingest | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
-| E1d | Seasons routes into a weekend-filtered Sessions overview | open — **decided 2026-08-24**; blocked on **E1c**, then **E1b** | **`E1_E2_PLAN.md`**; the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data | open — **found 2026-08-25** while fixing the E1 pace charts; **not part of E15** | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
@@ -388,6 +430,8 @@ costs users a second one.
 | A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
+| E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **step 1 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
+| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **step 3 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
