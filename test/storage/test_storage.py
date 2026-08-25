@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from f1telemetry.src.domain.models import (
     Classification, ClassificationEntry, SessionResult, TyreStint,
@@ -10,7 +12,7 @@ from f1telemetry.src.domain.models import (
 from f1telemetry.src.protocol.enums import (
     Formula, ResultReason, ResultStatus, SessionType, Weather,
 )
-from f1telemetry.src.storage.sessions import SessionStore
+from f1telemetry.src.storage.sessions import DeletedSession, SessionStore
 
 
 def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=True):
@@ -44,6 +46,13 @@ def make_session(uid=0x8000_0000_0000_0000, stype=SessionType.RACE, with_player=
 def safe_reason():
     # use whatever the "no special reason" member is; fall back to raw 0
     return getattr(ResultReason, "INVALID", None) or getattr(ResultReason, "NONE", 0)
+
+
+def _utc(value: datetime | None) -> datetime | None:
+    """SQLite hands datetimes back naive; compare them as the UTC they were written as."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
 
 
 class StorageTestBase(unittest.TestCase):
@@ -201,6 +210,93 @@ class TombstoneTest(StorageTestBase):
         self.store.save(make_session(uid=big))
         self.store.delete(big)
         self.assertIn(big, self.store.deleted_uids())
+
+    def test_delete_records_what_the_session_was(self):
+        """The tombstone is descriptive on purpose: the deleted-sessions view has no capture to
+        read, so whatever it shows has to have been copied off the row as it went."""
+        recorded = datetime(2026, 8, 9, 21, 2, tzinfo=timezone.utc)
+        session = dataclasses.replace(
+            make_session(uid=1001, stype=SessionType.QUALIFYING_1), recorded_at=recorded)
+        self.store.save(session)
+
+        before = datetime.now(timezone.utc)
+        self.store.delete(1001)
+
+        tomb = self.store.deleted_sessions()[0]
+        self.assertEqual(tomb.session_uid, 1001)
+        self.assertEqual(tomb.track_id, 7)
+        self.assertEqual(tomb.session_type, SessionType.QUALIFYING_1)
+        self.assertEqual(_utc(tomb.recorded_at), recorded)
+        self.assertGreaterEqual(_utc(tomb.deleted_at), before - timedelta(seconds=5))
+
+    def test_tombstone_writes_without_a_session_row(self):
+        """The primitive ``delete`` cannot be: it writes nothing when the row is already gone,
+        which is exactly the state a rolled-back restore has to recover from."""
+        self.assertFalse(self.store.delete(2001), "no row to delete")
+
+        self.store.tombstone(2001, track_id=3, session_type=SessionType.RACE)
+
+        self.assertTrue(self.store.is_deleted(2001))
+        self.assertIn(2001, self.store.deleted_uids())
+        tomb = self.store.deleted_sessions()[0]
+        self.assertEqual((tomb.track_id, tomb.session_type), (3, SessionType.RACE))
+        self.assertIsNone(tomb.recorded_at, "a tombstone may know nothing but the uid")
+
+    def test_tombstone_is_idempotent_and_overwrites_the_description(self):
+        """A merge, so re-tombstoning a uid refreshes it rather than failing on the primary key."""
+        self.store.tombstone(2002, track_id=3, session_type=SessionType.RACE)
+        self.store.tombstone(2002, track_id=9, session_type=SessionType.PRACTICE_2)
+
+        self.assertEqual(len(self.store.deleted_sessions()), 1)
+        tomb = self.store.deleted_sessions()[0]
+        self.assertEqual((tomb.track_id, tomb.session_type), (9, SessionType.PRACTICE_2))
+
+    def test_tombstone_can_put_the_original_deletion_time_back(self):
+        """``deleted_at`` is settable so a failed restore doesn't re-date the deletion - the
+        view must not read "deleted just now" because a restore fell over."""
+        original = datetime(2026, 8, 10, 9, 14, tzinfo=timezone.utc)
+        self.store.tombstone(2003, track_id=1, session_type=SessionType.RACE,
+                             deleted_at=original)
+
+        self.assertEqual(_utc(self.store.deleted_sessions()[0].deleted_at), original)
+
+    def test_tombstone_keeps_a_session_type_newer_than_our_enum(self):
+        """Enums are stored raw and read via safe_enum (core invariant #9), so a title update
+        that adds a session type doesn't crash the deleted-sessions view."""
+        self.store.tombstone(2004, track_id=1, session_type=250)
+        self.assertEqual(self.store.deleted_sessions()[0].session_type, 250)
+
+
+class DeletedSessionsTest(StorageTestBase):
+    """``deleted_sessions()`` - the descriptive read ``deleted_uids()`` cannot feed."""
+
+    def test_lists_nothing_when_nothing_was_deleted(self):
+        self.assertEqual(self.store.deleted_sessions(), [])
+
+    def test_lists_most_recently_deleted_first(self):
+        self.store.tombstone(1, deleted_at=datetime(2026, 8, 1, tzinfo=timezone.utc))
+        self.store.tombstone(2, deleted_at=datetime(2026, 8, 20, tzinfo=timezone.utc))
+        self.store.tombstone(3, deleted_at=datetime(2026, 8, 10, tzinfo=timezone.utc))
+
+        self.assertEqual([tomb.session_uid for tomb in self.store.deleted_sessions()], [2, 3, 1])
+
+    def test_rows_are_the_read_model_not_the_orm_row(self):
+        self.store.save(make_session(uid=1001))
+        self.store.delete(1001)
+        self.assertIsInstance(self.store.deleted_sessions()[0], DeletedSession)
+
+    def test_restoring_removes_the_row(self):
+        self.store.save(make_session(uid=1001))
+        self.store.delete(1001)
+        self.store.restore(1001)
+
+        self.assertEqual(self.store.deleted_sessions(), [])
+        self.assertFalse(self.store.is_deleted(1001))
+
+    def test_reads_a_uint64_high_bit_uid_back_as_an_int(self):
+        big = 0x8000_0000_0000_0000
+        self.store.tombstone(big, track_id=1)
+        self.assertEqual(self.store.deleted_sessions()[0].session_uid, big)
 
 
 class EnsureSchemaTest(unittest.TestCase):

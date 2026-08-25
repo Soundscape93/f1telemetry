@@ -344,6 +344,19 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   (children by cascade) so a re-ingest stops listing archives that will never come back. It
   **re-resolves every hash at delete time** rather than trusting the caller's list, keeping
   anything that turned up meanwhile; it touches no file and no session. See DECISIONS → Storage.
+  It also owns the two **single-session** write points, both here rather than on a store because
+  each needs a second aggregate and a store must not import a sibling store:
+  `delete_session(uid, session_store, season_store, lap_store=None)` → `DeleteOutcome`, which
+  **refuses** a session assigned to a season round (naming the season and round) and otherwise takes
+  the session's laps and Parquet traces with it; and `restore_session(uid, session_store,
+  capture_store, ...)` → `RestoreOutcome`, a **single-capture re-ingest** — resolve a capture
+  holding the uid through `restorable_captures` (newest ingest first, findable archives only), clear
+  the tombstone, ingest that one file, and verify the uid actually came back. `ingest_capture`
+  reads `deleted_uids()` at the *start*, so the tombstone must be cleared **before** the ingest;
+  everything decidable is therefore decided first (is it deleted, is there a capture row, is the
+  archive findable, is the choice unambiguous) and every later failure rolls back the tombstone
+  field-for-field, removing a row the failed ingest had already saved. `ingest` is injectable, as
+  it is for `reingest_all`. See DECISIONS → UI.
 
 ## Capture compression
 
@@ -398,7 +411,17 @@ reports `progress(index, total, file_name)` to a modeless progress dialog, and i
 is a `threading.Event` polled between captures — a capture is never interrupted mid-way, so the
 store never holds a partial session. It writes the new `PIPELINE_VERSION` stamp only when the pass
 completed without errors or a cancel. `MainWindow` disables the record/ingest controls while it
-runs, so there is never a second writer.
+runs, so there is never a second writer. **`RelocateWorker`** and **`ImportWorker`** repeat the
+shape for the folder search and the league import.
+
+**`RestoreWorker`** is the same shape for one session coming back: its three stores (session, lap,
+capture) are built on its own thread and disposed in one `finally`, and it emits
+`done(RestoreOutcome)` / `failed(str)`. It has **no cancel and no progress** — `reingest_all` polls
+its stop event *between* captures, while this is a single capture, and `ingest_capture` offers
+neither an interruption point nor a progress callback — so a restore is one indeterminate wait that
+the window shows as busy. The window owns it, not the page: the deleted-sessions view confirms and
+picks the capture on the GUI thread, then asks upward. A refusal (a missing archive, no capture row)
+arrives through `done`, not `failed`: it is a normal answer, not a worker failure.
 
 ## Invariants (see also CLAUDE.md and DECISIONS.md)
 
