@@ -727,8 +727,8 @@ what would trigger revisiting it.
   line plots `100 − max(wear)` across the four corners. The worst corner is what forces the stop,
   so it is the strategy-relevant number; a mean smooths away exactly the signal being looked for.
   Per-wheel values go in the tooltip, so nothing is lost.
-- **Tyre stints are split on wear *dropping* or the age counter *resetting*, never on age
-  increments** *(decided 2026-08-24)*. Age is unreliable at the lap boundary — the Car Status
+- **A charted "stint" is a *run*, not a tyre set: split on fresh tyres or a return to the
+  garage, never on age increments** *(decided 2026-08-24, extended 2026-08-25)*. Age is unreliable at the lap boundary — the Car Status
   snapshot straddles the game's increment, giving runs like `age 0, 2, 2, 4, 4` inside one stint —
   and a naive age-based split turned one 27-lap race into fourteen stints. Cumulative wear is
   monotonic within a stint and resets to ~0 on a new set, so a drop is the reliable boundary.
@@ -745,6 +745,32 @@ what would trigger revisiting it.
   put a lower number there. Verified across all 406 stored laps — it adds exactly one stint
   boundary, and changes one session of 54. The two tests are complementary, not redundant: 26 of the
   27 age falls already coincide with a wear drop, and 4 wear drops have no age fall.
+
+  **Extended 2026-08-25: a return to the garage also ends a run, read from the fuel load.** Checking
+  every session's charts showed the three tyre signals are not enough, because **a run and a set are
+  different things**. In a race they coincide — the car leaves the garage once — but practice and
+  qualifying are full of one set doing several runs, and of two *fresh sets of the same compound*
+  doing a single lap each. Nothing in the tyre data separates the latter: a Q3 pair of new softs
+  reads `age 0` on both laps, the same compound, and wear that *rises* rather than resets. Drawing
+  them as one line claims a continuity that did not happen.
+
+  `fuel_in_tank` resolves it, and is already stored 406 of 406. A full lap burns **1.06-1.96 kg**
+  across every session here, and fuel cannot be added on track — so a load that rises, or barely
+  falls, means the car was in the garage. Measured: **22 detections in practice and qualifying**,
+  every one matching a run boundary the driver confirmed, against **1 in 322 race transitions** —
+  and that one is `12316788…`, whose lap 3 is missing and whose lap 2 took 170 s. It independently
+  settled two open questions about real sessions (Suzuka Q2 was two runs on one set of inters;
+  Suzuka Q1 was one run).
+
+  **Not** `tyre_age_laps == 0` on both laps, which looks like the same signal and is not: a post-pit
+  out-lap reports `age 0` at wear `0.00` and the lap after it still reports `age 0`, so that rule
+  breaks three race stints that are currently correct. Tested before it was rejected.
+
+  This is knowingly a **proxy**. `driver_status` in the Lap Data packet states outright when the car
+  is in the garage, and would also make the out-lap flag exact rather than inferred from
+  position-in-run — but it needs a new column, a `PIPELINE_VERSION` bump and a re-ingest
+  (PRIORITIES → **E17**, deliberately separate from E15). When it lands it becomes primary and fuel
+  becomes the fallback for rows ingested before the bump.
 - **A tyre stint is drawn only from 2 laps up, in every session type** *(decided 2026-08-24)*.
   Chosen so wet qualifying and longer quali runs still get a chart, accepting that a single-timed-lap
   dry qualifying gets none. It also earns its keep as a data filter: pit in-laps produce single-lap
@@ -792,8 +818,8 @@ what would trigger revisiting it.
   **(b) Stint-relative, not absolute race lap.** Degradation is a function of stint age, so every
   stint restarts at stint lap 1 and the axis runs to the longest stint; that is what makes two
   compounds comparable. The real race lap goes in the tooltip.
-- **The pace chart's y-range excludes both pit laps and is capped at 8 s** *(decided
-  2026-08-24)*. This is what makes the stint-relative axis viable at all. Measured across every
+- **The pace chart's y-axis is a fixed 8 s window starting just under the quickest lap**
+  *(decided 2026-08-24, replaced 2026-08-25)*. This is what makes the stint-relative axis viable at all. Measured across every
   50%-distance race in the database, the first lap of each *post-pit* stint carries **+14 to +37 s**
   (the game bundles the pit loss into it). On an absolute axis those spikes sit at different x
   positions and read as "that's the stop"; on a stint-relative axis they all stack at x = 1, so an
@@ -825,6 +851,35 @@ what would trigger revisiting it.
   thing the caption warns about. Every clipped lap is still plotted at the top edge with a triangle
   marker and its real time in the tooltip: 33 of 375 timed laps (8.8%), of which 14 are out-laps
   already off the scale by rule.
+
+  **Replaced 2026-08-25: the axis is a fixed height, and the exclusions no longer scale anything.**
+  Fitting the axis to the data was wrong at *both* ends, and only the wide end had been noticed. Too
+  narrow is just as dishonest: a run whose laps sit within 0.3 s of each other had that 0.3 s
+  stretched over the full plot height, so laps that were effectively a dead heat read as a dramatic
+  fall-off. The axis is now **always exactly 8 s**, anchored so the quickest lap sits 5% above the
+  floor and the remaining 7.6 s runs upward — upward because no lap can appear below the quickest
+  one, so centring the window would spend half the plot on space nothing can occupy.
+
+  Two consequences. **(a) The exclusions stop governing the scale.** With the height fixed, an
+  out-lap cannot stretch the axis however slow it is, so there is nothing to exclude — the anchor
+  counts *every* timed lap. `representative_laps` was deleted; `is_out_lap` and `in_lap_numbers`
+  survive only to *label* the tooltips. **(b) It fixes a bug the exclusion caused.** In practice and
+  qualifying the real out-lap is usually never stored (no Session History time, or it starts too far
+  past the line), so a run's first stored lap is a *flying* lap and is often the quickest of the
+  session. Anchoring above it put it below the axis floor, where it was drawn nowhere at all —
+  Suzuka P1 silently lost its best lap this way, line and marker both. Clipping now clamps at both
+  edges, and the marker is a triangle pointing the way the real value lies. Relatedly, the out-lap
+  *label* now requires the lap to actually be slower than the median of its own run.
+
+  A fixed height also makes two sessions comparable at a glance, which fitting actively prevented.
+
+  **The known cost, accepted: mixed dry/wet sessions.** An intermediate or wet run can be 14 s off
+  the dry pace, so it lands entirely on the clipped top edge — Shanghai P1 (`13974110…`) does
+  exactly that with its lap 10-11 intermediate run. Widening automatically was rejected because it
+  reinstates the original problem: fitting that session would need ~16 s and would compress the dry
+  runs' 1-3 s degradation to under a fifth of the plot. An **opt-in** expansion is the right shape
+  and is banked (ROADMAP → Other surfaces), not built. Meanwhile the laps are drawn, marked clipped,
+  and carry their real times on hover.
 - **The lap-time chart is "observed lap time by stint", and the fuel caveat is stated rather than
   corrected for** *(decided 2026-08-24)*. A stint-relative overlay conflates tyre degradation with
   **fuel burn-off**: the car sheds ~1.1-1.3 kg per lap, so a later stint is partly faster because it

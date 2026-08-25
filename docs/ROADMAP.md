@@ -80,10 +80,22 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   captures surface that lists the `captures` table (file, size, sessions, recorded by, last seen)
   would answer "which capture holds this session?" — the direction `CaptureStore.for_session` was
   built for, and the first thing that would actually *read* `recorded_by`.
-- **Sessions** — a list of every captured session; likely also a *session-centric* assignment
-  path (complement to the round-centric one in the weekend view). The per-session detail renders
-  its classification via `ui/components/classification_table.py` (the same builder the weekend
-  view uses). *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
+- **Sessions** — **shipped** (E1 branches 0-2c): a filterable list of every captured session,
+  and a per-session detail page carrying the result, the player's laps, any penalties, the circuit
+  outline, and two stacked charts — tyre life and observed lap time, per *run*, on a shared
+  stint-relative axis. Still likely to gain a *session-centric* assignment path (complement to the
+  round-centric one in the weekend view). The per-session detail renders its classification via
+  `ui/components/classification_table.py` (the same builder the weekend view uses).
+
+  *Known limitation of the charts:* a run boundary is read from the tyres where it can be (wear
+  reset, compound change, age reset) and otherwise inferred from the **fuel load**, since a lap
+  burns 1.06-1.96 kg and fuel cannot be added on track. That proxy catches every case measured, but
+  it is a proxy: a same-set two-run pair whose refuel happens to look like a normal lap's burn can
+  still draw as one line. `driver_status` in the Lap Data packet states it outright — tracked as
+  **E17**, which needs a `PIPELINE_VERSION` bump and a re-ingest. A second limitation, deliberate:
+  the pace axis is a fixed 8-second window, so in a **mixed dry/wet session** an intermediate or wet
+  run can sit entirely on the clipped top edge (Shanghai P1 does). Widening it automatically would
+  undo what the fixed window is for, so an opt-in expansion is banked rather than built. *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
   "Delete from database…" on the weekend capture picker (unassigned captures only — an assigned
   session must be unassigned first, which drops it back into the picker). Delete removes the
   stored results only; the `captures/` recording is kept, so a re-ingest recreates the session.

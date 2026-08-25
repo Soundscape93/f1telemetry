@@ -34,11 +34,12 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import nan
+from statistics import median
 
-_MIN_STINT_LAPS = 2         # DECISIONS -> UI: every session type, and it drops pit-lap artefacts too
-_PACE_PADDING = 0.05        # headroom past the representative laps, as a fraction of their span
-_MIN_PACE_SPAN_MS = 1000.0  # a floor, so a session whose laps are all but identical still gets an axis
-_MAX_PACE_SPAN_MS = 8000.0  # the widest spread the pace axis will show; see pace_y_range
+_MIN_STINT_LAPS = 2             # DECISIONS -> UI: every session type, and it drops pit-lap artefacts too
+_PACE_PADDING = 0.05            # gap between the axis floor and the fastest lap, as a fraction of the span
+_PACE_SPAN_MS = 8000.0          # the pace axis is always exactly this tall; see pace_y_range
+_GARAGE_FUEL_DELTA_KG = -0.5    # a lap burns 1.06-1.96 kg; above this: the car was in the garage
 
 
 @dataclass(frozen=True)
@@ -120,23 +121,6 @@ def stint_axis_max(stints: Sequence[TyreStint]) -> int:
     return max((stint.axis_span for stint in stints), default=1)
 
 
-def representative_laps(stints: Sequence[TyreStint]) -> tuple[StintLap, ...]:
-    """Every timed lap allowed to set the pace chart's scale - the ordinary racing laps.
-
-    Both pit-affected laps come out, for the same reason: neither measures the tyre. The out-lap is
-    structural and certain (the first lap of a stint that follows a stop) and carries +14 to +37 s.
-    The in-lap is inferred from stint contiguity and is milder - measured across this database, a
-    median +3.68 s - but that is the same order as the 1-3 s degradation signal the chart exists to
-    show, and on one race here the in-lap is the single lap setting the whole scale.
-
-    ``in_lap_numbers`` declines to claim a lap it cannot be sure about, so a session with laps
-    missing around the stop keeps its in-lap in the range and lets ``max_span`` deal with it.
-    """
-    in_laps = in_lap_numbers(stints)
-    return tuple(lap for stint in stints for lap in stint.laps
-                 if not lap.is_out_lap and lap.lap_number not in in_laps and lap.lap_time_ms)
-
-
 def in_lap_numbers(stints: Sequence[TyreStint]) -> frozenset[int]:
     """The lap numbers we can honestly call in-laps: the driver pitted at the end of them.
 
@@ -155,34 +139,43 @@ def in_lap_numbers(stints: Sequence[TyreStint]) -> frozenset[int]:
 
 
 def pace_y_range(stints: Sequence[TyreStint], padding: float = _PACE_PADDING,
-                 max_span: float | None = _MAX_PACE_SPAN_MS) -> tuple[float, float] | None:
-    """The pace chart's y-range in ms, from the representative laps only - or None if there are none.
+                 span_ms: float | None = _PACE_SPAN_MS) -> tuple[float, float] | None:
+    """The pace chart's y-range in ms - a fixed window above the quickest lap, or None if untimed.
 
-    Two bounds, doing different jobs. ``representative_laps`` drops the pit laps, which are
-    systematic: on a stint-relative axis every out-lap lands on x = 1, so letting them in would
-    squash the real 1-3 s degradation signal into a few percent of the plot height.
+    **The axis is always the same height.** Fitting it to the data was dishonest at both ends.
+    *Too wide*: a post-pit out-lap carries +14 to +37 s and, on a stint-relative axis, every one of
+    them lands on x = 1, so the real 1-3 s degradation signal was squashed into a few percent of the
+    plot - and an incident lap, which no rule can classify, did the same (one race here spreads
+    49.7 s over four laps in the 120-140 s range). *Too narrow*: a run whose laps sit within 0.3 s
+    of each other had that 0.3 s stretched over the full height, so laps that were effectively
+    identical read as a dramatic fall-off.
 
-    ``max_span`` then bounds what is left, anchored at the *fast* end - the fastest lap is the
-    reference every other lap is read against, so it is the one thing that must never clip. It
-    catches what no rule can classify: one race here spans 49.7 s on four incident laps in the
-    120-140 s range, and the signal disappears just as thoroughly as under an out-lap. Measured
-    across this database, ordinary lap-to-lap variance stays well inside 8 s - what runs past it is
-    incidents and pit laps - so the cap costs a consistent driver nothing and rescues a chaotic race.
+    A fixed window answers both, and makes two sessions comparable at a glance, which fitting
+    actively prevented. Over the plot's height it resolves about 20 ms per pixel, and 0.3 s of
+    spread occupies about 4% of it - which is what "these laps were the same" should look like.
 
-    Padding is taken from the *capped* span deliberately. From the raw one, a 40 s spread would pad
-    by 2 s and burn a quarter of the window on dead air below the fastest lap.
+    Anchored at the quickest lap and extending *upward*: no lap can appear below it, so centring the
+    window would spend half the plot on space nothing can occupy. ``padding`` is the small gap that
+    keeps that lap off the border.
 
-    Laps past the range are still plotted, clipped, with the true time in the tooltip. Pass
-    ``max_span=None`` to fit the whole spread.
+    The anchor counts **every** timed lap, pit laps included. With the height fixed, an out-lap
+    cannot stretch the scale however slow it is, so there is nothing to exclude - and excluding
+    would actively hurt: in practice and qualifying the quickest lap of the session is often a run's
+    first stored lap, and anchoring above it dropped it off the bottom of the plot entirely.
+
+    Laps outside the window are still plotted, clipped to the nearer edge with the true time in the
+    tooltip. Pass ``span_ms=None`` to fit the data instead.
     """
-    values = [float(lap.lap_time_ms) for lap in representative_laps(stints)]
+    values = [float(lap.lap_time_ms)
+              for stint in stints for lap in stint.laps if lap.lap_time_ms]
     if not values:
         return None
     low, high = min(values), max(values)
-    if max_span is not None:
-        high = min(high, low + max_span)    # cap the data window, never the fast end
-    span = (high - low) or _MIN_PACE_SPAN_MS
-    return low - span * padding, high + span * padding
+    if span_ms is None:
+        span = (high - low) or _PACE_SPAN_MS
+        return low - span * padding, high + span * padding
+    pad = span_ms * padding
+    return low - pad, low - pad + span_ms
 
 
 def stint_series(stint: TyreStint, value_of: Callable[[StintLap], float],
@@ -205,16 +198,45 @@ def stint_series(stint: TyreStint, value_of: Callable[[StintLap], float],
 
 # --- reading one stored lap ----------------------------------------------------------------------
 def _starts_new_stint(lap, previous) -> bool:
-    """Whether ``lap`` begins a new set: wear dropped, the age counter fell, or the compound changed.
+    """Whether ``lap`` begins a new run: fresh tyres, or the car went back to the garage.
 
-    Strict ``<`` on the wear, with no tolerance. Checked against every lap-to-lap wear drop in the
-    real database - thirty of them: the smallest is a ``-0.0`` float artefact that strict ``<``
-    already rejects, and every other one is a genuine set change. A tolerance would only be a rule
-    nobody measured.
+    "Stint" here means a *continuous run on one set*, which is what the chart needs. In a race that
+    is the same thing as a set, because the car leaves the garage once. In practice and qualifying
+    they come apart: one set often does several runs, and two fresh sets can do a single lap each. A
+    line drawn straight through a garage visit claims a continuity that did not happen.
+
+    Four signals, and each is load-bearing - see the helpers for the session that defeats the others.
     """
     return (_max_wear(lap) < _max_wear(previous)
             or _age_reset(lap, previous)
-            or _compound(lap) != _compound(previous))
+            or _compound(lap) != _compound(previous)
+            or _returned_to_garage(lap, previous))
+
+
+def _returned_to_garage(lap, previous) -> bool:
+    """Whether the car went back to the garage between these two laps, read from the fuel load.
+
+    A full lap burns 1.06-1.96 kg across every session in this database, and fuel cannot be added on
+    track - so a load that rises, or barely falls, means a garage visit and a new run.
+
+    It is the only signal that separates two *fresh sets of the same compound*. A Q3 pair of new
+    softs reads ``age 0`` on both laps, the same compound, and wear that rises rather than resets,
+    so nothing in the tyre data tells them apart; fuel shows -0.22 to +0.05 kg where a lap costs 1.2.
+    Measured across the whole database: 22 detections in practice and qualifying, every one matching
+    a run boundary, against 1 in 322 race transitions - and that one is in ``12316788...``, whose
+    lap 3 is missing and whose lap 2 took 170 s.
+
+    Deliberately *not* ``tyre_age_laps == 0`` on both laps, which looks like the same signal and is
+    not: a post-pit out-lap reports age 0 at wear 0.00 and the lap after it still reports age 0, so
+    that rule breaks three race stints that are currently correct.
+
+    A proxy, and known to be one. ``driver_status`` in the Lap Data packet states outright when the
+    car is in the garage (PRIORITIES -> E17); once that is stored this becomes the fallback for rows
+    ingested before it.
+    """
+    now, before = lap.fuel_in_tank, previous.fuel_in_tank
+    return (now is not None and before is not None
+            and now - before > _GARAGE_FUEL_DELTA_KG)
 
 
 def _age_reset(lap, previous) -> bool:
@@ -247,8 +269,9 @@ def _age(lap) -> int | None:
 
 
 def _place_on_axis(group: list, follows_pit: bool) -> tuple[StintLap, ...]:
-    """Put a stint's laps on the stint-relative axis, from lap numbers rather than list position."""
+    """Put a run's laps on the sint-relative axis, from lap numbers rather than list position."""
     base = group[0].lap_number
+    opener_is_out_lap = follows_pit and _is_slow_opener(group)
     return tuple(
         StintLap(
             lap_number=lap.lap_number,
@@ -256,8 +279,30 @@ def _place_on_axis(group: list, follows_pit: bool) -> tuple[StintLap, ...]:
             lap_time_ms=lap.lap_time_ms,
             tyre_life=100.0 - _max_wear(lap),
             wear=_wear(lap),
-            is_out_lap=(follows_pit and position == 0))
-        for position, lap in enumerate(group))
+            is_out_lap=(opener_is_out_lap and position == 0)
+        )
+        for position, lap in enumerate(group)
+    )
+
+
+def _is_slow_opener(group: list) -> bool:
+    """Whether a run's first lap really is an out-lap - which is to say, slower than the rest of it.
+
+    Following a stop is not enough on its own. In a race the first stored lap of a post-pit run *is*
+    the out-lap, carrying the whole pit loss. In practice and qualifying the real out-lap is usually
+    not stored at all - no Session History time, or it starts too far past the line - so the first
+    stored lap of a run is a *flying* lap, and can be the quickest of the session. Suzuka P1
+    (``14040810...``) is the case: its second run opens at 1:33.219, faster than either lap of the
+    first, and calling that an out-lap put the wrong label on the best lap of the session.
+
+    Compared against the median of the rest rather than the minimum, so one wild lap inside the run
+    cannot suppress the flag.
+    """
+    first, rest = group[0], group[1:]
+    others = [lap.lap_time_ms for lap in rest if lap.lap_time_ms]
+    if not first.lap_time_ms or not others:
+        return False
+    return first.lap_time_ms > median(others)
 
 
 def _max_wear(lap) -> float:

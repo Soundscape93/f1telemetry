@@ -40,17 +40,18 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   now named instead of showing an unknown mode id.
 - **Circuit outline** in the details box, and the session type in the
   classification box title.
-- **The session detail page now charts pace and tyre life per stint.** Under your laps, two
+- **The session detail page now charts pace and tyre life per run.** Under your laps, two
   full-width graphs share one stint-relative axis — tyre life above, observed lap time below — so
-  every stint restarts at stint lap 1 and two compounds can be read against each other directly.
-  Stints are worked out from the tyres themselves — the wear resetting, the compound changing, or a fresh set
-  showing up in the age counter — so a set change is caught even where any one of those signals is unreliable on its
-  own and each point's tooltip carries the real lap number along with
-  the wear on all four wheels. Lap times are what you actually drove and are not corrected for
-  fuel: a later stint is partly quicker simply because the car is lighter. The scale holds the
-  closest 8 seconds to your fastest racing lap and leaves out the laps into and out of the pits,
-  so the real one-to-three second degradation stays readable; anything slower is still drawn,
-  clipped to the top edge, with its true time on hover.
+  every run restarts at lap 1 and two compounds can be read against each other directly. Runs are
+  worked out from the car itself: fresh tyres show up as the wear resetting, the compound changing
+  or the age counter going back to zero, and a trip back to the garage shows up in the fuel load —
+  so two runs on the *same* set of tyres, which practice and qualifying are full of, are no longer
+  drawn as one continuous line. Each point's tooltip carries the real lap number and the wear on
+  all four wheels. Lap times are what you actually drove and are not corrected for fuel: a later
+  run is partly quicker simply because the car is lighter. The pace scale is always 8 seconds,
+  starting just under your quickest lap, so a run whose laps are within a few tenths reads as the
+  dead heat instead of being stretched to fill the graph — and anything outside that window
+  is still drawn, clipped to the nearer edge, with its true time on hover.
 
 ### Fixed
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a

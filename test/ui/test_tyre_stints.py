@@ -12,7 +12,6 @@ from f1telemetry.src.domain.models import Lap, LapTyreContext
 from f1telemetry.src.ui.sessions.tyre_stints import (
     in_lap_numbers,
     pace_y_range,
-    representative_laps,
     split_tyre_stints,
     stint_axis_max,
     stint_series,
@@ -21,11 +20,11 @@ from f1telemetry.src.ui.sessions.tyre_stints import (
 _S, _M, _H, _I = 16, 17, 18, 7      # visual compounds: soft, medium, hard, intermediate
 
 
-def _lap(number, compound, wear, ms, age=0):
+def _lap(number, compound, wear, ms, age=0, fuel=None):
     """One stored lap. ``wear`` is the worst wheel's %, or a full RL, RR, FL, FR tuple."""
     wheels = wear if isinstance(wear, tuple) else (wear, wear * 0.8, wear * 0.6, wear * 0.4)
     return Lap(lap_number=number, lap_time_ms=ms, sector1_ms=None, sector2_ms=None, sector3_ms=None,
-               is_valid=True,
+               is_valid=True, fuel_in_tank=fuel,
                tyre_context=LapTyreContext(actual_compound=compound, visual_compound=compound,
                                            age_laps=age, wear=wheels))
 
@@ -190,6 +189,22 @@ class TestSplitTyreStints(unittest.TestCase):
         self.assertEqual(len(stints), 1)
         self.assertEqual([lap.lap_number for lap in stints[0].laps], [1, 2])
 
+    def test_a_run_opening_on_a_flying_lap_is_not_called_an_out_lap(self):
+        """Suzuka P1: the second run's first stored lap is 1:33.219, quicker than either lap of the
+        first. The real out-lap was never stored, so this is a flying lap - and the quickest of the
+        session."""
+        laps = [_lap(1, _S, 9.93, 94701, age=0), _lap(2, _S, 14.65, 94466, age=1),
+                _lap(3, _S, 7.76, 93219, age=0), _lap(4, _S, 18.71, 100483, age=1)]
+        stints = split_tyre_stints(laps)
+        self.assertEqual(len(stints), 2)
+        self.assertTrue(stints[1].follows_pit)              # it does follow a stop
+        self.assertFalse(stints[1].laps[0].is_out_lap)      # but it is not an out-lap
+
+    def test_a_race_out_lap_is_still_flagged(self):
+        laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500),
+                _lap(3, _H, 1, 125000), _lap(4, _H, 5, 89500), _lap(5, _H, 9, 89800)]
+        self.assertTrue(split_tyre_stints(laps)[1].laps[0].is_out_lap)
+
 
 class TestStintRelativeAxis(unittest.TestCase):
 
@@ -235,14 +250,6 @@ class TestStintRelativeAxis(unittest.TestCase):
 
 class TestPaceYRange(unittest.TestCase):
 
-    def test_a_post_pit_out_lap_does_not_set_the_range(self):
-        laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500),
-                _lap(3, _H, 1, 125000),                             # out-lap: +35 s of pit loss
-                _lap(4, _H, 5, 89500), _lap(5, _H, 9, 89800)]
-        low, high = pace_y_range(split_tyre_stints(laps))
-        self.assertLess(high, 95000)        # plotted, but never allowed near the scale
-        self.assertGreater(low, 85000)
-
     def test_stint_one_lap_one_sets_the_range_like_any_other_lap(self):
         """A race start is a real racing lap - a couple of seconds slow, not a pit out-lap."""
         laps = [_lap(1, _M, 5, 95000), _lap(2, _M, 10, 90000), _lap(3, _M, 15, 90500)]
@@ -270,16 +277,6 @@ class TestPaceYRange(unittest.TestCase):
         self.assertLess((high - low) / 1000.0, 15.0)
         self.assertLess(high / 1000.0, 96.0)        # below the 96.528 s stint-3 out-lap
 
-    def test_representative_laps_leave_out_both_pit_laps(self):
-        stints = split_tyre_stints(_session_14435457())
-        numbers = {lap.lap_number for lap in representative_laps(stints)}
-        self.assertNotIn(3, numbers)        # out-lap into stint 2
-        self.assertNotIn(21, numbers)       # out-lap into stint 3
-        self.assertNotIn(2, numbers)        # in-lap: pitted at the end of it
-        self.assertNotIn(20, numbers)       # in-lap
-        self.assertIn(1, numbers)           # the race start is a racing lap and counts
-        self.assertEqual(len(numbers), 29 - 4)
-
     def test_a_single_stint_with_no_pit_stop_still_gets_a_range(self):
         laps = [_lap(n, _M, n * 4, 90000 + n * 200) for n in range(1, 8)]
         low, high = pace_y_range(split_tyre_stints(laps))
@@ -292,18 +289,6 @@ class TestPaceYRange(unittest.TestCase):
 
     def test_no_stints_has_no_range(self):
         self.assertIsNone(pace_y_range(()))
-
-    def test_an_in_lap_does_not_set_the_range(self):
-        """Modelled on Shanghai Race 2, where lap 13 (1:44.165) was the slowest lap left once the
-        out-laps went, and stretched the axis on its own from 4.1 s to 9.7 s."""
-        laps = [_lap(n, _M, n * 3, 97500 + n * 120) for n in range(1, 13)]
-        laps.append(_lap(13, _M, 40, 104165))       # in-lap: braking for the pit entry
-        laps.append(_lap(14, _H, 2, 115172))        # out-lap, new stint
-        laps += [_lap(n, _H, (n - 13) * 3, 97800 + n * 60) for n in range(15, 22)]
-        stints = split_tyre_stints(laps)
-        self.assertEqual(in_lap_numbers(stints), frozenset({13}))
-        _, high = pace_y_range(stints)
-        self.assertLess(high, 104165)
 
     def test_the_range_is_capped_so_one_wild_lap_cannot_flatten_it(self):
         """An incident lap is a real lap, but it is not what the chart is for - and no rule can
@@ -329,8 +314,43 @@ class TestPaceYRange(unittest.TestCase):
 
     def test_the_cap_can_be_lifted(self):
         laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 91000), _lap(3, _M, 15, 130000)]
-        _, high = pace_y_range(split_tyre_stints(laps), max_span=None)
+        _, high = pace_y_range(split_tyre_stints(laps), span_ms=None)
         self.assertGreater(high, 130000)
+
+    def test_the_window_is_always_the_same_height(self):
+        tight = [_lap(n, _M, n * 3, 90000 + n * 100) for n in range(1, 6)]    # 0.4 s of spread
+        wide = [_lap(n, _M, n * 3, 90000 + n * 2000) for n in range(1, 6)]    # 8 s of spread
+        for label, laps in (("tight", tight), ("wide", wide)):
+            with self.subTest(spread=label):
+                low, high = pace_y_range(split_tyre_stints(laps))
+                self.assertAlmostEqual(high - low, 8000.0, places=6)
+
+    def test_near_identical_laps_are_not_magnified(self):
+        """0.3 s of spread must read as 0.3 s. Fitted to the data it filled the plot and made laps
+        that were effectively identical look like a fall-off."""
+        laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90150), _lap(3, _M, 15, 90300)]
+        low, high = pace_y_range(split_tyre_stints(laps))
+        self.assertLess(300 / (high - low), 0.05)
+
+    def test_the_window_sits_just_under_the_quickest_lap_not_centred_on_it(self):
+        laps = [_lap(1, _M, 5, 95000), _lap(2, _M, 10, 90000), _lap(3, _M, 15, 90500)]
+        low, high = pace_y_range(split_tyre_stints(laps))
+        self.assertLess(low, 90000)
+        self.assertGreater(low, 90000 - 8000 * 0.5)     # just under; centring wastes half the plot
+        self.assertGreater(high, 95000)
+
+    def test_no_lap_can_fall_below_the_window(self):
+        """Suzuka P1: the quickest lap of the session is a run's first stored lap. Anchoring above
+        it dropped it off the bottom of the plot, line and all."""
+        laps = [_lap(1, _S, 9.93, 94701, age=0), _lap(2, _S, 14.65, 94466, age=1),
+                _lap(3, _S, 7.76, 93219, age=0), _lap(4, _S, 18.71, 100483, age=1)]
+        stints = split_tyre_stints(laps)
+        low, _ = pace_y_range(stints)
+        for stint in stints:
+            for lap in stint.laps:
+                with self.subTest(lap=lap.lap_number):
+                    self.assertGreaterEqual(lap.lap_time_ms, low)
+
 
 class TestInLapNumbers(unittest.TestCase):
 
@@ -348,6 +368,48 @@ class TestInLapNumbers(unittest.TestCase):
 
     def test_no_stints_no_in_laps(self):
         self.assertEqual(in_lap_numbers(()), frozenset())
+
+
+class TestGarageReturns(unittest.TestCase):
+    """Fuel separates a *run* from a *set*: one set can do several runs, and two fresh sets can do
+    one lap each. Every fixture here is real, read out of the sessions named."""
+
+    def test_two_fresh_sets_of_the_same_compound_split_on_the_fuel_load(self):
+        """Shanghai Q3 (12303182…): two new sets of softs, one lap each. Both report age 0, the same
+        compound, and wear that rises rather than resets — only the fuel shows the garage visit,
+        -0.01 kg where a lap costs 1.2."""
+        laps = [_lap(1, _S, 5.13, 93606, age=0, fuel=3.7992),
+                _lap(2, _S, 5.50, 93309, age=0, fuel=3.7846)]
+        stints = split_tyre_stints(laps, min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 1), (2, 2)])
+
+    def test_two_one_lap_runs_are_not_charted_at_all(self):
+        """The honest outcome for that session: no chart, rather than one line through two sets."""
+        laps = [_lap(1, _S, 5.13, 93606, age=0, fuel=3.7992),
+                _lap(2, _S, 5.50, 93309, age=0, fuel=3.7846)]
+        self.assertEqual(split_tyre_stints(laps), ())
+
+    def test_a_normal_lap_of_fuel_burn_is_not_a_garage_return(self):
+        """Suzuka Q1 (17491710…), full wets, one run of three laps: -1.32 and -1.31 kg."""
+        laps = [_lap(1, 8, 2.41, 109182, age=0, fuel=5.8469),
+                _lap(2, 8, 4.19, 108525, age=1, fuel=4.5268),
+                _lap(3, 8, 5.84, 106242, age=2, fuel=3.2184)]
+        stints = split_tyre_stints(laps)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 3)])
+
+    def test_a_refuel_between_runs_on_one_set_splits_them(self):
+        """Suzuka Q2 (3113777…): laps 1-3 one run, lap 4 a second run on the same set of inters.
+        The tyres say nothing — age climbs 0,1,2,3 and wear rises throughout — but fuel goes +1.65."""
+        laps = [_lap(1, 7, 1.90, 108785, age=0, fuel=5.7675),
+                _lap(2, 7, 2.87, 105374, age=1, fuel=4.4409),
+                _lap(3, 7, 3.93, 105432, age=2, fuel=3.1069),
+                _lap(4, 7, 6.95, 104722, age=3, fuel=4.7520)]
+        stints = split_tyre_stints(laps, min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 3), (4, 4)])
+
+    def test_a_missing_fuel_reading_is_never_a_garage_return(self):
+        laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500)]      # fuel None on both
+        self.assertEqual(len(split_tyre_stints(laps)), 1)
 
 
 if __name__ == "__main__":

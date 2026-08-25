@@ -75,7 +75,7 @@ class StintCharts(QWidget):
         self._proxy = None      # kept alive so the mouse SignalProxy isn't garbage collected
         self._link = None       # the shared-x plot the cursor position is read from
         self._axis_max = 1
-        self._pace_top = 0.0    # where an out-lap clips to; set from the representative range
+        self._pace_bounds: tuple[float, float] | None = None        # where a lap outside the window clips to
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -166,15 +166,16 @@ class StintCharts(QWidget):
         return plot
 
     def _apply_pace_range(self, plot) -> None:
-        """Scale the pace axis to the representative laps, so out-laps can't flatten the signal."""
-        self._pace_top = 0.0        # cleared first: a redraw must never clip to the old range
+        """Fix the pace axis to its window: out-laps can't flatten it, and near-identical laps can't
+        be magnified into a fall-off that never happened."""
+        self._pace_bounds = None        # cleared first: a redraw must never clip to the old window
         span = pace_y_range(self._stints)
         if span is None:
-            return                  # nothing timed to scale to; the plot fits what it has
+            return                      # nothing timed to scale to; the plot fits what it has
         low, high = span[0] / 1000.0, span[1] / 1000.0
-        self._pace_top = high
+        self._pace_bounds = (low, high)
         plot.setYRange(low, high, padding=0)
-
+        
     # --- the two rows --------------------------------------------------------------------------
     def _draw_life(self, plot, legend) -> None:
         """Tyre life per stint: ``100 - max(wear)``, with the four wheels in each point's tooltip.
@@ -193,43 +194,54 @@ class StintCharts(QWidget):
                           [_life_tip(lap) for lap in stint.laps])
 
     def _draw_pace(self, plot) -> None:
-        """Observed lap time per stint, with anything past the range clipped to the top edge."""
+        """Observed lap time per stint, with anything past the range clipped to its nearer edge."""
         in_laps = in_lap_numbers(self._stints)
         for stint in self._stints:
             colour, style = _stint_style(stint)
             xs, ys = stint_series(stint, self._pace_value)
             plot.plot(xs, ys, pen=self._pg.mkPen(colour, width=2, style=style),
-                      connect="finite")     # a missing lap breaks the line, never bridges it
+                      connect="finite")        # a missing lap breaks the line, never bridges it
 
-            timed = [lap for lap in stint.laps if lap.lap_time_ms]
-            # Round markers for the laps that fit the scale, a triangle for the ones drawn clipped,
-            # so a point parked on the top border can't be read as a lap that really ran that time.
-            for symbol, group in (("o", [l for l in timed if not self._is_clipped(l)]),
-                                  ("t1", [l for l in timed if self._is_clipped(l)])):
+            # Round markers inside the window; outside it a triangle pointing the way the real value
+            # lies, so a point resting on a border can never be read as a lap that ran that time.
+            # Both edges are reachable: the top is out-laps and incidents, the bottom a run's
+            # opening flying lap in practice or qualifying.
+            groups: dict[str, list] = {"o": [], "t1": [], "t": []}
+            for lap in stint.laps:
+                if lap.lap_time_ms:
+                    groups[_pace_symbol(self._clip_side(lap))].append(lap)
+            for symbol, group in groups.items():
                 self._scatter(plot, colour, symbol,
                               [(lap.stint_lap, self._pace_value(lap)) for lap in group],
-                              [_pace_tip(lap, lap.lap_number in in_laps, self._is_clipped(lap))
+                              [_pace_tip(lap, lap.lap_number in in_laps, self._clip_side(lap))
                                for lap in group])
 
-    def _is_clipped(self, lap: StintLap) -> bool:
-        """Whether the lap is drawn at the top edge rather than at its own time."""
-        return bool(self._pace_top) and _pace_seconds(lap) > self._pace_top
+    def _clip_side(self, lap: StintLap) -> str:
+        """-1 when the lap is drawn on the bottom edge, +1 on the top edge, 0 when it fits."""
+        seconds = _pace_seconds(lap)
+        if self._pace_bounds is None or seconds != seconds:
+            return 0
+        low, high = self._pace_bounds
+        return -1 if seconds < low else 1 if seconds > high else 0
 
     def _pace_value(self, lap: StintLap) -> float:
-        """A lap's y position in seconds, pinned to the top of the range when it runs past it.
+        """A lap's y position in seconds, pinned to the window's edge when it falls outside.
 
-        A clipped lap stays *on* the line rather than floating free of it. Detached it read as though
-        the stint simply started a lap late - worst exactly where every out-lap sits, at the head of
-        a stint, and worst of all on a session like ``14435457...`` where stint 3 opens on a
-        different compound and the eye has nothing to anchor the change to. Joined, the line runs up
-        into the top border and stops, which is the ordinary way of drawing a value that leaves the
-        scale; the triangle marks the point as clipped and its tooltip says so outright.
+        Clipped laps stay *on* the line rather than floating free of it. Detached they read as
+        though the run had skipped a lap - worst at the head of a run, which is where every out-lap
+        sits. Joined, the line runs into the border and stops, the ordinary way of drawing a value
+        that leaves the scale; the triangle marks it and the tooltip carries the real time.
 
-        Both pit laps and any incident lap can land here now - the range is bounded, not fitted.
+        Clamped at both ends. The floor is normally the quickest lap so nothing should sit below it,
+        but a stale bound or an odd reading must not put a point off the plot: drawing nothing at all
+        is how the Suzuka P1 chart silently lost its best lap.
         """
         seconds = _pace_seconds(lap)
-        return self._pace_top if self._pace_top and seconds > self._pace_top else seconds
-
+        if self._pace_bounds is None or seconds != seconds:
+            return seconds
+        low, high = self._pace_bounds
+        return min(max(seconds, low), high)
+        
     def _scatter(self, plot, colour: str, symbol: str, points, tips) -> None:
         """Hoverable per-lap markers - the tooltip is where the real lap number and the wear live."""
         drawable = [(x, y) for x, y in points if y == y]        # drop nan; a hole has no marker
@@ -287,6 +299,11 @@ def _axis_ticks(axis_max: int) -> list[tuple[float, str]]:
     return [(float(n), str(n)) for n in range(1, axis_max + 1) if n == 1 or n % stride == 0]
 
 
+def _pace_symbol(clip_side: int) -> str:
+    """Round inside the window, outside it a triangle pointing the way the real value lies."""
+    return "o" if clip_side == 0 else ("t1" if clip_side > 0 else "t")
+
+
 @lru_cache(maxsize=1)
 def _lap_time_axis_class(pg):
     """A left-axis type whose ticks read as lap times, so the axis uses the tooltips' own unit.
@@ -334,14 +351,16 @@ def _life_tip(lap: StintLap) -> str:
             f"Wear  {wheels}")
 
 
-def _pace_tip(lap: StintLap, in_lap: bool, clipped: bool) -> str:
+def _pace_tip(lap: StintLap, in_lap: bool, clip_side: int) -> str:
     """What one lap says on hover: its real number, its real time, and why it sits where it does."""
     lines = [f"Lap {lap.lap_number} · stint lap {lap.stint_lap}", format_lap_time(lap.lap_time_ms)]
     if lap.is_out_lap:
-        lines.append("Out-lap — carries the pit stop, so it's left out of the scale")
+        lines.append("Out-lap: lap after the pit stop")
     elif in_lap:
-        lines.append("In-lap — you pitted at the end of this lap")
-    if clipped:
-        # Say it outright: a marker on the top border must never read as a real measurement.
-        lines.append("Drawn clipped at the top — the time above is the real one")
+        lines.append("In-lap: lap before the pit stop")
+    if clip_side > 0:
+        # Say it outright: a marker resting on a border must never read as a real measurement.
+        lines.append("Drawn clipped at the top: the time above is the real one")
+    elif clip_side < 0:
+        lines.append("Drawn clipped at the bottom: the time above is the real one")
     return "\n".join(lines)
