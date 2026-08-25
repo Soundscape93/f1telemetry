@@ -905,6 +905,67 @@ what would trigger revisiting it.
   the session detail, the laps box, the Laps view and the Sessions overview. The green is the
   `_POS_COLORS` gain-green promoted out of `classification_table.py`, where it was private. Both
   set `color:` explicitly, which is the one kind of stylesheet A4 leaves alone.
+- **Restore is a single-capture re-ingest with a tombstone rollback, not a cleared tombstone**
+  *(decided 2026-08-24, built 2026-08-25 as E1 branch 3)*. `SessionStore.restore` only clears the
+  tombstone, which is the *smaller* half of the job: the session's rows are gone, so clearing it
+  alone leaves nothing behind but permission for a future ingest to re-create it. `pipeline
+  .restore_session` does the real thing — find a capture holding the uid, clear the tombstone,
+  ingest **that one file**. One file is enough because `ingest_capture` replaces by uid, and it is
+  idempotent for the same reason. Re-deriving one session by decompressing every archive in the
+  database is what the guided re-ingest under Help already is.
+
+  **The ordering is the safety property, and it is why this function exists.** `ingest_capture`
+  reads `deleted_uids()` at the *start*, so the tombstone has to be cleared **before** the ingest —
+  which opens a window where the uid is un-tombstoned with **no session row**. That state is worse
+  than a deleted session: the next *full* re-ingest silently resurrects a session the user believes
+  is gone, and nothing anywhere says so. So everything decidable is decided before the tombstone is
+  touched, and every failure after it rolls back. `SessionStore.delete` cannot perform that
+  rollback — it returns `False` and writes nothing when there is no session row — hence
+  `SessionStore.tombstone`, which merges a tombstone with no row required.
+
+  **There are two half-states, not one.** The plan named the first; the second turned up while
+  building it. *(a) Cleared, no row* — the ordinary failure (a corrupt archive, or a capture that
+  turned out not to hold the uid); the tombstone is simply re-written. *(b) Cleared, row present* —
+  a capture holding several sessions, where ours was saved before a later one raised. Left alone
+  that session would sit in Sessions **and** in the deleted list at once, so the rollback deletes
+  the resurrected row and takes its laps with it, exactly as `delete_session` does. The tombstone is
+  re-written last in both cases with the *original* values, `deleted_at` included — a failed restore
+  is not a new deletion and must not re-date one in the manager.
+
+  **The capture is verified, never assumed.** `capture_sessions` rows go stale (pruned, re-recorded,
+  written by an older ingest), so the sessions the ingest returns are checked for the uid rather
+  than trusting the row that pointed there; a miss rolls back and says so. Passing `capture_store`
+  through to the ingest *corrects* such a row on the way past (`record` replaces by hash with what
+  the file actually holds), so that refusal leaves the session honestly shown as having no capture.
+
+  **A missing archive fails honestly, and "no capture row at all" is a different answer.** An
+  unfindable archive leaves the tombstone alone and names the file, because Help → *Find moved
+  captures…* may bring it back. A uid no `captures` row mentions can *never* be restored, which is
+  why the manager needs **Forget** — clear the tombstone without restoring — or the row is
+  unremovable. **Several findable captures are refused rather than guessed at**: two copies are
+  usually a member's original plus an imported copy, they can differ in completeness (someone
+  stopped recording early), and nothing can tell which is better without decompressing both, so the
+  caller chooses and passes a `content_hash`. `restorable_captures` is shared between that chooser
+  and the restore itself, so the list offered and the list accepted cannot drift apart.
+
+  Both halves are covered by `test/ingest/test_restore_session.py`, and the whole flow was proven
+  against real archives before any page leaned on it: a real restore rebuilt a session with its laps
+  and traces, an injected failure over a real capture rolled back to an identical tombstone, and a
+  genuinely missing archive refused with the tombstone untouched.
+- **The tombstone read model lives in `storage/sessions.py`, not in `domain/`** *(decided
+  2026-08-25)*. `SessionStore.deleted_sessions()` returns `DeletedSession` (uid, deleted_at,
+  track_id, session_type, recorded_at) — the descriptive rows `deleted_uids()` cannot feed. It is
+  defined beside the store rather than in `domain/models.py` because a tombstone is **not a domain
+  concept**: no normalizer emits one, no assembler builds one, no analysis reads one. It exists only
+  because rows persist. The repo's actual rule is *stores return domain dataclasses for domain
+  concepts* — `assignment_for` already returns a bare `tuple[int, int]`, `known_files` a set of
+  pairs — so this follows `pipeline`'s habit of keeping `DeleteOutcome` / `ReingestSummary` beside
+  the functions that return them. `CaptureMeta` stays in `domain/` because it is an aggregate root
+  with its own identity that the whole app reasons about; this is a flag with four descriptive
+  fields. **Known limitation:** the tombstone carries `session_type` but not `weekend_structure`,
+  and a Sprint Race and a Grand Prix both report type 15 (invariant #5), so a deleted sprint reads
+  as "Race" in the manager. Widening the tombstone to fix it is not worth it; the view says so in a
+  tooltip.
 
 ## Localization
 
