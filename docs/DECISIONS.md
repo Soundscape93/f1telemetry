@@ -963,9 +963,52 @@ what would trigger revisiting it.
   the functions that return them. `CaptureMeta` stays in `domain/` because it is an aggregate root
   with its own identity that the whole app reasons about; this is a flag with four descriptive
   fields. **Known limitation:** the tombstone carries `session_type` but not `weekend_structure`,
-  and a Sprint Race and a Grand Prix both report type 15 (invariant #5), so a deleted sprint reads
-  as "Race" in the manager. Widening the tombstone to fix it is not worth it; the view says so in a
-  tooltip.
+  so a deleted **Sprint Race** reads as "Race" in the manager — it reports type 15 exactly as an
+  ordinary race does, and only the weekend it sat in separates them (invariant #5). Narrower than it
+  first looked: a sprint weekend's *Grand Prix* reports RACE_2 (16), which needs no weekend context,
+  so only type 15 is genuinely ambiguous. Widening the tombstone to fix that is not worth it; the
+  view says so in a tooltip.
+- **The deleted-sessions manager refuses nothing itself** *(decided 2026-08-25, built 2026-08-26 as
+  E1 branch 4)*. The page confirms, and picks the capture when several hold the session — the two
+  things that need a person and therefore the GUI thread. Everything else is decided by
+  `pipeline.restore_session` and worded once in `ui/formatting.restore_message`, arriving through
+  the worker's `done` rather than `failed` because **a refusal is a normal answer here**, not a
+  crash: a missing archive, a capture row that went stale, a session no capture mentions.
+
+  **Why not pre-empt the obvious ones.** The page already knows an archive is missing — it drew
+  "archive not found" in that row. Refusing locally would cost one short-lived worker and buy a
+  second place where that sentence lives, and the two would drift: the page would keep offering a
+  file the restore had started refusing, or refuse one it would have accepted. Both halves read the
+  *same* list, `pipeline.restorable_captures`, for exactly that reason, and the one decision the
+  page does make is passed as a **content hash** — never a path, because the identity is the content
+  and files move between the click and the worker.
+
+  **The chooser's accessor is a property, and that is a scar.** It was a method; a call site dropped
+  the parentheses and returned the bound method, which PySide6 cannot convert for a
+  `Signal(str, str)` — it prints to stderr and passes an **empty string** rather than raising. The
+  pipeline read that as "no choice was made" and refused as ambiguous, so a user picking a file
+  watched the app ignore them with a message that sounded deliberate. A property cannot be left
+  uncalled, and the caller now refuses any hash it did not just offer.
+- **Forget clears a tombstone without restoring, and says so in those words** *(decided 2026-08-20,
+  built 2026-08-26)*. Without it a tombstone can be **unremovable**: a session whose `captures` rows
+  were pruned — or that was ingested before capture metadata existed — can never be restored, and
+  the row would sit in the manager for the life of the database. Forget is `SessionStore.restore`
+  alone: the stored results do not come back, but the uid stops being skipped, so a later import or
+  re-read of that recording stores the session again.
+
+  **The dialog has to overcome the word.** "Forget" reads naturally as *delete it for good*, which
+  is the opposite of what it does, so the confirmation states both halves outright — nothing comes
+  back now, and the session is no longer skipped. It emits no `sessions_changed`: no stored session
+  changed, and the overview's count re-reads when it is shown.
+- **Every non-sprint race type is labelled "Race", never "Race 2"** *(decided 2026-08-26)*. A sprint
+  weekend in this database reports `weekend_structure = [1, 10, 11, 12, 15, 5, 6, 7, 16]` — the
+  Sprint as RACE (15) and the Grand Prix as **RACE_2 (16)** — so `slot_label` printing the prettified
+  enum name put "Race 2" on the Grand Prix in Sessions, Laps, Seasons and the weekend page. The
+  weekend's final race is the Grand Prix and earlier races are Sprints (invariant #5), which
+  `weekend_slots` already resolves **by position**; the ordinal inside the enum name is an artefact
+  of the wire format and not something a user has any use for. Fixing it in `slot_label` rather than
+  per surface is what makes it one line instead of six, and it also makes the number useful where
+  there is no weekend to resolve against at all: a tombstone reading 16 is a Grand Prix on its own.
 
 ## Localization
 

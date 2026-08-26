@@ -283,8 +283,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   laps · uid, and the **source capture** resolved via `CaptureStore.for_session` +
   `resolve_capture_path`), then a 4×2 details grid, the shared
   `components.build_classification_table`, a clickable laps box, a penalties box, and a stacked
-  pair of charts (tyre life and lap times) sharing one **stint-relative** x-axis. `sessions_changed` is the non-navigation signal, re-emitted for `MainWindow` to
-  fan out exactly as `SeasonsView` does.
+  pair of charts (tyre life and lap times) sharing one **stint-relative** x-axis, each run's legend
+  entry carrying its **corrected average pace** (`tyre_stints.stint_average_ms` — out-laps, in-laps
+  and a race's standing start are excluded, because they measure the stop or the start rather than
+  the run). `deleted_page.py` is the deleted-sessions manager (E2): a table over
+  `SessionStore.deleted_sessions()`, with Restore and Forget as row buttons and as a context menu.
+  It reads `pipeline.restorable_captures` for both its capture column and its chooser — the same
+  list `restore_session` resolves through, so what it offers and what the restore accepts cannot
+  drift — and it **refuses nothing itself**: it confirms, picks the capture when several hold the
+  session, then emits `restore_requested(uid, content_hash)` upward. `sessions_changed` is the
+  non-navigation signal, re-emitted for `MainWindow` to fan out exactly as `SeasonsView` does; so is
+  `restore_requested`, which asks for a *job* rather than a page, because the window owns workers.
   **Two cross-cutting rules live here.** Points are rendered only for race/sprint sessions because
   the stored value is a carried-over championship figure on every other type (DECISIONS → UI);
   and a lap row emits `lap_requested(uid, lap_number)` upward, which `MainWindow` turns into a

@@ -279,11 +279,11 @@ re-run under WAL on 2026-08-05 and passes.
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
 | E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
-| E1 | Sessions surface | **in progress** — branches 0-1 merged; **detail-view layout specified 2026-08-24**, branch 2 split into 2a (built) / 2b / 2c | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
-| E2 | Deleted-sessions manager | open — **planned in full 2026-08-20**, inside E1 (branches 3-4, not started); store side partly built | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E1 | Sessions surface | **done 2026-08-26** — all five branches merged (0, 1, 2a/2b/2c, 3, 4); overview, detail, charts, shared guarded delete | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E2 | Deleted-sessions manager | **done 2026-08-26** — the manager, Restore (single-capture re-ingest with tombstone rollback) and Forget | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
 | E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
-| E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.8.2 release** so it shares one re-ingest | the note below |
+| E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.9.0 release** so it shares one re-ingest (the release shape below renamed it from v0.8.2 on 2026-08-25) | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
@@ -449,10 +449,27 @@ costs users a second one.
 | E9 | Corner numbers on the track map (**licensing caveat**) | DECISIONS → UI |
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
-| E13 | Move the capture/database actions off Help into their own surface | ROADMAP → Other surfaces |
+| E13 | Move the capture/database actions off Help into their own surface — including **is this recording safe to delete?** | ROADMAP → Other surfaces; the note below |
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
 | G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**E13 gains a question E1 could not answer — "is this recording safe to delete?", raised
+2026-08-26.** Found while testing the deleted-sessions manager: a tombstoned session names the
+capture that holds it, so the natural next thought is *delete the file and reclaim the space* — and
+nothing in the app says whether that file also holds sessions the user still has. One capture
+routinely holds a whole weekend, so the honest answer needs, per capture, every session it contains
+and each one's state (stored / deleted / assigned to a round). **The action wanted:** a *Delete
+capture* that is offered only when every session in the file is deleted, and that refuses with a
+list when it is not.
+
+**It belongs on Captures, not on Sessions**, for the reason the boundary was drawn in the first
+place (E1/E2 plan → decision 5): "which sessions does this *file* hold, and where is it" is
+capture-shaped. Sessions answers *what did I record and what happened in it*. Putting a file-delete
+on the deleted-sessions manager would need the capture's whole session list to be truthful anyway —
+which is E13's table — so it would drag the surface across the boundary rather than borrow from it.
+`CaptureStore.for_session` and `capture_sessions` already hold everything the check needs; nothing
+new has to be stored.
 
 **A6, added 2026-08-08, and what earned it.** Between `listening on 0.0.0.0:20777` and a finished
 capture, the recorder says **nothing** — so "it isn't recording" cannot be told apart from "nothing
@@ -576,6 +593,19 @@ up opportunistically rather than scheduled.
   installer-created rule itself, not to updating. **Do not schedule "experiment #6", a real
   v0.7.0 → v0.8.0 upgrade test: it is not runnable**, because v0.8.0 is the first release that
   shipped an installer.
+- **The `disk I/O error` after a Forget, 2026-08-26 — unexplained, and not seen since.** During
+  E1 branch 4's manual pass, `Help → Re-read captures` failed for **all 33 captures** at once, every
+  one on the worker's *own* fresh `SessionStore` at its first read (`SELECT … FROM deleted_sessions`),
+  while the GUI's already-open stores kept working; restarting the app cleared it. It has not
+  recurred since the branch-4 fixes, and **none of those fixes touch SQLite**, so the cause is not
+  known — do not record it as fixed. The one mechanism reproduced in isolation is *replacing
+  `f1league.db` while the app runs and deleting its `-wal`/`-shm` sidecars*, which produces exactly
+  this signature (new connections fail, open ones do not); the tester does not believe the file was
+  swapped, and the seasons survived, which a swap-from-backup would not have left. **Plan:** if it
+  returns, capture whether `f1league.db-wal` / `-shm` exist and their mtimes at that moment, and
+  whether anything outside the app had the file open (`lsof`). Suspect list, in order: a store
+  disposed on a worker thread while the GUI's engines are open (`RestoreWorker` refusing early is the
+  newest caller of that pattern), then anything that touches the file from outside the process.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
   rendered map against the in-game track map when recording the next sessions — which is the same
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
@@ -594,6 +624,18 @@ up opportunistically rather than scheduled.
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 ## Recently closed
+
+- **E1 + E2 — the Sessions surface and the deleted-sessions manager.** Closed 2026-08-26, five
+  branches over six days: `ai_difficulty` through the pipeline (0), the delete guard that stopped an
+  assigned session being deleted from the weekend picker (1), the surface itself — overview, detail,
+  pace and tyre-life charts (2a/2b/2c), `pipeline.restore_session` with its tombstone rollback (3),
+  and the manager with Restore, Forget and the capture chooser (4). Planned in
+  **`E1_E2_PLAN.md`**, which stays as the record of *why* each piece is shaped the way it is.
+  Four defects came out of the manual pass and were fixed on branch 4: a chooser whose selection was
+  silently dropped (a bound method PySide6 converted to an empty string), a log call with three
+  placeholders and two arguments, a stint average that rounded to even, and a sprint weekend's Grand
+  Prix reading "Race 2" everywhere a session is named. One item from that pass is **not** closed —
+  see the `disk I/O error` entry under *Needs verification*.
 
 - **A4 + A4b — the live light/dark switch, and the guard that stops it coming back.** A4 done
   2026-08-15 on `fix/theme-switch-text-colour`, A4b done 2026-08-18; **shipped together as

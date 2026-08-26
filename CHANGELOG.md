@@ -52,8 +52,26 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   starting just under your quickest lap, so a run whose laps are within a few tenths reads as the
   dead heat instead of being stretched to fill the graph — and anything outside that window
   is still drawn, clipped to the nearer edge, with its true time on hover.
+- **Each run on the pace chart now shows its average lap time.** In the legend, beside the compound
+  and the lap range. It's the pace of the *run*, not of the pit stop: the lap into the pits, the lap
+  out of them, and a race's standing start are left out of the average, since they'd otherwise add
+  seconds to a number meant to show tenths.
+- **Sessions you deleted can be brought back.** `Sessions → Deleted sessions` lists everything
+  you've deleted — what the session was, where and when it was recorded, when you deleted it, and
+  which recording holds it. **Restore** reads that one recording again and puts the session back
+  with its laps and their saved traces; if two recordings hold it, you're asked which, because they
+  can differ and the app won't guess. If the file can't be found it says so and points you at
+  *Help → Find moved captures* instead of pretending. **Forget** is the other way out: it stops the
+  session being remembered as deleted without bringing it back, so a recording you import or re-read
+  later can store it again — the only way to clear a session whose recording the app no longer knows
+  about. A restore never half-happens: if reading the file fails, everything goes back exactly as it
+  was, deletion date included. One caveat it tells you about itself — a deleted **Sprint Race**
+  shows as "Race", because what's remembered about a deleted session can't tell the two apart.
 
 ### Fixed
+- **A sprint weekend's Grand Prix is now called Race, not Race 2, everywhere a session is named.**
+  The game reports the sprint and the Grand Prix as two different session types, and the app was
+  showing the second one's raw name. The Sprint Race was already named correctly.
 - **Deleting a session can no longer remove one that is assigned to a season round.** From a
   round's capture picker it was possible to right-click a session belonging to a *different*
   round — same track, or with *Show captures from all tracks* ticked — and delete it, which
