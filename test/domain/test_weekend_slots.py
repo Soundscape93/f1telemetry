@@ -19,6 +19,7 @@ from f1telemetry.src.protocol.enums import Formula, SessionType, Weather
 # The running order the game reports for a sprint weekend: Practice, three Sprint Shootouts,
 # the Sprint Race (RACE=15), three Qualifying sessions, then the Grand Prix (RACE=15 again).
 _SPRINT_STRUCTURE = (1, 10, 11, 12, 15, 5, 6, 7, 15)
+
 _SPRINT_TYPES = (
     SessionType.PRACTICE_1,
     SessionType.SPRINT_SHOOTOUT_1,
@@ -31,6 +32,11 @@ _SPRINT_TYPES = (
     SessionType.RACE,               # Grand Prix
 )
 _WEEKEND_LINK = 3_602_001_984       # a real value from f1league.db
+# What f1league.db actually stores for its sprint weekend: the Grand Prix reports RACE_2 (16), not
+# a second RACE (15). The fixture above uses 15/15, which is the shape invariant #5 describes; both
+# occur, and slot derivation must be indifferent because it works by position.
+_REAL_SPRINT_STRUCTURE = (1, 10, 11, 12, 15, 5, 6, 7, 16)
+_REAL_SPRINT_TYPES = _SPRINT_TYPES[:-1] + (SessionType.RACE_2,)
 
 
 def make(stype, link, *, structure=_SPRINT_STRUCTURE, uid=None):
@@ -141,6 +147,35 @@ class NonSprintWeekendTest(unittest.TestCase):
         self.assertTrue(race_slot.is_grand_prix)
         self.assertFalse(race_slot.is_sprint_race)
         self.assertIs(grand_prix_session([race]), race)
+
+
+class RaceTwoGrandPrixTest(unittest.TestCase):
+    """A sprint weekend whose Grand Prix is RACE_2 - resolved by position, exactly as 15/15 is.
+
+    Pinned because ``ui.formatting.slot_label`` leans on it: it renders every non-sprint race type
+    as "Race", which is only honest while the weekend's *final* race is the Grand Prix whatever
+    number the game put on it.
+    """
+
+    def _weekend(self):
+        return [make(stype, _WEEKEND_LINK + 10 * i, structure=_REAL_SPRINT_STRUCTURE)
+                for i, stype in enumerate(_REAL_SPRINT_TYPES)]
+
+    def test_the_sprint_and_the_grand_prix_are_still_told_apart(self):
+        slots = weekend_slots(self._weekend())
+        self.assertTrue(slots[4].is_sprint_race, "the RACE (15) at position 4 is the Sprint")
+        self.assertFalse(slots[4].is_grand_prix)
+        self.assertTrue(slots[8].is_grand_prix, "the RACE_2 (16) at position 8 is the Grand Prix")
+        self.assertFalse(slots[8].is_sprint_race)
+
+    def test_the_grand_prix_session_is_the_race_2_one(self):
+        weekend = self._weekend()
+        self.assertIs(grand_prix_session(weekend), weekend[8])
+
+    def test_slot_for_session_agrees_from_a_single_session(self):
+        weekend = self._weekend()
+        self.assertTrue(slot_for_session(weekend[4], weekend).is_sprint_race)
+        self.assertTrue(slot_for_session(weekend[8], weekend).is_grand_prix)
 
 
 if __name__ == "__main__":

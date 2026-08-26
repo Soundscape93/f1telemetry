@@ -297,19 +297,28 @@ class RestoreRefusalTest(RestoreTestBase):
 
     def test_a_missing_archive_is_refused_and_names_the_file(self):
         """Fail honestly: the row stays in the manager and the user can go looking for the file
-        (Help -> Find moved captures...) rather than being told a lie either way."""
+        (Help -> Find moved captures...) rather than being told a lie either way.
+
+        Wrapped in ``assertLogs`` on purpose. ``logging`` swallows a format-string/argument
+        mismatch and prints it to stderr, so a broken log call on this path stayed invisible to the
+        suite until a user found it in their log file; ``assertLogs`` renders each record, which
+        raises on the mismatch instead.
+        """
         self._deleted(3001)
         self._capture("gone.f1cap.zst", (3001,), on_disk=False)
         ingest = _FakeIngest({"gone.f1cap.zst": [_session(3001)]})
 
-        outcome = restore_session(3001, self.sessions, self.captures,
-                                  captures_dir=self.captures_dir, ingest=ingest)
+        with self.assertLogs("f1telemetry.src.pipeline", level="INFO") as logged:
+            outcome = restore_session(3001, self.sessions, self.captures,
+                                      captures_dir=self.captures_dir, ingest=ingest)
 
         self.assertFalse(outcome.restored)
         self.assertIs(outcome.reason, RestoreProblem.ARCHIVE_MISSING)
         self.assertEqual(outcome.capture_name, "gone.f1cap.zst")
         self.assertEqual(ingest.calls, [], "nothing was ingested")
         self.assertTrue(self.sessions.is_deleted(3001), "and the tombstone was never touched")
+        self.assertTrue(any("gone.f1cap.zst" in line and "3001" in line for line in logged.output),
+                        f"the log line must name both the file and the session: {logged.output}")
 
     def test_no_capture_row_at_all_is_a_different_answer(self):
         """Pruned, or ingested before ``capture_store`` was wired: restore is impossible *ever*,

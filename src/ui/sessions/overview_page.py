@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QToolButton,
     QVBoxLayout,
@@ -64,6 +65,7 @@ class OverviewPage(QWidget):
 
     session_requested = Signal(str)  # session_uid (str, uint64-safe)
     sessions_changed = Signal()  # a delete removed stored data - other surfaces re-read
+    deleted_requested = Signal()  # open the deleted-sessions manager (the container hops)
 
     def __init__(self, session_store, season_store, lap_store=None, parent=None):
         super().__init__(parent)
@@ -75,9 +77,19 @@ class OverviewPage(QWidget):
 
         outer = QVBoxLayout(self)
 
+        header = QHBoxLayout()
         title = QLabel("Sessions")
         apply_heading(title, size_px=20)
-        outer.addWidget(title)
+        header.addWidget(title)
+        header.addStretch(1)
+        # Always shown, cound and all - it is the only route to the manager and "(0)" is the
+        # honest answer rather than a button that appears and disappears.
+        self._deleted = QPushButton()
+        self._deleted.setToolTip(
+            "Sessions you deleted: what was removed, and how to bring one back")
+        self._deleted.clicked.connect(self.deleted_requested.emit)
+        header.addWidget(self._deleted)
+        outer.addLayout(header)
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Filter by track or session")
@@ -102,6 +114,7 @@ class OverviewPage(QWidget):
     def reload(self) -> None:
         """Rebuild the cards from the session store, honouring the current filter."""
         clear_layout(self._body)
+        self._deleted.setText(f"Deleted sessions ({len(self._sessions.deleted_sessions())})")
         all_sessions = self._sessions.list_sessions()      # already recorded_at desc
         shown = 0
         for session in all_sessions:

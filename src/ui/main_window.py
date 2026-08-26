@@ -36,7 +36,14 @@ from PySide6.QtWidgets import (
 
 from f1telemetry.src.capabilities import log_capabilities
 
-from .workers import ImportWorker, IngestWorker, RecorderWorker, ReingestWorker, RelocateWorker
+from .workers import (
+    ImportWorker,
+    IngestWorker,
+    RecorderWorker,
+    ReingestWorker,
+    RelocateWorker,
+    RestoreWorker,
+)
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
 from ..storage.laps import LapStore
@@ -46,6 +53,7 @@ from .sessions import SessionsView
 from .laps import LapsView
 from .help_page import HelpPage
 from .style import MUTED_TEXT_QSS, apply_heading
+from .formatting import format_size, restore_message
 from .. import paths
 
 # Data paths (DB, captures, lap traces, rosters) resolve through ``paths`` so a frozen build
@@ -96,6 +104,9 @@ class MainWindow(QMainWindow):
         self._relocate_dialog: QProgressDialog | None = None
         self._import: ImportWorker | None = None
         self._import_dialog: QProgressDialog | None = None
+        # No dialog of its own: ingest_capture has no progress callback and no interruption point,
+        # so a restore is one indeterminate wait that the status line and _busy() describe honeslty.
+        self._restore: RestoreWorker | None = None
 
         # Resolve the per user data pahts once; the workers reuse them on their own threads.
         self._db_url = paths.db_url()
@@ -201,9 +212,13 @@ class MainWindow(QMainWindow):
         # canonical track-map cache has to go the same way it does after an ingest. The weekend
         # page can't reach the laps view itself - pages never reference siblings (PRIORITIES -> A1).
         self._seasons_view.sessions_changed.connect(self._laps_view.invalidate_caches)
+        # The same contract from the Sessions surface, which also deletes sessions.
+        self._sessions_view.sessions_changed.connect(self._laps_view.invalidate_caches)
         # Same rule, the other direction: a lap row on the Session detail page opens the lap's
         # telemetry, which lives on a diffrent surface. Only the window owns both.
         self._sessions_view.lap_requested.connect(self._show_lap)
+        # And a job rather than a page: the deleted-sessions manager asks, the window runs it.
+        self._sessions_view.restore_requested.connect(self._on_restore_requested)
         self._stack.addWidget(self._laps_view)
         self._stack.addWidget(_PlaceholderPage(
             "Analytics", "The analytics will be shown here, with charts and graphs."))
@@ -227,7 +242,8 @@ class MainWindow(QMainWindow):
         from two threads.
         """
         return any(worker is not None for worker in
-                   (self._recorder, self._ingest, self._reingest, self._relocate, self._import))
+                   (self._recorder, self._ingest, self._reingest, self._relocate, self._import,
+                    self._restore))
 
     def _on_button_clicked(self) -> None:
         """Handle the record button click; start or stop recording depending on the current state."""
@@ -330,7 +346,7 @@ class MainWindow(QMainWindow):
 
     def _on_failed(self, message: str) -> None:
         """Handle a failure from any worker; reset the button and show the error."""
-        for attr in ("_recorder", "_ingest", "_reingest", "_relocate", "_import"):
+        for attr in ("_recorder", "_ingest", "_reingest", "_relocate", "_import", "_restore"):
             worker = getattr(self, attr)
             if worker is not None:
                 worker.wait()  # ensure the thread has finished before deleting it
@@ -370,6 +386,54 @@ class MainWindow(QMainWindow):
         stack stays on Sessions and the click does nothing visible at all."""
         self._sidebar.setCurrentRow(_SECTIONS.index("Laps"))
         self._laps_view.show_lap(session_uid, lap_number)
+
+    # --- restoring a deleted session --------------------------------------------------------
+
+    def _on_restore_requested(self, session_uid: str, content_hash: str) -> None:
+        """Re-read the one capture that holds a deleted session, off the GUI thread.
+
+        The page has already confirmed and, where several captures hold the session, asked which
+        one - both of which need a person and therefore the GUI thread. Everything after that is
+        ``pipeline.restore_session`` on ``RestoreWorker``: a league capture is minutes of parsing,
+        and the window owns workers so no page has to.
+
+        An empty ``content_hash`` means "there was only one findable recording, resolve it
+        yourself" - the page never passes a file path, because the hash is the identity and files
+        move between here and the worker's own stores.
+        """
+        if self._busy():
+            self._status.setText("Busy - wait for the current job to finish.")
+            return
+
+        self._record_button.setEnabled(False)
+        self._restore = RestoreWorker(
+            self._db_url, int(session_uid), content_hash=content_hash or None,
+            trace_dir=self._trace_dir, captures_dir=str(paths.captures_dir()))
+        self._restore.done.connect(self._on_restore_done)
+        self._restore.failed.connect(self._on_failed)
+        self._restore.start()
+        self._status.setText("Restoring the session from its recording ...")
+
+    def _on_restore_done(self, outcome) -> None:
+        """A restore finished - which includes refusing, honestly and without changing anything.
+
+        A refusal arrives here rather than through ``failed`` because it is a normal answer, not a
+        crash: a recording that has gone missing, a capture row that turned out to be stale. It
+        gets a dialog as well as the status line for the same reason the delete guard does - the
+        user pressed a button and is owed an answer they cannot miss.
+        """
+        worker, self._restore = self._restore, None
+        if worker is not None:
+            worker.wait()  # ensure the thread has finished before deleting it
+
+        self._reset_button()
+        message = restore_message(outcome)
+        self._status.setText(message)
+        if not outcome.restored:
+            QMessageBox.warning(self, "Session not restored", message)
+        # Re-read either way: a success puts the session back everywhere it belongs, and a refusal
+        # means the list the user is looking at was drawn before the attempt.
+        self._refresh_current_view()
 
     def _check_capabilities(self) -> None:
         """Log what this build can do, and say so once when a piece is missing.
@@ -520,7 +584,7 @@ class MainWindow(QMainWindow):
             return
 
         noun = "capture" if len(candidates) == 1 else "captures"
-        total_size = _format_size(sum(c.file_size for c in candidates))
+        total_size = format_size(sum(c.file_size for c in candidates))
         recorded_by, accepted = QInputDialog.getText(
             self, "Import captures",
             f"{len(candidates)} new {noun} found ({total_size}).\n"
@@ -904,12 +968,6 @@ def _relocate_message(summary) -> str:
     if summary.cancelled:
         parts.append("The search was canceled.")
     return " ".join(parts)
-
-
-def _format_size(num_bytes: int) -> str:
-    """Bytes as MB/GB, an import moves hundreds of MBs and the user should know first."""
-    mb = num_bytes / (1024 * 1024)
-    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
 
 
 def _import_message(summary) -> str:

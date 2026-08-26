@@ -80,12 +80,32 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   captures surface that lists the `captures` table (file, size, sessions, recorded by, last seen)
   would answer "which capture holds this session?" — the direction `CaptureStore.for_session` was
   built for, and the first thing that would actually *read* `recorded_by`.
-- **Sessions** — **shipped** (E1 branches 0-2c): a filterable list of every captured session,
-  and a per-session detail page carrying the result, the player's laps, any penalties, the circuit
-  outline, and two stacked charts — tyre life and observed lap time, per *run*, on a shared
-  stint-relative axis. Still likely to gain a *session-centric* assignment path (complement to the
-  round-centric one in the weekend view). The per-session detail renders its classification via
-  `ui/components/classification_table.py` (the same builder the weekend view uses).
+
+  **The boundary against Sessions, decided 2026-08-20 and unchanged by E1 shipping.** *Sessions*
+  answers **"what did I record, and what happened in it"** — sessions, results, laps. *Captures*
+  answers **"what files do I have, where are they, who sent them"** — the `captures` table plus the
+  five actions above. Two consequences follow, and both already bind:
+
+  - **`recorded_by` belongs here, not on a session.** It is a property of the *file*: one session
+    can live in two captures with different `recorded_by` values, so there is no single truthful
+    value for a session row. The only capture-shaped thing Sessions took is a read-only **source
+    capture** line on the detail page (file name, or "archive not found"), because that is the fact
+    Restore depends on — and it is the natural hand-off point to this surface later.
+  - **"Is this recording safe to delete?" is this surface's question** (PRIORITIES → E13 note,
+    2026-08-26). A capture routinely holds a whole weekend, so a *Delete capture* action needs every
+    session in the file and each one's state — stored, deleted, or assigned to a round — which is
+    exactly the table this surface is. Offer it only when every session in the file is deleted;
+    refuse with the list when it is not.
+- **Sessions** — **shipped, complete** (E1, branches 0-4): a filterable list of every captured
+  session, and a per-session detail page carrying the result, the player's laps, any penalties, the
+  circuit outline, and two stacked charts — tyre life and observed lap time, per *run*, on a shared
+  stint-relative axis, each run labelled with its **corrected average pace** (the laps into and out
+  of the pits and a race's standing start are left out of the mean, because they are the stop and
+  the start rather than the run). Deleting a session is here too, through the same guard the weekend
+  picker uses, and `Deleted sessions (N)` opens the manager below. Still likely to gain a
+  *session-centric* assignment path (complement to the round-centric one in the weekend view). The
+  per-session detail renders its classification via `ui/components/classification_table.py` (the
+  same builder the weekend view uses).
 
   *Known limitation of the charts:* a run boundary is read from the tyres where it can be (wear
   reset, compound change, age reset) and otherwise inferred from the **fuel load**, since a lap
@@ -102,11 +122,29 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   This action moves to (or is shared with) the Sessions surface when it lands. The picker shows
   a "Recorded" column stamped from the capture's real packet time (see DECISIONS → `recorded_at`),
   so repeated attempts of one session are separable by time — the keeper is the latest.
-- **Deleted-sessions manager** — a view listing tombstoned sessions (track / type / recorded-at,
-  already stored on `deleted_sessions`) with a Restore button. The store side is done
-  (`SessionStore.deleted_uids` / `is_deleted` / `restore`; delete tombstones by default and
-  `ingest_capture` skips tombstoned uids); only the UI is pending. Likely lives on the Sessions
-  surface.
+- **Deleted-sessions manager** — **shipped** (E2, E1 branches 3-4), on the Sessions surface: a
+  table of every tombstoned session (session / track / recorded / deleted / the capture that holds
+  it) with two actions, as row buttons and as a right-click.
+
+  **Restore is a single-capture re-ingest, not a cleared tombstone.** `pipeline.restore_session`
+  finds a capture holding the uid, clears the tombstone, and ingests *that one file* —
+  `ingest_capture` replaces by uid, so one file is enough and it is idempotent. The ordering is the
+  safety property: `ingest_capture` reads `deleted_uids()` at the *start*, so the tombstone must be
+  cleared first, and every failure after that point rolls it back with its original `deleted_at`.
+  A restore either completes or leaves the database exactly as it found it. It runs on
+  `RestoreWorker` because a league capture is minutes of parsing.
+
+  **Three refusals, worded apart on purpose.** A findable archive is read; an archive that has moved
+  or gone points at *Help → Find moved captures*; a session no `captures` row mentions can never be
+  restored at all. That last case is why the manager needs **Forget** — clear the tombstone without
+  restoring, so the row can leave the list and a later import or re-read of that recording brings
+  the session back on its own. When several captures hold one session the user is **asked** rather
+  than guessed at: two copies are usually a member's original plus an imported one and they can
+  differ in completeness, which nothing can tell without decompressing both.
+
+  *Known limitation, stated in the view's own tooltip:* the tombstone carries `session_type` but not
+  `weekend_structure`, so a deleted **Sprint Race** reads as "Race" (invariant #5). A sprint
+  weekend's Grand Prix is not affected — it reports `RACE_2`, which is unambiguous on its own.
 - **Laps** — per-lap browser + lap detail; the next surface to build, and the driver for the
   dense-trace persistence below. Scoped into iterations (see DECISIONS → the Laps/Analytics split):
   - *1a — persistence backbone (no UI). DONE (commit 73d2c35).* Assembler captures the player's

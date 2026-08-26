@@ -5,10 +5,14 @@ from types import SimpleNamespace
 
 from datetime import datetime, timedelta, timezone
  
+from f1telemetry.src.pipeline import RestoreOutcome, RestoreProblem
 from f1telemetry.src.protocol.enums import ResultStatus, SessionType, Weather
-from f1telemetry.src.protocol.reference import team_display_name
+from f1telemetry.src.protocol.reference import team_display_name, track_name
 from f1telemetry.src.ui.formatting import (
+    capture_choice_label,
     compound_for_lap,
+    deleted_capture_label,
+    deleted_session_cells,
     estimate_points,
     format_gap,
     format_grid,
@@ -17,6 +21,7 @@ from f1telemetry.src.ui.formatting import (
     format_penalty_badge,
     format_position_change,
     format_race_time,
+    format_size,
     is_race,
     lap_gap_label,
     laps_completed_label,
@@ -26,6 +31,8 @@ from f1telemetry.src.ui.formatting import (
     race_result,
     race_winner_summary,
     recorded_label,
+    restore_message,
+    slot_label,
     session_best_lap_ms,
     session_context_label,
     session_fastest_lap,
@@ -462,6 +469,153 @@ class SessionContextLabelTest(unittest.TestCase):
         session = _sess(entries=[_rival()], game_mode=7)
         self.assertEqual(session_context_label(session, "Qualifying 3"),
                          "Online Custom  ·  Qualifying 3")
+
+def _tomb(uid=123, session_type=SessionType.RACE, track_id=2,
+            recorded_at=datetime(2026, 8, 9, 21, 2), deleted_at=datetime(2026, 8, 10, 9, 14)):
+    """One ``storage.sessions.DeletedSession``, shaped - every field but the uid is nullable."""
+    return SimpleNamespace(session_uid=uid, session_type=session_type, track_id=track_id,
+                            recorded_at=recorded_at, deleted_at=deleted_at)
+
+
+def _capture(file_name="20260823_140747.f1cap.zst", recorded_by=None, file_size=46_544_961,
+                ingested_at=datetime(2026, 8, 24, 17, 55), content_hash="abc"):
+    return SimpleNamespace(file_name=file_name, recorded_by=recorded_by, file_size=file_size,
+                           ingested_at=ingested_at, content_hash=content_hash)
+
+
+class FormatSizeTest(unittest.TestCase):
+    def test_megabytes_are_whole(self):
+        self.assertEqual(format_size(46_544_961), "44 MB")
+
+    def test_gigabytes_get_a_decimal(self):
+        self.assertEqual(format_size(3 * 1024 ** 3), "3.0 GB")
+
+    def test_zero_is_not_special_cased(self):
+        self.assertEqual(format_size(0), "0 MB")
+
+
+class DeletedSessionCellsTest(unittest.TestCase):
+    def test_the_four_descriptive_columns(self):
+        session, track, recorded, deleted = deleted_session_cells(_tomb())
+        self.assertEqual(session, "Race")
+        self.assertEqual(track, track_name(2))
+        self.assertEqual(recorded, "2026-08-09 21:02")
+        self.assertEqual(deleted, "2026-08-10 09:14")
+
+    def test_a_tombstone_that_knows_nothing_renders_em_dashes(self):
+        """A rollback of a session whose row was already gone can carry only the uid."""
+        cells = deleted_session_cells(_tomb(session_type=None, track_id=None,
+                                            recorded_at=None, deleted_at=None))
+        self.assertEqual(cells, ("\u2014", "\u2014", "\u2014", "\u2014"))
+
+    def test_a_session_type_newer_than_the_enum_still_renders(self):
+        """Enums are stored as raw ints (core invariant #9) - a new value must not crash a row."""
+        self.assertEqual(deleted_session_cells(_tomb(session_type=250))[0], "250")
+
+    def test_a_deleted_sprint_reads_as_race(self):
+        """The stated limitation, pinned: the tombstone has no weekend_structure to tell it from a
+        Grand Prix (core invariant #5), so this must stay true until the tombstone widens."""
+        self.assertEqual(deleted_session_cells(_tomb(session_type=SessionType.RACE))[0], "Race")
+
+    def test_a_sprint_weekends_grand_prix_is_recoverable_from_the_type_alone(self):
+        """RACE_2 needs no weekend context: a second race is the weekend's final one."""
+        self.assertEqual(deleted_session_cells(_tomb(session_type=SessionType.RACE_2))[0], "Race")
+
+
+class DeletedCaptureLabelTest(unittest.TestCase):
+    def test_no_capture_row_at_all(self):
+        self.assertEqual(deleted_capture_label([], []), "not recorded")
+
+    def test_one_findable_capture_is_just_its_name(self):
+        self.assertEqual(deleted_capture_label(["a.zst"], ["a.zst"]), "a.zst")
+
+    def test_known_but_unfindable_names_every_one_of_them(self):
+        """It must match what the refusal names, so no single row is chosen here."""
+        self.assertEqual(deleted_capture_label(["a.zst", "b.zst"], []),
+                         "a.zst, b.zst  (archive not found)")
+
+    def test_several_findable_counts_the_rest(self):
+        self.assertEqual(deleted_capture_label(["a.zst", "b.zst"], ["b.zst", "a.zst"]),
+                         "b.zst  (+1 more)")
+
+
+class CaptureChoiceLabelTest(unittest.TestCase):
+    def test_names_everything_that_tells_two_copies_apart(self):
+        label = capture_choice_label(_capture(recorded_by="Ana"))
+        self.assertIn("20260823_140747.f1cap.zst", label)
+        self.assertIn("recorded by Ana", label)
+        self.assertIn("44 MB", label)
+        self.assertIn("read 2026-08-24 17:55", label)
+
+    def test_an_unset_recorder_says_unknown_rather_than_claiming_you(self):
+        self.assertIn("recorder unknown", capture_choice_label(_capture(recorded_by=None)))
+
+    def test_an_unstamped_ingest_is_an_em_dash(self):
+        self.assertIn("read \u2014", capture_choice_label(_capture(ingested_at=None)))
+
+
+class RestoreMessageTest(unittest.TestCase):
+    def _refusal(self, reason, **kwargs):
+        return RestoreOutcome(restored=False, session_uid=1, reason=reason, **kwargs)
+
+    def test_success_names_the_capture(self):
+        message = restore_message(RestoreOutcome(restored=True, session_uid=1,
+                                                 capture_name="a.zst"))
+        self.assertIn("a.zst", message)
+        self.assertIn("laps", message)
+
+    def test_a_missing_archive_sends_you_to_find_moved_captures(self):
+        message = restore_message(self._refusal(RestoreProblem.ARCHIVE_MISSING,
+                                                capture_name="a.zst"))
+        self.assertIn("a.zst", message)
+        self.assertIn("Find moved captures", message)
+        self.assertNotIn("Forget", message)
+
+    def test_no_capture_row_sends_you_to_forget_and_never_to_the_file(self):
+        """The pair that must not read alike: one file can be found again, the other never existed."""
+        message = restore_message(self._refusal(RestoreProblem.NO_CAPTURE_ROW))
+        self.assertIn("Forget", message)
+        self.assertNotIn("Find moved captures", message)
+
+    def test_every_problem_says_something_of_its_own(self):
+        messages = {reason: restore_message(self._refusal(reason)) for reason in RestoreProblem}
+        self.assertEqual(len(set(messages.values())), len(RestoreProblem))
+        for reason, message in messages.items():
+            with self.subTest(reason=reason):
+                self.assertTrue(message.endswith(".") and len(message) > 20)
+
+    def test_an_ingest_failure_carries_its_error(self):
+        message = restore_message(self._refusal(RestoreProblem.INGEST_FAILED,
+                                                capture_name="a.zst", error="zstd frame corrupt"))
+        self.assertIn("zstd frame corrupt", message)
+        self.assertIn("still listed as deleted", message)
+
+    def test_a_refusal_with_no_capture_name_still_reads(self):
+        self.assertIn("the recording",
+                      restore_message(self._refusal(RestoreProblem.INGEST_FAILED)))
+
+
+class SlotLabelTest(unittest.TestCase):
+    def test_a_non_race_type_is_its_prettified_name(self):
+        self.assertEqual(slot_label(SessionType.QUALIFYING_3), "Qualifying 3")
+        self.assertEqual(slot_label(SessionType.SPRINT_SHOOTOUT_1), "Sprint Shootout 1")
+
+    def test_the_sprint_flag_wins(self):
+        self.assertEqual(slot_label(SessionType.RACE, is_sprint_race=True), "Sprint Race")
+
+    def test_a_grand_prix_reads_race_whatever_number_the_game_put_on_it(self):
+        """A sprint weekend reports the Sprint as RACE (15) and the Grand Prix as RACE_2 (16), so
+        the raw enum name labelled every sprint weekend's Grand Prix "Race 2"."""
+        self.assertEqual(slot_label(SessionType.RACE), "Race")
+        self.assertEqual(slot_label(SessionType.RACE_2), "Race")
+        self.assertEqual(slot_label(SessionType.RACE_3), "Race")
+
+    def test_a_raw_int_race_type_reads_race_too(self):
+        """Enums are stored as raw ints (invariant #9), and a tombstone hands one straight over."""
+        self.assertEqual(slot_label(16), "Race")
+
+    def test_a_type_newer_than_the_enum_renders_as_its_number(self):
+        self.assertEqual(slot_label(250), "250")
 
 
 if __name__ == "__main__":

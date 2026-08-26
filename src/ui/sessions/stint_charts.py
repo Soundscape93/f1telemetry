@@ -37,7 +37,15 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from ..components.tyres import compound_style
 from ..formatting import format_lap_time
 from ..style import MUTED_TEXT_QSS
-from .tyre_stints import StintLap, TyreStint, in_lap_numbers, pace_y_range, stint_axis_max, stint_series
+from .tyre_stints import (
+    StintLap,
+    TyreStint,
+    in_lap_numbers,
+    pace_y_range,
+    stint_average_label,
+    stint_axis_max,
+    stint_series
+)
 
 _MISSING = "The pace and tyre-life charts need pyqtgraph — install it with:\n\n    pip install pyqtgraph"
 
@@ -68,9 +76,11 @@ _PACE_TITLE = "Observed lap time by stint"
 class StintCharts(QWidget):
     """Tyre life over observed lap time, per stint, on a shared stint-relative axis."""
 
-    def __init__(self, stints: Sequence[TyreStint] = (), parent=None) -> None:
+    def __init__(self, stints: Sequence[TyreStint] = (), *, standing_start: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._stints: tuple[TyreStint, ...] = ()
+        self._standing_start = standing_start           # a race/sprint lap 1 starts t rest - see- set_stints
+        self._in_laps: frozenset[int] | None = None
         self._vlines: list = []
         self._proxy = None      # kept alive so the mouse SignalProxy isn't garbage collected
         self._link = None       # the shared-x plot the cursor position is read from
@@ -94,19 +104,29 @@ class StintCharts(QWidget):
         self._glw = pg.GraphicsLayoutWidget()
         layout.addWidget(self._glw)
         if stints:
-            self.set_stints(stints)
+            self.set_stints(stints, standing_start=standing_start)
 
-    def set_stints(self, stints: Sequence[TyreStint]) -> None:
-        """Draw a session's stints; an empty sequence clears the charts."""
+    def set_stints(self, stints: Sequence[TyreStint], *, standing_start: bool = False) -> None:
+        """Draw a session's stints; an empty sequence clears the charts.
+
+        ``standing_start`` says this session began on the grid, which only the caller knows - a
+        Sprint Race and a Grand Prix are the same ``session_type`` (core invariant #5). It reaches
+        the per-stint average, where lap 1 of a race is not representative pace.
+        """
         self._stints = tuple(stints)
+        self._standing_start = standing_start
         if self._pg is None or self._glw is None:
             return
         self._glw.clear()
         self._vlines = []
         self._proxy = self._link = None
         if not self._stints:
+            self._in_laps = frozenset()
             return
 
+        # Computed once and shared: the pace chart labels them, and the per-stint average leaves
+        # them out. Two callers deriving it separately is how the two would eventually disagree.
+        self._in_laps = in_lap_numbers(self._stints)
         self._axis_max = stint_axis_max(self._stints)
         legend = self._add_legend()
         life = self._add_plot(row=1, title=_LIFE_TITLE, axis="Tyre life", unit="%",
@@ -188,14 +208,14 @@ class StintCharts(QWidget):
             xs, ys = stint_series(stint, lambda lap: lap.tyre_life)
             curve = plot.plot(xs, ys, pen=self._pg.mkPen(colour, width=2, style=style),
                               connect="finite")     # a missing lap breaks the line, never bridges it
-            legend.addItem(curve, _legend_label(stint))
+            legend.addItem(curve, _legend_label(stint, self._stint_average(stint)))
             self._scatter(plot, colour, "o",
                           [(lap.stint_lap, lap.tyre_life) for lap in stint.laps],
                           [_life_tip(lap) for lap in stint.laps])
 
     def _draw_pace(self, plot) -> None:
         """Observed lap time per stint, with anything past the range clipped to its nearer edge."""
-        in_laps = in_lap_numbers(self._stints)
+        in_laps = self._in_laps
         for stint in self._stints:
             colour, style = _stint_style(stint)
             xs, ys = stint_series(stint, self._pace_value)
@@ -215,6 +235,10 @@ class StintCharts(QWidget):
                               [(lap.stint_lap, self._pace_value(lap)) for lap in group],
                               [_pace_tip(lap, lap.lap_number in in_laps, self._clip_side(lap))
                                for lap in group])
+
+    def _stint_average(self, stint: TyreStint) -> str:
+        """This stint's corrected average pace, ready for its legend entry."""
+        return stint_average_label(stint, self._in_laps, standing_start=self._standing_start)
 
     def _clip_side(self, lap: StintLap) -> str:
         """-1 when the lap is drawn on the bottom edge, +1 on the top edge, 0 when it fits."""
@@ -286,11 +310,17 @@ def _stint_style(stint: TyreStint) -> tuple[str, Qt.PenStyle]:
     return colour, _STINT_STYLES[(stint.index - 1) % len(_STINT_STYLES)]
 
 
-def _legend_label(stint: TyreStint) -> str:
-    """``Stint 3 · M · laps 22–29`` - the lap range is what disambiguates a repeated compound."""
+def _legend_label(stint: TyreStint, average: str) -> str:
+    """``Stint 3 · M · laps 22-29 · avg 1:22.926``.
+
+    The lap range disambiguates a repeated compound; the average is what the run was actually
+    worth. It is the stint's *representative* pace, not the mean of the laps drawn: the laps into
+    and out of the pits and a race's standing start are left out of it (``stint_average_ms``), so
+    two runs compare directly even when one of them opens with a 37-second out-lap.
+    """
     letter, _ = compound_style(stint.visual_compound) or _UNKNOWN_COMPOUND
     return (f"Stint {stint.index} · {letter} · "
-            f"laps {stint.first_lap_number}\u2013{stint.last_lap_number}")
+            f"laps {stint.first_lap_number}\u2013{stint.last_lap_number} · avg {average}")
 
 
 def _axis_ticks(axis_max: int) -> list[tuple[float, str]]:
