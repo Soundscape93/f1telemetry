@@ -31,15 +31,18 @@ lap after it. ``stint_series`` keeps those holes as holes.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from math import nan
 from statistics import median
+
+from ..formatting import format_lap_time
 
 _MIN_STINT_LAPS = 2             # DECISIONS -> UI: every session type, and it drops pit-lap artefacts too
 _PACE_PADDING = 0.05            # gap between the axis floor and the fastest lap, as a fraction of the span
 _PACE_SPAN_MS = 8000.0          # the pace axis is always exactly this tall; see pace_y_range
 _GARAGE_FUEL_DELTA_KG = -0.5    # a lap burns 1.06-1.96 kg; above this: the car was in the garage
+_STANDING_START_LAP = 1         # lap 1 of a race begins at rest in the grid box - not representative pace
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,49 @@ def in_lap_numbers(stints: Sequence[TyreStint]) -> frozenset[int]:
         stint.last_lap_number
         for stint, following in zip(stints, stints[1:])
         if following.first_lap_number == stint.last_lap_number + 1)
+
+
+def stint_average_ms(stint: TyreStint, in_laps: Collection[int] = (), *,
+                     standing_start: bool = False) -> float | None:
+    """A stint's average pace in ms over the laps that represent it, or None when none do.
+
+    A plain mean of a stint's laps is not its pace. Three kinds of lap belong to the pit stop or to
+    the start rather than to the run, and each is worth seconds against a degradation signal
+    measured in tenths:
+
+    * **the out-lap** - the lap after the stop carries the whole pit loss (+14 to +37 s in this
+      database). Already flagged per lap, and flagged from the *unfiltered* stint ordinal, so an
+      artefact stint the minimum-laps rule removed can never promote a post-pit lap to "race start".
+    * **the in-lap** - the lap into the pits, from :func:`in_lap_numbers`, which only claims one
+      where the lap numbers of two stints actually meet.
+    * **the standing start** - lap 1 of a race or sprint begins at rest in the grid box, so it is
+      seconds slower than any lap driven from speed. Keyed on the real lap *number*, not on the
+      stint-relative offset: a race whose opening lap was never stored must not lose a genuine
+      racing lap to this rule.
+
+    Nothing else is excluded, and that limit is worth knowing: a lap spent in the gravel or behind
+    a safety car still counts, because nothing stored says it was one (PRIORITIES -> E15). Fuel is
+    not corrected for either - the charts say so outright, and a correction is Analytics work.
+    """
+    times = [lap.lap_time_ms for lap in stint.laps
+             if lap.lap_time_ms
+             and not lap.is_out_lap
+             and lap.lap_number not in in_laps
+             and not (standing_start and lap.lap_number == _STANDING_START_LAP)]
+    return (sum(times) / len(times)) if times else None
+
+
+def stint_average_label(stint: TyreStint, in_laps: Collection[int] = (), *,
+                        standing_start: bool = False) -> str:
+    """:func:`stint_average_ms` as a lap time, or an em dash when no lap represents the stint.
+
+    An em dash rather than silence: a two-lap opening stint of a standing start and an in-lap
+    genuinely has no pace to report, and a missing number would read as one the app forgot to fill
+    in. Formatted through ``format_lap_time`` so the legend, the tooltips and the laps table all
+    print a lap time the same way.
+    """
+    average = stint_average_ms(stint, in_laps, standing_start=standing_start)
+    return format_lap_time(round(average)) if average is not None else "\u2014"
 
 
 def pace_y_range(stints: Sequence[TyreStint], padding: float = _PACE_PADDING,

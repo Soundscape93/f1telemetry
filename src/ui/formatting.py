@@ -15,8 +15,9 @@ so they line up with the classification order.
 
 from __future__ import annotations
 
+from ..pipeline import RestoreProblem
 from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType, Weather
-from ..protocol.reference import game_mode_name, team_display_name
+from ..protocol.reference import game_mode_name, team_display_name, track_name
 
 # Position-change glyphs (race Pos cell): filled triangles read closer to the game than
 # the arrowhead code points, and bold cleanly. Em dash = no change / unknown grid.
@@ -406,3 +407,111 @@ def session_context_label(session, session_label: str) -> str:
     bits.append(game_mode_name(session.game_mode))
     bits.append(session_label)
     return "  ·  ".join(bits)
+
+
+# --- the deleted-session manager ------------------------------------------------------------
+
+def format_size(num_bytes: int) -> str:
+    """Bytes as MB/GB - an import moves hundreds of MB, and a capture chooser has to say so.
+
+    Promoted out of ``main_window`` when the restore chooser became its second caller: two copies
+    of one session differ in size before they differ in anything else a person can see.
+    """
+    mb = num_bytes / (1024 * 1024)
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+def deleted_session_cells(deleted) -> tuple[str, str, str, str]:
+    """The deleted-sessions table's four descriptive columns for one tombstone.
+
+    Every field but the uid is nullable - a tombstone written by an older build, or rolled back
+    from a failed restore of a session whose row was already gone, may know nothing else at all -
+    so each column falls back to an em dash instead of inventing a value.
+
+    **The session column cannot say "Sprint Race".** The tombstone carries ``session_type``, and
+    the game reports RACE for both a sprint and a Grand Prix; only the weekend the session sat in
+    separates them (core invariant #5), and that is gone with the session. The view states the
+    limitation in a tooltip rather than guessing here.
+    """
+    return (
+        _EM_DASH if deleted.session_type is None else slot_label(deleted.session_type),
+        _EM_DASH if deleted.track_id is None else track_name(deleted.track_id),
+        recorded_label(deleted.recorded_at),
+        recorded_label(deleted.deleted_at),
+    )
+
+
+def deleted_capture_label(known_names, found_names) -> str:
+    """The manager's capture column: the file a restore would read, or why there isn't one.
+
+    Three answers, because they mean different things and have different ways out - the same three
+    the session detail page gives for a stored session, in the width a table cell has:
+
+    * **no capture row at all** - pruned, or ingested before capture metadata was recorded. This
+      session can never be restored, and Forget is the only way its row leaves the list.
+    * **rows, but nothing findable** - the file moved or was deleted. Every known name is shown,
+      not a chosen one, so it always matches what a refusal will name, and Help → Find moved
+      captures may bring it back.
+    * **findable** - the file restore would read. Several are counted rather than listed, because
+      the chooser is where they get named properly.
+    """
+    if not known_names:
+        return "not recorded"
+    if not found_names:
+        return f"{', '.join(known_names)}  (archive not found)"
+    if len(found_names) > 1:
+        return f"{found_names[0]}  (+{len(found_names) - 1} more)"
+    return found_names[0]
+
+
+def capture_choice_label(capture) -> str:
+    """One line of the "which recording?" chooser: file, who recorded it, size, when it was read.
+
+    Every field is there because it is something that tells two copies of one session apart: the
+    same session recorded by two league members gives two files of different sizes, and the same
+    file imported twice gives two ingest stamps. ``recorded_by`` is unset for a capture made on
+    this machine as well as for one whose recorder was never recorded, so it says "unknown" rather
+    than claiming either (it is a property of the *file* - E13's, not Sessions').
+    """
+    return "  ·  ".join((
+        capture.file_name,
+        f"recorded by {capture.recorded_by}" if capture.recorded_by else "recorder unknown",
+        format_size(capture.file_size),
+        f"read {recorded_label(capture.ingested_at)}",
+    ))
+
+
+def restore_message(outcome) -> str:
+    """What a finished restore says to the user - one sentence per ``RestoreProblem``.
+
+    The wording lives here, Qt-free and tested, rather than at the call site, because a refusal is
+    a *normal* answer for this job and two of them have to be told apart carefully: a recording
+    whose file has gone missing can be found again, while a session no capture row mentions can
+    never be restored at all and only Forget will clear it. Reading the same in both cases would
+    send someone hunting for a file that was never recorded (E1/E2 plan -> Restore = single-capture
+    re-ingest).
+    """
+    name = outcome.capture_name or "the recording"
+    if outcome.restored:
+        return f"Restored the session from {name}, with its laps and their traces."
+    if outcome.reason is RestoreProblem.ARCHIVE_MISSING:
+        return (f"The recording for this session can't be found ({name}). Restore needs it — try "
+                "Help → Find moved captures, or import it again. The session is still listed as "
+                "deleted.")
+    if outcome.reason is RestoreProblem.NO_CAPTURE_ROW:
+        return ("Nothing in the database records which recording held this session, so it can't "
+                "be restored. Forget removes the row; if you import or re-read that recording "
+                "later, the session comes back on its own.")
+    if outcome.reason is RestoreProblem.AMBIGUOUS_CAPTURE:
+        return ("Several recordings hold this session, so nothing was guessed at — choose one and "
+                "try again.")
+    if outcome.reason is RestoreProblem.NOT_IN_CAPTURE:
+        return (f"{name} turned out not to hold this session after all. Nothing was changed, the "
+                "session is still listed as deleted, and its capture record has been corrected.")
+    if outcome.reason is RestoreProblem.INGEST_FAILED:
+        detail = f" ({outcome.error})" if outcome.error else ""
+        return (f"Reading {name} failed{detail}. Nothing was changed and the session is still "
+                "listed as deleted.")
+    if outcome.reason is RestoreProblem.NOT_DELETED:
+        return "This session isn't deleted — the list was out of date and has been re-read."
+    return "The session could not be restored for an unkown reason."

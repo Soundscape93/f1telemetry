@@ -53,6 +53,7 @@ from ..components.tyres import tyre_pixmap
 from ..formatting import (
     format_lap_time,
     format_penalty_badge,
+    is_race,
     lap_gap_label,
     laps_completed_label,
     player_best_lap_ms,
@@ -89,7 +90,9 @@ _FUEL_CAVEAT = ("Observed lap times, not tyre performance: the car sheds roughly
                 "of the compound or the tyre's condition. No fuel correction is applied here. "
                 "The scale holds the closest 8 seconds to your fastest racing lap — laps into and "
                 "out of the pits are left out of it — so anything slower draws clipped at the top "
-                "edge; hover it for the real time.")
+                "edge; hover it for the real time. Each run's average leaves out the same laps, "
+                "plus a race's standing start, so it is the pace of the run rather than of the "
+                "stop; an incident lap still counts, because nothing stored says it was one.")
 
 
 class DetailPage(QWidget):
@@ -169,7 +172,7 @@ class DetailPage(QWidget):
         laps = self._stored_laps(session)
         self._body.addWidget(self._top_row(session, slot, label, laps))
         self._body.addWidget(self._middle_row(session, laps))
-        self._body.addWidget(self._charts_row(laps))
+        self._body.addWidget(self._charts_row(laps, slot))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
@@ -195,7 +198,7 @@ class DetailPage(QWidget):
                     _box("Penalties", self._penalties_panel(session), scroll=True),
                     max_height=_MID_ROW_MAX_H)
 
-    def _charts_row(self, laps) -> QWidget:
+    def _charts_row(self, laps, slot) -> QWidget:
         """The stacked pace and tyre-life charts, under the laps.
 
         One box rather than two: the charts share a single x-axis inside one pyqtgraph layout, so a
@@ -204,6 +207,11 @@ class DetailPage(QWidget):
 
         A session with no chartable stint gets an honest sentence instead of an empty plot: a single
         flying lap in dry qualifying genuinely has no stint to draw.
+
+        ``slot`` is only read for whether this session started on the grid, which decides whether
+        lap 1 counts towards a stint's average. It has to come from here: a Sprint Race and a Grand
+        Prix share a ``session_type`` and only the weekend tells them apart (core invariant #5),
+        and ``is_race`` covers both.
         """
         stints = split_tyre_stints(laps)
         if not stints:
@@ -211,7 +219,7 @@ class DetailPage(QWidget):
         host = QWidget()
         box = QVBoxLayout(host)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(StintCharts(stints))
+        box.addWidget(StintCharts(stints, standing_start=is_race(slot.session_type)))
         box.addWidget(_muted_label(_FUEL_CAVEAT))
         return _box("Pace and tyre life", host)
 

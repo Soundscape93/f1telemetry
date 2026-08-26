@@ -13,6 +13,8 @@ from f1telemetry.src.ui.sessions.tyre_stints import (
     in_lap_numbers,
     pace_y_range,
     split_tyre_stints,
+    stint_average_label,
+    stint_average_ms,
     stint_axis_max,
     stint_series,
 )
@@ -410,6 +412,85 @@ class TestGarageReturns(unittest.TestCase):
     def test_a_missing_fuel_reading_is_never_a_garage_return(self):
         laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500)]      # fuel None on both
         self.assertEqual(len(split_tyre_stints(laps)), 1)
+
+
+class TestStintAverage(unittest.TestCase):
+    """The corrected per-stint average shown in each chart's legend entry.
+
+    Every number here comes from the same real fixtures as the rules above, so a "simplification"
+    that drops an exclusion fails against a real race rather than an invented one.
+    """
+
+    def _stints(self, laps):
+        stints = split_tyre_stints(laps)
+        return stints, in_lap_numbers(stints)
+
+    def test_excludes_the_standing_start_and_the_in_lap(self):
+        """``11708585...`` stint 1: lap 1 starts from the grid box, lap 9 is the lap into the pits.
+
+        Both in one stint, and both slow for reasons that have nothing to do with the tyres - the
+        uncorrected mean is 1:30.214, two thirds of a second adrift.
+        """
+        stints, in_laps = self._stints(_session_11708585())
+        average = stint_average_ms(stints[0], in_laps, standing_start=True)
+        self.assertAlmostEqual(average, 89551.571, places=2)
+        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:29.552")
+
+    def test_excludes_the_out_lap(self):
+        """``14435457...`` stint 2 opens at 119.594 s against an 82.7 s median.
+
+        Left in, the average reads 1:24.942 - a run that never ran a lap anywhere near it.
+        """
+        stints, in_laps = self._stints(_session_14435457())
+        self.assertEqual(stint_average_label(stints[1], in_laps, standing_start=True), "1:22.896")
+
+    def test_a_stint_of_nothing_but_a_start_and_a_stop_has_no_average(self):
+        """``14435457...`` stint 1 is lap 1 (standing start) and lap 2 (in-lap) and nothing else.
+
+        The honest answer is "no pace to report", not the mean of the two laps that were about
+        something else - and the label says so out loud rather than leaving a blank.
+        """
+        stints, in_laps = self._stints(_session_14435457())
+        self.assertIsNone(stint_average_ms(stints[0], in_laps, standing_start=True))
+        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "\u2014")
+
+    def test_the_standing_start_rule_is_race_only(self):
+        """``13974110...`` is practice: its lap 1 is a flying lap and counts.
+
+        Only the in-lap (7) comes out, which is why the flag is passed in rather than assumed -
+        a practice session's opening lap is often one of its quickest.
+        """
+        stints, in_laps = self._stints(_session_13974110())
+        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=False), "1:39.509")
+        # The same laps read as a race would drop lap 1 as well - the flag is doing the work.
+        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:39.900")
+
+    def test_a_removed_artefact_stint_cannot_promote_an_out_lap_to_a_race_start(self):
+        """``12316788...``: the 170.8 s lap 2 is an out-lap, and the standing-start rule (lap 1)
+        must not reach it - lap 1 belongs to the single-lap stint the minimum-laps rule removed."""
+        stints, in_laps = self._stints(_session_12316788())
+        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:36.603")
+
+    def test_a_hole_inside_a_stint_does_not_poison_the_average(self):
+        """``11708585...`` stint 2 runs 10-18 with the out-lap at 10; nothing is invented for the
+        laps that were never stored."""
+        stints, in_laps = self._stints(_session_11708585())
+        self.assertEqual(stint_average_label(stints[1], in_laps, standing_start=True), "1:29.310")
+
+    def test_untimed_laps_are_ignored_and_the_result_is_a_lap_time(self):
+        """A lap the game never timed contributes nothing - it is not a zero."""
+        laps = [_lap(1, _M, 2.0, 90000), _lap(2, _M, 4.0, None),
+                _lap(3, _M, 6.0, 92000), _lap(4, _M, 8.0, 94000)]
+        stints, in_laps = self._stints(laps)
+        self.assertEqual(stint_average_ms(stints[0], in_laps), 92000.0)
+        self.assertEqual(stint_average_label(stints[0], in_laps), "1:32.000")
+
+    def test_no_in_laps_and_no_flag_is_the_plain_mean(self):
+        """The defaults have to be the uncorrected answer, so a caller that forgets an argument
+        gets something wrong-but-obvious rather than something subtly filtered."""
+        laps = [_lap(1, _M, 2.0, 90000), _lap(2, _M, 4.0, 92000)]
+        stints = split_tyre_stints(laps)
+        self.assertEqual(stint_average_ms(stints[0]), 91000.0)
 
 
 if __name__ == "__main__":
