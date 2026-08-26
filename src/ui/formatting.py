@@ -86,11 +86,25 @@ def estimate_points(position: int, result_status: ResultStatus, is_sprint_race: 
 def slot_label(session_type, is_sprint_race: bool = False) -> str:
     """Return prettified session-type name, e.g. RACE -> Race.
 
-    ``is_sprint_race`` overrides the RACE label to "Sprint Race" - both report SessionType.RACE,
-    so only the weekend context (see domain.season.weekend_slots) can tell them apart.
+    Two race-shaped corrections, both display-only:
+
+    ``is_sprint_race`` overrides the label to "Sprint Race". Only weekend context can decide it
+    (``domain.season.weekend_slots``), so a caller with no weekend - the deleted-sessions manager -
+    cannot pass it, and a deleted sprint reads as "Race" there.
+
+    **Every other race type reads "Race", never "Race 2".** On a sprint weekend the game reports
+    the Sprint as ``RACE`` (15) and the Grand Prix as ``RACE_2`` (16) - verified against this
+    database's ``weekend_structure`` of ``[1, 10, 11, 12, 15, 5, 6, 7, 16]`` - so the raw enum name
+    put "Race 2" on the Grand Prix in every view that labels a session. The weekend's *final* race
+    is the Grand Prix and earlier races are Sprints (core invariant #5), which ``weekend_slots``
+    already resolves by position; the ordinal inside the enum name is not something a user needs.
+    It also makes the number useful where there is no weekend at all: a tombstone reading 16 is a
+    Grand Prix whatever else is unknown about it.
     """
     if is_sprint_race:
         return "Sprint Race"
+    if is_race(session_type):
+        return "Race"
     name = getattr(session_type, "name", None)
     return name.replace("_", " ").title() if name else str(session_type)
 
@@ -428,10 +442,12 @@ def deleted_session_cells(deleted) -> tuple[str, str, str, str]:
     from a failed restore of a session whose row was already gone, may know nothing else at all -
     so each column falls back to an em dash instead of inventing a value.
 
-    **The session column cannot say "Sprint Race".** The tombstone carries ``session_type``, and
-    the game reports RACE for both a sprint and a Grand Prix; only the weekend the session sat in
-    separates them (core invariant #5), and that is gone with the session. The view states the
-    limitation in a tooltip rather than guessing here.
+    **The session column cannot say "Sprint Race".** The tombstone carries ``session_type``, and a
+    sprint reports RACE (15) exactly as an ordinary race does; only the weekend the session sat in
+    separates them (core invariant #5), and that is gone with the session. A sprint weekend's Grand
+    Prix *is* recoverable - it reports RACE_2 (16), which ``slot_label`` renders as "Race" - so the
+    limitation is narrower than it looks: it bites type 15 only. The view says so in a tooltip
+    rather than guessing here.
     """
     return (
         _EM_DASH if deleted.session_type is None else slot_label(deleted.session_type),

@@ -1040,7 +1040,7 @@ def restore_session(session_uid: int, session_store: SessionStore, capture_store
             return RestoreOutcome(restored=False, session_uid=uid, 
                                   reason=RestoreProblem.NO_CAPTURE_ROW)
         newest = max(known, key=_ingest_order)
-        log.info("Restore: capture %s for session %s is missing (%s)", uid, newest.file_name)
+        log.info("Restore: the capture holding session %s is missing (%s)", uid, newest.file_name)
         return RestoreOutcome(restored=False, session_uid=uid, capture_name=newest.file_name,
                               reason=RestoreProblem.ARCHIVE_MISSING)
     if len(found) > 1:

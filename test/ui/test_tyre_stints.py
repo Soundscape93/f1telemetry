@@ -492,6 +492,14 @@ class TestStintAverage(unittest.TestCase):
         stints = split_tyre_stints(laps)
         self.assertEqual(stint_average_ms(stints[0]), 91000.0)
 
+    def test_a_half_millisecond_mean_rounds_up_not_to_even(self):
+        """Two laps a millisecond apart average to a half-millisecond, and ``round`` is banker's:
+        it would print 1:33.786 where the DB average of 93.7865 s reads 1:33.787 everywhere else."""
+        laps = [_lap(1, _M, 2.0, 93786), _lap(2, _M, 4.0, 93787)]
+        stints = split_tyre_stints(laps)
+        self.assertEqual(stint_average_ms(stints[0]), 93786.5)
+        self.assertEqual(stint_average_label(stints[0]), "1:33.787")
+
 
 if __name__ == "__main__":
     unittest.main()

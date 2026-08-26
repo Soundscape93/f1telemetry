@@ -32,6 +32,7 @@ from f1telemetry.src.ui.formatting import (
     race_winner_summary,
     recorded_label,
     restore_message,
+    slot_label,
     session_best_lap_ms,
     session_context_label,
     session_fastest_lap,
@@ -516,6 +517,10 @@ class DeletedSessionCellsTest(unittest.TestCase):
         Grand Prix (core invariant #5), so this must stay true until the tombstone widens."""
         self.assertEqual(deleted_session_cells(_tomb(session_type=SessionType.RACE))[0], "Race")
 
+    def test_a_sprint_weekends_grand_prix_is_recoverable_from_the_type_alone(self):
+        """RACE_2 needs no weekend context: a second race is the weekend's final one."""
+        self.assertEqual(deleted_session_cells(_tomb(session_type=SessionType.RACE_2))[0], "Race")
+
 
 class DeletedCaptureLabelTest(unittest.TestCase):
     def test_no_capture_row_at_all(self):
@@ -588,6 +593,29 @@ class RestoreMessageTest(unittest.TestCase):
     def test_a_refusal_with_no_capture_name_still_reads(self):
         self.assertIn("the recording",
                       restore_message(self._refusal(RestoreProblem.INGEST_FAILED)))
+
+
+class SlotLabelTest(unittest.TestCase):
+    def test_a_non_race_type_is_its_prettified_name(self):
+        self.assertEqual(slot_label(SessionType.QUALIFYING_3), "Qualifying 3")
+        self.assertEqual(slot_label(SessionType.SPRINT_SHOOTOUT_1), "Sprint Shootout 1")
+
+    def test_the_sprint_flag_wins(self):
+        self.assertEqual(slot_label(SessionType.RACE, is_sprint_race=True), "Sprint Race")
+
+    def test_a_grand_prix_reads_race_whatever_number_the_game_put_on_it(self):
+        """A sprint weekend reports the Sprint as RACE (15) and the Grand Prix as RACE_2 (16), so
+        the raw enum name labelled every sprint weekend's Grand Prix "Race 2"."""
+        self.assertEqual(slot_label(SessionType.RACE), "Race")
+        self.assertEqual(slot_label(SessionType.RACE_2), "Race")
+        self.assertEqual(slot_label(SessionType.RACE_3), "Race")
+
+    def test_a_raw_int_race_type_reads_race_too(self):
+        """Enums are stored as raw ints (invariant #9), and a tombstone hands one straight over."""
+        self.assertEqual(slot_label(16), "Race")
+
+    def test_a_type_newer_than_the_enum_renders_as_its_number(self):
+        self.assertEqual(slot_label(250), "250")
 
 
 if __name__ == "__main__":

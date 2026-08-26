@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
-from math import nan
+from math import floor, nan
 from statistics import median
 
 from ..formatting import format_lap_time
@@ -181,7 +181,12 @@ def stint_average_label(stint: TyreStint, in_laps: Collection[int] = (), *,
     print a lap time the same way.
     """
     average = stint_average_ms(stint, in_laps, standing_start=standing_start)
-    return format_lap_time(round(average)) if average is not None else "\u2014"
+    if average is None:
+        return "\u2014"
+    # Half-up, not ``round``: an even number of laps timed in whole milliseconds puts the mean on a
+    # half-millisecond often, and banker's rounding prints 93786.5 as 1:33.786 while every
+    # calculator, spreadsheet and stopwatch the user checks it against says 1:33.787.
+    return format_lap_time(floor(average + 0.5))
 
 
 def pace_y_range(stints: Sequence[TyreStint], padding: float = _PACE_PADDING,

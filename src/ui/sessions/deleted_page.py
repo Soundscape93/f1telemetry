@@ -211,13 +211,17 @@ class DeletedPage(QWidget):
         _known, found = self._captures_for(tomb.session_uid)
         content_hash = ""
         if len(found) > 1:
-            content_hash = self._choose_capture(found)          # the user picks which file to read, if more than one holds the session_uid
-            if not content_hash:
+            content_hash = self._choose_capture(found)
+            # Anything that isn't one of the hashes just offered means "don't restore" - a cancel,
+            # or a chooser that failed to hand one back. Never fall through with an empty hash: the
+            # pipeline reads that as "no choice was made" and refuses as ambiguous, which the user
+            # reads as their choice having been ignored, because it has been.
+            if content_hash not in {meta.content_hash for meta, _path in found}:
                 return
         elif not self._confirm_restore(found[0][0].file_name if found else ""):
             return
         self.restore_requested.emit(str(tomb.session_uid), content_hash)
-
+    
     def _confirm_restore(self, file_name: str) -> bool:
         opening = (f"The recording {file_name} will be read again"
                    if file_name else "This session's recording will be read again")
@@ -302,7 +306,15 @@ class _CaptureChooser(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    @property
     def content_hash(self) -> str:
+        """The chosen capture's identity - the hash, never the path, because files move.
+
+        A property rather than a method, and deliberately so: as a method, a caller who dropped the
+        parentheses got the bound method back. PySide6 cannot convert one for a ``Signal(str, str)``
+        and passes an **empty string** instead of raising, so the pipeline saw "no choice made" and
+        refused the restore as ambiguous - the chooser appearing to do nothing at all.
+        """
         item = self._list.currentItem()
         return "" if item is None else str(item.data(Qt.ItemDataRole.UserRole))
 
