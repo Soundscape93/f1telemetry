@@ -109,7 +109,8 @@ class LapRow(Base):
     session delete - so a lap persistence never depends on cross-store cascade behaviour. The dense
     ~5400-sample trace lives in a Parquet file at ``trace_path``(relative to the store's trace
     dir), never in the database. Tyte context is lap-boundary snapshot: compound/age from Car
-    Status, cumulative wear % from Car Damage (RL, RR, FL, FR).
+    Status, cumulative wear % from Car Damage (RL, RR, FL, FR). The lap-context columns are read
+    from Lap-Data over the lap's own timed run and from the Session packet's race-control state.
     """
 
     __tablename__ = "laps"
@@ -133,6 +134,16 @@ class LapRow(Base):
     tyre_carcass_temp: Mapped[list | None] = mapped_column(JSON, nullable=True)  # per-wheel tyre inner/carcass temp °C
     damage: Mapped[dict | None] = mapped_column(JSON, nullable=True)         # non-tyre CarDamage snapshot
     fuel_in_tank: Mapped[float | None] = mapped_column(nullable=True)        # kg in tank at lap start
+    # Lap context (PIPELINE_VERSION 4): what Lap Data and the Session packet said about this lap.
+    # Additive-nullable like every column before them - a lap stored earlier reads them back as
+    # None, which is what tells the charts to fall back to inference (see domain Lap.has_lap_context).
+    driver_status: Mapped[int | None] = mapped_column(nullable=True)        # raw DriverStatus
+    pit_status: Mapped[int | None] = mapped_column(nullable=True)           # raw PitStatus, peak
+    preceded_by_garage: Mapped[bool | None] = mapped_column(nullable=True)  # garage before this lap
+    is_out_lap: Mapped[bool | None] = mapped_column(nullable=True)          # began in the pit lane
+    is_in_lap: Mapped[bool | None] = mapped_column(nullable=True)           # ended entering the pits
+    safety_car: Mapped[int | None] = mapped_column(nullable=True)           # raw SafetyCarStatus
+    red_flagged: Mapped[bool | None] = mapped_column(nullable=True)         # a red flag began here
 
 
 class DeletedSessionRow(Base):

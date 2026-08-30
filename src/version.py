@@ -18,4 +18,7 @@ __version__ = "0.8.1"
 # 2: classification entries carry ``is_ai`` (AI vs human), so league standings stop confusing
 # drivers with the same race number
 # 3: sessions carry ``ai_difficulty`` from the Session packet; rows ingested before this read 0
-PIPELINE_VERSION = 3
+# 4: laps carry their context - ``driver_status`` / ``pit_status`` from Lap Data, the computed
+#    garage, out-lap and in-lap flags, and the Session packet's safety-car and red-flag state;
+#    rows ingested before this read None and fall back to the fuel/stint-shape inference
+PIPELINE_VERSION = 4

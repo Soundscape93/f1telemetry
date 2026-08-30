@@ -66,13 +66,14 @@ from ..formatting import (
 from ..style import (
     FASTEST_LAP,
     FASTEST_LAP_QSS,
+    MUTED_TEXT,
     MUTED_TEXT_QSS,
     PERSONAL_BEST,
     apply_bold,
     apply_heading
 )
+from .lap_context import analyse_session
 from .stint_charts import StintCharts
-from .tyre_stints import split_tyre_stints
 
 _MID_ROW_MAX_H = 500            # the Laps / Penalties row is capped; those two boxes scroll inside it
 _LAPS_TABLE_MAX_H = 440         # _MID_ROW_MAX_H less the box's heading and margins
@@ -170,9 +171,14 @@ class DetailPage(QWidget):
         self._subtitle.setText(f"uid {session.session_uid} · Source capture: {self._capture_label(session)}")
 
         laps = self._stored_laps(session)
+        # One classification for the page: the Laps box's indicators, the run split and the pace
+        # averages all read this, so a lap the table flags and a lap the average drops are the same
+        # lap by construction (ui/sessions/lap_context.py). ``is_race`` covers the Sprint Race too,
+        # which shares its session_type with the Grand Prix (core invariant #5).
+        analysis = analyse_session(laps, standing_start=is_race(slot.session_type))
         self._body.addWidget(self._top_row(session, slot, label, laps))
-        self._body.addWidget(self._middle_row(session, laps))
-        self._body.addWidget(self._charts_row(laps, slot))
+        self._body.addWidget(self._middle_row(session, laps, analysis))
+        self._body.addWidget(self._charts_row(analysis))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
@@ -189,16 +195,16 @@ class DetailPage(QWidget):
                                 build_classification_table(session, is_sprint_race=slot.is_sprint_race), fill=True)
         return _row(details, classification)
 
-    def _middle_row(self, session, laps) -> QWidget:
+    def _middle_row(self, session, laps, analysis) -> QWidget:
         """The player's laps beside the session's penalties, capped.
         
-        The Laps table scrolls itself, header pinned), the penalties panel is plain widgets so it
+        The Laps table scrolls itself, (header pinned), the penalties panel is plain widgets so it
         gets a scroll area for when E15 is done."""
-        return _row(_box("Laps", self._laps_table(session, laps)),
+        return _row(_box("Laps", self._laps_table(session, laps, analysis)),
                     _box("Penalties", self._penalties_panel(session), scroll=True),
                     max_height=_MID_ROW_MAX_H)
 
-    def _charts_row(self, laps, slot) -> QWidget:
+    def _charts_row(self, analysis) -> QWidget:
         """The stacked pace and tyre-life charts, under the laps.
 
         One box rather than two: the charts share a single x-axis inside one pyqtgraph layout, so a
@@ -207,21 +213,15 @@ class DetailPage(QWidget):
 
         A session with no chartable stint gets an honest sentence instead of an empty plot: a single
         flying lap in dry qualifying genuinely has no stint to draw.
-
-        ``slot`` is only read for whether this session started on the grid, which decides whether
-        lap 1 counts towards a stint's average. It has to come from here: a Sprint Race and a Grand
-        Prix share a ``session_type`` and only the weekend tells them apart (core invariant #5),
-        and ``is_race`` covers both.
         """
-        stints = split_tyre_stints(laps)
-        if not stints:
-            return _box("Pace and tyre life", _muted_label(_NO_STINTS))
+        if not analysis.stints:
+            return _box("Tyre stints & pace", _muted_label(_NO_STINTS))
         host = QWidget()
         box = QVBoxLayout(host)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(StintCharts(stints, standing_start=is_race(slot.session_type)))
+        box.addWidget(StintCharts(analysis))
         box.addWidget(_muted_label(_FUEL_CAVEAT))
-        return _box("Pace and tyre life", host)
+        return _box("Tyre stints & pace", host)
 
     # --- boxes -----------------------------------------------------------------------------------
     def _details_grid(self, session, slot, label: str, laps) -> QWidget:
@@ -299,11 +299,17 @@ class DetailPage(QWidget):
         track.setMinimumHeight(_TRACK_MAP_MIN_H)
         return track
     
-    def _laps_table(self, session, laps) -> QWidget:
+    def _laps_table(self, session, laps, analysis) -> QWidget:
         """The player's laps, one clickable row each, with the gap to *my* fastest lap.
 
         A single click opens the lap - unlike the laps overview, where the row is also a fold
         target and the first click is already spoken for. Deliberate, and recorded in DECISIONS.
+
+        The ``CTX`` column carries the lap-context chips - START, OUT, IN, SC, RED - from the same
+        classification the pace chart's averages use. There is one chip per reason a lap leaves a
+        run's average and no chip that isn't one, so a lap missing from an average can always be
+        seen to be missing, and the row's tooltip says why. Muted rather than coloured: they are
+        context, not a result, and the fastest-lap colours in this table have to keep standing out.
         """
         if not laps:
             return _muted_label(
@@ -317,7 +323,7 @@ class DetailPage(QWidget):
         # equality would call that a session-fastest lap and paint it blue.
         best_color = FASTEST_LAP if player_best and player_best == session_best else PERSONAL_BEST
 
-        columns = ["LAP", "TYRE", "GAP", "TIME"]
+        columns = ["LAP", "TYRE", "GAP", "TIME", "CTX"]
         table = QTableWidget(len(laps), len(columns))
         table.setHorizontalHeaderLabels(columns)
         tidy_table(table)
@@ -340,6 +346,22 @@ class DetailPage(QWidget):
             if player_best and lap.lap_time_ms == player_best:
                 time_item.setForeground(QColor(best_color))
             table.setItem(row, 3, time_item)
+
+            context = analysis.for_lap(lap.lap_number)
+            flags = cell(" ".join(context.indicators))
+            tooltip = context.tooltip
+            if flags is not None:
+                # On the whole row, not just the chip: the user hovering a lap *time* that looks
+                # out of place is the one asking "why isn't this in the average?", and a two-letter
+                # chip three columns away is not where they are pointing.
+                for column in range(table.columnCount()):
+                    item = table.item(row, column) or flags
+                    item.setToolTip(tooltip)
+            if context.indicators:
+                # setForeground, never a stylesheet: a stylesheet freezes the palette at apply time
+                # and survives a theme switch (core invariant #11). MUTED_TEXT reads on both grounds.
+                flags.setForeground(QColor(MUTED_TEXT))
+            table.setItem(row, 4, flags)
         fit_table_height(table, max_height=_LAPS_TABLE_MAX_H)
         table.cellClicked.connect(partial(self._open_lap, table))
         return table

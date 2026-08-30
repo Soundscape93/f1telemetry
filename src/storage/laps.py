@@ -144,7 +144,14 @@ class LapStore:
             tyre_surface_temp=list(tc.surface_temp) if tc else None,
             tyre_carcass_temp=list(tc.carcass_temp) if tc else None,
             damage=dataclasses.asdict(lap.damage) if lap.damage else None,
-            fuel_in_tank=lap.fuel_in_tank
+            fuel_in_tank=lap.fuel_in_tank,
+            driver_status=lap.driver_status,
+            pit_status=lap.pit_status,
+            preceded_by_garage=lap.preceded_by_garage,
+            is_out_lap=lap.is_out_lap,
+            is_in_lap=lap.is_in_lap,
+            safety_car=lap.safety_car,
+            red_flagged=lap.red_flagged
         )
     
     def _to_domain(self, row: LapRow, with_trace: bool = True) -> Lap:
@@ -180,6 +187,12 @@ class LapStore:
             trace=trace,
             tyre_context=tyre_context,
             damage=damage,
-            fuel_in_tank=row.fuel_in_tank
+            fuel_in_tank=row.fuel_in_tank,
+            driver_status=row.driver_status,
+            pit_status=row.pit_status,
+            preceded_by_garage=row.preceded_by_garage,
+            is_out_lap=row.is_out_lap,
+            is_in_lap=row.is_in_lap,
+            safety_car=row.safety_car,
+            red_flagged=row.red_flagged
         )
-

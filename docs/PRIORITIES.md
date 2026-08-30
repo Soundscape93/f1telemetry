@@ -209,7 +209,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 
 | Release | Contents | Label | Re-ingest |
 |---|---|---|---|
-| **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (`driver_status`) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → 3 |
+| **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — 3 → 4 |
 | **v0.11.0** | **E1c** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework) | `minor` | no |
 
@@ -287,7 +287,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
-| E17 | Store `driver_status` / `pit_status` from Lap Data | open — **found 2026-08-25** while fixing the E1 pace charts; **not part of E15** | the note below |
+| E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -331,7 +331,24 @@ re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should *
 share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
 `Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
 
-**Lap-context indicators for the Laps box — banked 2026-08-24, ride with the E14/E15 re-ingest.**
+**The red-flag rules were corrected on manual check, 2026-08-30.** Worth keeping because the scan
+that designed them was not wrong about the data and was still wrong about the game. `driver_status`
+really does read `OUT_LAP` for 94-95 % of the lap a red-flagged race restarts on, and the first rule
+believed it — but the game does not time the drive from the pit lane back to the grid, so that
+status belongs to a lap that was never emitted and the restart is a standing start from the grid
+box. Driving the session is what settled it; `docs/TELEMETRY_NOTES.md` had already written down the
+skipped lap six sections above the rule that contradicted it. The same stoppage also makes the game
+report near-zero tyre wear for one lap, which split a run in two and cost the Shanghai sprint its
+opening lap. Both are fixed and pinned; details in TELEMETRY_NOTES and DECISIONS.
+
+**Lap-context indicators for the Laps box — banked 2026-08-24, done 2026-08-27 as part of E17.**
+Landed with it rather than after it, because the measurement showed the cost was a shared
+classification and two Session-packet fields, not a second piece of work. See the E17 note above.
+The original entry, kept for the reasoning:
+Landed as five chips rather than the three requested — `START` / `OUT-LAP` / `IN-LAP` / `SC` /
+`RED-FLAG` — once the rule became "one chip per reason a lap leaves the run average, and no chip
+that isn't one".
+
 Requested while reviewing the E1 detail view: mark **in-laps / out-laps** and **safety-car laps**
 in the session's lap list, because those laps are slow for reasons that have nothing to do with
 pace and currently read as if the driver simply lost time. Also the input the pace chart's out-lap
@@ -405,6 +422,33 @@ out-lap starts too far past the line), so the useful shape is a flag computed in
 rather than a raw per-lap status. Needs a new column, a `PIPELINE_VERSION` bump and a re-ingest, so
 bundle it with **E14/E15** and pay for one re-ingest. Fuel then becomes the fallback for rows
 ingested before the bump.
+
+**Done 2026-08-27, on `feature/store-driver-status`, and it absorbed the banked Laps-box
+indicators.** Measuring first was what settled the shape, and it is worth recording what the
+measurement changed about the plan:
+
+1. **The computed boundary flag was right, and safer than expected.** Across all 33 captures — 484
+   emitted laps — a garage visit sits *before* the timed run in **every** case: 69 laps have one,
+   none has garage frames inside or after the run, and no garage is stranded in a buffer that was
+   never emitted. So the flag is exact, not best-effort.
+2. **`driver_status` alone is not enough, and `pit_status` / `pit_lane_timer_active` are
+   load-bearing.** `IN_LAP` marks the *planned* in-lap and stays set while the driver stays out
+   (three laps early in one race, six in another), so the in-lap comes from the pit-lane timer.
+   Conversely the timer never runs on a red-flag restart, so the out-lap needs `driver_status` too.
+   Both are stored.
+3. **Safety Car and Red Flag came in for free** — both are on the **Session** packet the assembler
+   already routes, so no Event work (that stays E15). Hence the banked *lap-context indicators*
+   item landed here rather than waiting: `SCAR` Event packets are actively worse for this, being
+   mostly formation-lap and "resume race" noise.
+4. **It corrected two real errors**, verified end-to-end against every capture: the fuel proxy's one
+   false split (Shanghai sprint lap 4) is gone, and a safety-car run that reported 1:55.967 now
+   reports the 1:36.776 it actually ran. It also *raises* some practice averages, because a flying
+   lap that merely ended a run is no longer mistaken for an in-lap — deliberate, and recorded in
+   DECISIONS → UI.
+
+Shape as landed: `Sample` → `Lap` → `LapRow` → both mappings, seven additive-nullable columns, a new
+Qt-free `ui/sessions/lap_context.py` that classifies each lap once for the Laps box, the stint split
+and the average pace, and **`PIPELINE_VERSION` 3 → 4**.
 
 **E16 — game-mode ids for 2026.** `game_mode 78` is **Driver Career '26**, established from
 observation 2026-08-24: every "Driver Career with the 2026 cars" recording carries it, checked in

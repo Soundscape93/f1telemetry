@@ -52,6 +52,21 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   starting just under your quickest lap, so a run whose laps are within a few tenths reads as the
   dead heat instead of being stretched to fill the graph — and anything outside that window
   is still drawn, clipped to the nearer edge, with its true time on hover.
+- **Your laps now say what happened on them, and the run averages act on it.** The session detail's
+  Laps box marks a lap that started from the grid (`START`), left the pits (`OUT-LAP`), came into
+  them (`IN-LAP`), ran behind a safety car (`SC`) or was caught by a red flag (`RED-FLAG`), and
+  hovering the lap says what it means. There is one mark for each reason a lap is left out of its
+  run's average pace, and no others — so an average you doubt can always be traced to the laps
+  behind it. They come from what the game reported at the time rather than being guessed at from lap
+  times, so they are right in places the guess was wrong: a practice lap that merely happened to be
+  the last one of a run is no longer treated as the lap into the pits, and a run that spent four
+  laps behind the safety car no longer reports that as its pace (one race here read 1:55.967 and
+  actually ran 1:36.776). A red-flagged race is read properly too: the slow lap the flag fell on is
+  marked and left out, the restart is recognised as the standing start from the grid box that it is,
+  and the run either side of the stoppage stays one run instead of being split in two and losing its
+  opening laps. The same reading decides where one run ends and the next begins, so the charts, the
+  averages and the marks beside your laps can no longer disagree. Sessions already in your database need a re-ingest before any of it appears; until then
+  they fall back to the old estimates and chart exactly as they do today.
 - **Each run on the pace chart now shows its average lap time.** In the legend, beside the compound
   and the lap range. It's the pace of the *run*, not of the pit stop: the lap into the pits, the lap
   out of them, and a race's standing start are left out of the average, since they'd otherwise add
@@ -87,9 +102,11 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   though the recording had been started mid-lap. The race just had no opening lap, with nothing said
   about it. Affected races get their lap 1 back on the re-ingest this release already asks for.
 
-**Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 3. The new column is added silently on
-startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty stored
-until the guided re-ingest re-reads their captures. Everything else about them is unaffected.
+**Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 4. The new columns are added silently on
+startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty and no
+lap context stored until the guided re-ingest re-reads their captures — until then their laps carry
+no In/Out/Safety car/Red flag marks, and their run splitting and averages use the previous
+estimates. Everything else about them is unaffected.
 
 
 ## v0.8.1 — 2026-08-18
