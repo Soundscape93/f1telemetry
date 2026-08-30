@@ -227,6 +227,101 @@ Two related traps in the same data:
 Coverage is good: **406 of 406** stored laps carry `tyre_wear`, `tyre_age_laps` and
 `tyre_visual_compound`.
 
+## What `driver_status` actually reports, and what it does not
+
+*Measured 2026-08-27 across every capture in this database (33 files, 484 emitted laps) while
+implementing E17. The scan replayed each capture through the assembler's own run-splitting, so what
+is described here is what the assembler sees, not what the spec promises.*
+
+**The lap counter only advances at the end of a *timed* lap.** Crossing the line on an in-lap, in
+the pit lane, or on an out-lap does not increment `current_lap_num`. So in practice and qualifying a
+single lap number covers the whole sequence between two timed laps:
+
+    lap 3 | FLYING  100.2 s  -> IN_LAP   (pit entry at 5638 m, line crossed in the pit lane)
+    lap 3 | IN_GARAGE 206 s  -> OUT_LAP  (garage at d=228 m, out-lap from d=267 m)
+    lap 3 | FLYING   93.1 s            <- this is Session History lap 3 (93.219)
+
+Three consequences, all load-bearing:
+
+- **A garage visit is always *before* the timed run of the lap that follows it.** Across all 484
+  emitted laps: 69 have garage frames ahead of the selected run, **none** inside it and **none**
+  after it. Checked separately: no garage sits in a buffer that was never emitted while a later lap
+  was — the only non-emitted garage buffers are trailing ones (the driver parked at the end).
+  This is what `Lap.preceded_by_garage` reads, and it is why the flag is computed at the boundary
+  rather than stored as a raw per-lap status.
+- **The lap on which a driver returns to the pits is never timed in practice or qualifying**, so it
+  is never stored. Every one of the 159 emitted non-race laps here reads `FLYING` end to end — no
+  in-laps, no out-laps, no garage frames inside the lap. Any rule that labels a stored practice lap
+  an in-lap or an out-lap is inventing it.
+- **A race never reports `IN_GARAGE`.** The game says `pit_status = IN_PIT_AREA` for a pit stop and
+  keeps `IN_GARAGE` for the garage proper. So the garage flag is an *additional* run boundary beside
+  wear / age / compound, never a replacement for them.
+
+**`driver_status == IN_LAP` is not "the lap you pitted on".** The game sets it when the *planned*
+in-lap comes up and leaves it set while the driver stays out. Melbourne `14435457…` reads `IN_LAP`
+for the whole of laps 19, 20 **and** 21, and the stop is on 21; Suzuka `267662079…` reads it for its
+last six laps and never pits again. Use `pit_lane_timer_active` instead — active on the lap's last
+frames means the pit lane was entered, active on its first frames means it was left.
+
+**`pit_status == IN_PIT_AREA` marks the lap that carries the stop, and which lap that is depends on
+the circuit.** Where the pit box sits before the timing line (Melbourne, Sakhir) the stationary time
+lands on the **in**-lap: `14435457…` lap 3 runs 119.594 s and lap 4 runs 87.341 s. Where it sits
+after (Suzuka, Shanghai) it lands on the out-lap. Both laps are excluded from a run's average pace
+for that reason.
+
+**A red-flag restart reads as `OUT_LAP` and is not one.** Shanghai sprint `12316788…` lap 4 and
+Shanghai race `10247048…` lap 13 are 94 % and 95 % `OUT_LAP` with the pit-lane timer never active,
+and the first rule written for E17 believed them — "lane timer at the lap's start **or** `OUT_LAP`
+for most of the lap". That was wrong, and this document already said why two sections up (*A red
+flag skips a lap number*): the game does not time the trip from the pit lane back to the grid, so
+the status is left over from a lap that was never emitted, and the lap it lands on is a **standing
+start from the grid box**. Confirmed in-game 2026-08-30.
+
+The corrected rule is one signal: **out-lap is the pit-lane timer running as the lap began, and
+nothing else**. Scanned over all 470 emitted laps in this database (2026-08-30), the timer flags 15
+laps and every one of them also carries a pit stop; `driver_status` flags those same 15 plus exactly
+the two restarts above, and flags nothing the timer misses. The restart is read instead from the lap
+*before* it — `red_flagged` on the previous emitted lap — and classified as a standing start
+(`ui/sessions/lap_context.py` → `_restart_laps`). Only for a session that starts on the grid: a
+practice or qualifying restart really is a pit-lane exit, and the timer catches it.
+
+**Under a red flag the game reports the tyres as good as new.** On the lap the flag falls, wear is
+read while the car is being reset in the pit lane and comes back near zero — Shanghai race lap 11
+reads 1.28 % after lap 10 read 54.65 %, Shanghai sprint lap 2 reads 2.32 % after lap 1 read 6.75 %.
+No set was fitted: `tyre_age_laps` counts straight through both (9 → 10 and 0 → 1), the compound is
+unchanged, and the wear picks up where it left off on the restart lap (5.22 % and 6.79 %). Believing
+it opens a stint in the middle of a run, and the laps stranded in front of it then vanish to the
+minimum-laps filter — which is exactly what the Shanghai sprint's chart did, losing lap 1 entirely
+and putting every remaining lap one place early on the stint axis. So the *wear* boundary alone is
+suppressed on a red-flagged lap; age and compound keep their say, and when Shanghai race really did
+change mediums for hards during its stoppage that boundary still stands.
+
+## Safety car and red flag come from the Session packet, not from Event packets
+
+*Measured 2026-08-27, same scan.* Both are already on a packet the assembler routes, so per-lap
+attribution needs no Event ingest (which is PRIORITIES → E15, and unrelated).
+
+- **Safety car** is `PacketSessionData.safety_car_status`, per frame. Three real deployments exist in
+  this database: `2114813…` (sprint) laps 19-22, `10247048…` laps 11-13, `6912670…` laps 23-26.
+  Attribution is "the state seen while this lap number was current", which is exact for a race — one
+  lap-distance pass per lap number.
+- **The `SCAR` Event packet is worse for this**, which is worth recording because it looks like the
+  obvious source. 59 of them exist and most are noise: `sc_status = 0, event_type = 3` ("Resume
+  Race") fired in practice and qualifying, plus a formation-lap pair at every race start. In
+  `10247048…` the deploy and resume events are 4 seconds apart while the Session field correctly
+  spans three laps.
+- **`FORMATION_LAP` is reported on lap 1 of every race here**, so it is stored honestly and then
+  ignored by the classification — it is not a safety car, and the standing-start rule already
+  accounts for that lap.
+- **Red flag** is a *rise* in `num_red_flag_periods`. Only a rise: the counter is not monotonic —
+  the Shanghai sprint's went 0 → 1 during lap 2 and back to 0 at lap 10 — so reading the value
+  itself would flag every lap of the restart and then stop. **Thin evidence, stated as such:** this
+  database holds exactly two red flags (`12316788…` lap 2, `10247048…` lap 11) and both land on the
+  right lap. Revisit if a third behaves differently.
+
+Both fields are named identically in the 2025 and 2026 wire structs, as are `driver_status`,
+`pit_status` and `pit_lane_timer_active`, so none of this is format-branched.
+
 ## The pit out-lap carries the whole pit loss (+14 to +37 s)
 
 *Measured 2026-08-24 across every 50%-distance race in the database.* The game does not split pit

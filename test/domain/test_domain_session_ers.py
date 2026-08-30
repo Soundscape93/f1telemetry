@@ -34,7 +34,8 @@ class LapTraceTest(unittest.TestCase):
 
 class TelemetrySampleTest(unittest.TestCase):
     def test_telemetry_sample_uses_car_status_ers_fields(self) -> None:
-        lap_data = SimpleNamespace(lap_distance=123.4)
+        lap_data = SimpleNamespace(lap_distance=123.4, driver_status=4, pit_status=0,
+                                   pit_lane_timer_active=0)
         car_telemetry = SimpleNamespace(
             speed=245,
             throttle=0.75,
@@ -54,7 +55,8 @@ class TelemetrySampleTest(unittest.TestCase):
         self.assertEqual(sample.fuel, 48.5)
 
     def test_telemetry_sample_defaults_ers_to_zero_without_car_status(self) -> None:
-        lap_data = SimpleNamespace(lap_distance=50.0)
+        lap_data = SimpleNamespace(lap_distance=50.0, driver_status=4, pit_status=0,
+                                   pit_lane_timer_active=0)
         car_telemetry = SimpleNamespace(
             speed=180,
             throttle=0.5,
@@ -154,7 +156,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=200,
                     player_car_index=0,
                 ),
-                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=25.0)],
+                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=25.0,
+                                          driver_status=4, pit_status=0,
+                                          pit_lane_timer_active=0)],
             )
         )
         builder.feed(
@@ -210,7 +214,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=201,
                     player_car_index=0,
                 ),
-                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=50.0)],
+                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=50.0,
+                                          driver_status=4, pit_status=0,
+                                          pit_lane_timer_active=0)],
             )
         )
         builder.feed(

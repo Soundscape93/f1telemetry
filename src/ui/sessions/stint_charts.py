@@ -6,8 +6,12 @@ lap over a 38-lap race against 18 px full-width, and stacking lets wear fall-off
 read down one vertical line. Charting is pyqtgraph, imported lazily exactly as
 ``components/trace_plot.py`` does it, so a missing install shows a hint instead of breaking the page.
 
-Every stint rule lives Qt-free in ``tyre_stints``; this module only draws them. Three drawing choices
-carry meaning rather than taste:
+Every stint rule lives Qt-free in ``tyre_stints``, and which laps represent a run's pace is decided
+once in ``lap_context`` - this module only draws them. It is handed a ``SessionAnalysis`` rather
+than a list of stints for exactly that reason: the average in a legend entry and the indicator
+beside that lap in the Laps box are then the same judgement, not two that happen to agree.
+
+Three drawing choices carry meaning rather than taste:
 
 * **A lap past the range is drawn clipped, but still on the line.** Pit laps are kept out of the
   scale by rule and the rest of the spread is capped, so any lap can end up above it: it is pinned
@@ -27,7 +31,6 @@ carry meaning rather than taste:
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
 from functools import lru_cache
 from math import nan
 
@@ -37,10 +40,10 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from ..components.tyres import compound_style
 from ..formatting import format_lap_time
 from ..style import MUTED_TEXT_QSS
+from .lap_context import LapContext, SessionAnalysis
 from .tyre_stints import (
     StintLap,
     TyreStint,
-    in_lap_numbers,
     pace_y_range,
     stint_average_label,
     stint_axis_max,
@@ -76,11 +79,11 @@ _PACE_TITLE = "Observed lap time by stint"
 class StintCharts(QWidget):
     """Tyre life over observed lap time, per stint, on a shared stint-relative axis."""
 
-    def __init__(self, stints: Sequence[TyreStint] = (), *, standing_start: bool = False, parent=None) -> None:
+    def __init__(self, analysis: SessionAnalysis | None = None, *, parent=None) -> None:
         super().__init__(parent)
+        self._analysis = SessionAnalysis()
         self._stints: tuple[TyreStint, ...] = ()
-        self._standing_start = standing_start           # a race/sprint lap 1 starts t rest - see- set_stints
-        self._in_laps: frozenset[int] | None = None
+        self._excluded: frozenset[int] = frozenset()
         self._vlines: list = []
         self._proxy = None      # kept alive so the mouse SignalProxy isn't garbage collected
         self._link = None       # the shared-x plot the cursor position is read from
@@ -103,30 +106,27 @@ class StintCharts(QWidget):
         pg.setConfigOptions(antialias=True)
         self._glw = pg.GraphicsLayoutWidget()
         layout.addWidget(self._glw)
-        if stints:
-            self.set_stints(stints, standing_start=standing_start)
+        if analysis is not None and analysis.stints:
+            self.set_analysis(analysis)
 
-    def set_stints(self, stints: Sequence[TyreStint], *, standing_start: bool = False) -> None:
-        """Draw a session's stints; an empty sequence clears the charts.
+    def set_analysis(self, analysis: SessionAnalysis) -> None:
+        """Draw a session's runs; an analysis with no stints clears the charts.
 
-        ``standing_start`` says this session began on the grid, which only the caller knows - a
-        Sprint Race and a Grand Prix are the same ``session_type`` (core invariant #5). It reaches
-        the per-stint average, where lap 1 of a race is not representative pace.
+        The whole analysis rather than its stints alone: the tooltips name what a lap was and the
+        legend's average leaves the same laps out, and both read it from here (``lap_context``).
+        Whether the session began on the grid is already settled inside it.
         """
-        self._stints = tuple(stints)
-        self._standing_start = standing_start
+        self._analysis = analysis
+        self._stints = tuple(analysis.stints)
         if self._pg is None or self._glw is None:
             return
         self._glw.clear()
         self._vlines = []
         self._proxy = self._link = None
+        self._excluded = analysis.excluded_laps
         if not self._stints:
-            self._in_laps = frozenset()
             return
 
-        # Computed once and shared: the pace chart labels them, and the per-stint average leaves
-        # them out. Two callers deriving it separately is how the two would eventually disagree.
-        self._in_laps = in_lap_numbers(self._stints)
         self._axis_max = stint_axis_max(self._stints)
         legend = self._add_legend()
         life = self._add_plot(row=1, title=_LIFE_TITLE, axis="Tyre life", unit="%",
@@ -215,7 +215,6 @@ class StintCharts(QWidget):
 
     def _draw_pace(self, plot) -> None:
         """Observed lap time per stint, with anything past the range clipped to its nearer edge."""
-        in_laps = self._in_laps
         for stint in self._stints:
             colour, style = _stint_style(stint)
             xs, ys = stint_series(stint, self._pace_value)
@@ -233,12 +232,12 @@ class StintCharts(QWidget):
             for symbol, group in groups.items():
                 self._scatter(plot, colour, symbol,
                               [(lap.stint_lap, self._pace_value(lap)) for lap in group],
-                              [_pace_tip(lap, lap.lap_number in in_laps, self._clip_side(lap))
-                               for lap in group])
+                              [_pace_tip(lap, self._analysis.for_lap(lap.lap_number),
+                                         self._clip_side(lap)) for lap in group])
 
     def _stint_average(self, stint: TyreStint) -> str:
         """This stint's corrected average pace, ready for its legend entry."""
-        return stint_average_label(stint, self._in_laps, standing_start=self._standing_start)
+        return stint_average_label(stint, self._excluded)
 
     def _clip_side(self, lap: StintLap) -> str:
         """-1 when the lap is drawn on the bottom edge, +1 on the top edge, 0 when it fits."""
@@ -315,8 +314,10 @@ def _legend_label(stint: TyreStint, average: str) -> str:
 
     The lap range disambiguates a repeated compound; the average is what the run was actually
     worth. It is the stint's *representative* pace, not the mean of the laps drawn: the laps into
-    and out of the pits and a race's standing start are left out of it (``stint_average_ms``), so
-    two runs compare directly even when one of them opens with a 37-second out-lap.
+    and out of the pits, a race's standing start, and any lap run behind a safety car or caught by a
+    red flag are left out of it (``lap_context`` decides, ``stint_average_ms`` applies), so two runs
+    compare directly even when one of them opens with a 37-second out-lap. Every excluded lap is
+    marked in the Laps box, so the number can always be accounted for from the page.
     """
     letter, _ = compound_style(stint.visual_compound) or _UNKNOWN_COMPOUND
     return (f"Stint {stint.index} · {letter} · "
@@ -381,13 +382,14 @@ def _life_tip(lap: StintLap) -> str:
             f"Wear  {wheels}")
 
 
-def _pace_tip(lap: StintLap, in_lap: bool, clip_side: int) -> str:
-    """What one lap says on hover: its real number, its real time, and why it sits where it does."""
+def _pace_tip(lap: StintLap, context: LapContext, clip_side: int) -> str:
+    """What one lap says on hover: its real number, its real time, and why it sits where it does.
+    
+    The reasons come from the shared classification, so a lap the Laps box marks ``IN`` and the
+    legend's average skips explains itself the same way here.
+    """
     lines = [f"Lap {lap.lap_number} · stint lap {lap.stint_lap}", format_lap_time(lap.lap_time_ms)]
-    if lap.is_out_lap:
-        lines.append("Out-lap: lap after the pit stop")
-    elif in_lap:
-        lines.append("In-lap: lap before the pit stop")
+    lines.extend(context.reasons)
     if clip_side > 0:
         # Say it outright: a marker resting on a border must never read as a real measurement.
         lines.append("Drawn clipped at the top: the time above is the real one")

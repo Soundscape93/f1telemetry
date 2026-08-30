@@ -6,10 +6,14 @@ which trap each one carries, so a future change that "simplifies" a rule fails a
 rather than against an invented case.
 """
 import unittest
+import dataclasses
 from math import isnan
 
 from f1telemetry.src.domain.models import Lap, LapTyreContext
+from f1telemetry.src.protocol.enums import DriverStatus, PitStatus, SafetyCarStatus
+from f1telemetry.src.ui.sessions.lap_context import analyse_session
 from f1telemetry.src.ui.sessions.tyre_stints import (
+    _fuel_says_garage,
     in_lap_numbers,
     pace_y_range,
     split_tyre_stints,
@@ -29,6 +33,30 @@ def _lap(number, compound, wear, ms, age=0, fuel=None):
                is_valid=True, fuel_in_tank=fuel,
                tyre_context=LapTyreContext(actual_compound=compound, visual_compound=compound,
                                            age_laps=age, wear=wheels))
+
+
+def _stored(laps, *, garage=(), out_laps=(), in_laps=(), safety_car=(), red_flag=()):
+    """The same real laps, as they read once ingested at PIPELINE_VERSION 4.
+
+    Deliberately a *transform* of the fixtures above rather than a second set of them: the whole
+    question these tests answer is what changes when the same session is re-ingested, and a
+    hand-written parallel fixture would let the two drift apart.
+
+    Every lap gets a ``driver_status``, because that is what ``Lap.has_lap_context`` tests - a lap
+    with the booleans set and no status would be read as legacy and quietly take the old path.
+    """
+    return [dataclasses.replace(
+        lap,
+        driver_status=int(DriverStatus.OUT_LAP if lap.lap_number in out_laps
+                          else DriverStatus.ON_TRACK),
+        pit_status=int(PitStatus.IN_PIT_AREA if lap.lap_number in out_laps else PitStatus.NONE),
+        preceded_by_garage=lap.lap_number in garage,
+        is_out_lap=lap.lap_number in out_laps,
+        is_in_lap=lap.lap_number in in_laps,
+        safety_car=int(SafetyCarStatus.FULL if lap.lap_number in safety_car
+                       else SafetyCarStatus.NONE),
+        red_flagged=lap.lap_number in red_flag)
+        for lap in laps]
 
 
 def _untyred(number, ms):
@@ -82,11 +110,16 @@ def _session_12316788():
     """A race whose opening stint is one lap, then a hole at lap 3.
 
     The reason the out-lap flag must be read from the *unfiltered* ordinal: the minimum-laps rule
-    removes lap 1's stint, and the 170.8 s lap behind it is a post-pit out-lap, not a race start.
+    removes lap 1's stint, and the 170.8 s lap behind it opens the run that is left.
+
+    This is the *pre-E17* reading of the session and it is wrong about what happened - the race was
+    red-flagged on lap 2, ran the whole distance on one set, and the hole at lap 3 is the drive back
+    out to the grid that the game never timed. ``TestRedFlagWear`` has the corrected split. The
+    fixture stays as it is because these rows are what a database stored before the bump holds.
     """
     return [
         _lap(1, _M, 6.75, 99971),
-        _lap(2, _M, 2.32, 170826),      # wear resets - a new set - and this lap carries the stop
+        _lap(2, _M, 2.32, 170826),      # wear reads near-new: the red-flag artefact, not a set
         # lap 3 was never stored
         _lap(4, _M, 6.79, 99308), _lap(5, _M, 11.48, 95745), _lap(6, _M, 16.09, 95435),
         _lap(7, _M, 20.81, 96316), _lap(8, _M, 25.34, 95980), _lap(9, _M, 30.94, 96710),
@@ -206,6 +239,41 @@ class TestSplitTyreStints(unittest.TestCase):
         laps = [_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500),
                 _lap(3, _H, 1, 125000), _lap(4, _H, 5, 89500), _lap(5, _H, 9, 89800)]
         self.assertTrue(split_tyre_stints(laps)[1].laps[0].is_out_lap)
+
+    def test_a_stored_out_lap_flag_is_believed_over_the_slow_opener_test(self):
+        """Suzuka P1 again (14040810...), now re-ingested. The second run's opener is 1:33.219 -
+        the quickest lap of the session - and the game says it was a flying lap. The inference
+        agreed here, and the point is that it is no longer *asked*."""
+        laps = _stored([_lap(1, _S, 9.93, 94701, age=0), _lap(2, _S, 14.65, 94466, age=1),
+                        _lap(3, _S, 7.76, 93219, age=0), _lap(4, _S, 18.71, 100483, age=1)],
+                       garage=[3])
+        stints = split_tyre_stints(laps)
+        self.assertEqual(len(stints), 2)
+        self.assertTrue(stints[1].follows_pit)
+        self.assertFalse(stints[1].laps[0].is_out_lap)
+
+    def test_a_stored_flag_can_call_a_quick_opener_an_out_lap_where_the_median_test_cannot(self):
+        """The inference can only see "slower than the rest of its run". After a red-flag restart
+        the out-lap is often *not* slower - Shanghai race lap 13 opens its run and runs 100.712 s
+        against a 97 s run median, but Shanghai sprint lap 4 is a restart out-lap at 99.308 s that
+        the run behind it never beats. Only the stored flag can say so."""
+        laps = _stored([_lap(1, _M, 6.75, 99971, age=0), _lap(2, _M, 2.32, 100826, age=1),
+                        _lap(3, _M, 6.79, 99308, age=3), _lap(4, _M, 11.48, 99745, age=4)],
+                       out_laps=[3])
+        stints = split_tyre_stints(laps, min_laps=1)
+        flags = {lap.lap_number: lap.is_out_lap for stint in stints for lap in stint.laps}
+        self.assertTrue(flags[3])
+        self.assertFalse(flags[1])
+        self.assertFalse(flags[4])
+
+    def test_a_stored_lap_the_game_called_ordinary_is_never_promoted_by_position(self):
+        """A run that follows a stop but whose first stored lap was not an out-lap. The old rule
+        would flag it whenever it was slower than the rest; the stored answer is no."""
+        laps = _stored([_lap(1, _M, 5, 90000), _lap(2, _M, 10, 90500),
+                        _lap(3, _H, 1, 125000), _lap(4, _H, 5, 89500), _lap(5, _H, 9, 89800)])
+        stint = split_tyre_stints(laps)[1]
+        self.assertTrue(stint.follows_pit)          # it does follow a set change
+        self.assertFalse(stint.laps[0].is_out_lap)  # and the game says it was not an out-lap
 
 
 class TestStintRelativeAxis(unittest.TestCase):
@@ -372,10 +440,122 @@ class TestInLapNumbers(unittest.TestCase):
         self.assertEqual(in_lap_numbers(()), frozenset())
 
 
-class TestGarageReturns(unittest.TestCase):
-    """Fuel separates a *run* from a *set*: one set can do several runs, and two fresh sets can do
-    one lap each. Every fixture here is real, read out of the sessions named."""
+class TestStoredGarageFlag(unittest.TestCase):
+    """The primary path: a lap that carries ``preceded_by_garage`` is believed, and fuel is not read.
 
+    The same real sessions as ``TestGarageReturns`` below, re-ingested. The stored flag reproduces
+    every true fuel detection in this database and rejects the one false positive, which is the
+    case that makes the switch worth doing rather than merely tidier.
+    """
+
+    def test_a_stored_garage_flag_splits_two_fresh_sets_with_no_fuel_reading_at_all(self):
+        """Shanghai Q3 (12303182...): two new sets of softs, one lap each. The fuel proxy needed
+        both readings to see it; ``driver_status`` says it outright, so the readings can be gone."""
+        laps = _stored([_lap(1, _S, 5.13, 93606, age=0), _lap(2, _S, 5.50, 93309, age=0)],
+                       garage=[2])
+        stints = split_tyre_stints(laps, min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 1), (2, 2)])
+
+    def test_the_stored_flag_refuses_a_split_the_fuel_load_would_have_made(self):
+        """Shanghai sprint (12316788...), the fuel rule's one false positive in this database.
+
+        The race was red-flagged on lap 2, so lap 3 is missing and lap 2 ran 170.8 s. Across that
+        hole the fuel falls only 0.46 kg where a lap costs 1.2, and the proxy calls it a garage
+        visit - but the game's own tyre stints say the whole race ran on **one** set, and
+        ``driver_status`` never reported the garage. Believing the fuel here splits a single run in
+        two; the stored flag leaves it whole.
+        """
+        laps = [_lap(1, _M, 6.75, 99971, age=0, fuel=12.9732),
+                _lap(2, _M, 2.32, 170826, age=1, fuel=11.7538),
+                # lap 3 was never stored - the stoppage
+                _lap(4, _M, 6.79, 99308, age=3, fuel=11.2915),
+                _lap(5, _M, 11.48, 95745, age=4, fuel=8.1085)]
+        self.assertTrue(_fuel_says_garage(laps[2], laps[1]))     # the proxy, on the real numbers
+        stints = split_tyre_stints(_stored(laps), min_laps=1)
+        # Lap 2's wear resets (6.75 -> 2.32), which is a real boundary and stays. What goes is the
+        # fuel-only split at lap 4 - so laps 2-5 are one run, as the game's own tyre stints say.
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints],
+                         [(1, 1), (2, 5)])
+        self.assertEqual([(s.first_lap_number, s.last_lap_number)
+                          for s in split_tyre_stints(laps, min_laps=1)],
+                         [(1, 1), (2, 2), (4, 5)])      # the fallback, splitting where fuel says
+
+    def test_a_stored_lap_never_consults_the_fuel_load(self):
+        """Suzuka Q2 (3113777...) with its +1.65 kg refuel between two runs on one set of inters.
+
+        The fuel says "garage" and the stored flag says no, so the run stays whole - which is what
+        "the stored truth wins" has to mean if it means anything. The reverse case is the test
+        above; both directions are pinned so neither path can quietly become the default.
+        """
+        laps = [_lap(1, 7, 1.90, 108785, age=0, fuel=5.7675),
+                _lap(2, 7, 2.87, 105374, age=1, fuel=4.4409),
+                _lap(3, 7, 3.93, 105432, age=2, fuel=3.1069),
+                _lap(4, 7, 6.95, 104722, age=3, fuel=4.7520)]
+        stints = split_tyre_stints(_stored(laps), min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 4)])
+
+    def test_the_stored_flag_still_splits_that_session_when_it_says_so(self):
+        """The same laps, with the flag set where the fuel said it was: the answer is unchanged."""
+        laps = [_lap(1, 7, 1.90, 108785, age=0, fuel=5.7675),
+                _lap(2, 7, 2.87, 105374, age=1, fuel=4.4409),
+                _lap(3, 7, 3.93, 105432, age=2, fuel=3.1069),
+                _lap(4, 7, 6.95, 104722, age=3, fuel=4.7520)]
+        stints = split_tyre_stints(_stored(laps, garage=[4]), min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 3), (4, 4)])
+
+    def test_wear_and_compound_still_split_a_race_the_garage_flag_never_sees(self):
+        """A race never reports IN_GARAGE - the game says IN_PIT_AREA for a stop - so the stored
+        flag is an *extra* boundary, not a replacement. ``14435457...`` has to keep its three."""
+        stints = split_tyre_stints(_stored(_session_14435457(), out_laps=[3, 21], in_laps=[2, 20]))
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints],
+                         [(1, 2), (3, 20), (21, 29)])
+
+
+class TestRedFlagWear(unittest.TestCase):
+    """Under a red flag the game reports the tyres as good as new, and they are not.
+
+    Both red flags in this database do it - Shanghai race lap 11 reads 1.28% after lap 10 read
+    54.65%, Shanghai sprint lap 2 reads 2.32% after lap 1 read 6.75% - and both pick straight up
+    again on the restart lap. Believing the reading opens a run in the middle of a stint.
+    """
+
+    def test_a_red_flagged_wear_reset_does_not_open_a_run(self):
+        """Shanghai sprint (12316788...): one set, one run, all ten laps. The tyre age counts
+        straight through (0, 1, 3, 4...) and the compound never changes, so nothing real happened
+        to the tyres - only the wear reading dipped."""
+        laps = _stored(_session_12316788(), red_flag=[2])
+        stints = split_tyre_stints(laps)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints], [(1, 10)])
+        # and the axis is back on real lap numbers, with the hole where the game skipped a lap
+        self.assertEqual([lap.stint_lap for lap in stints[0].laps], [1, 2, 4, 5, 6, 7, 8, 9, 10])
+
+    def test_a_compound_change_under_a_red_flag_still_opens_one(self):
+        """Shanghai race (10247048...) changed mediums for hards during its stoppage. Only the
+        *wear* signal is suppressed, so age and compound still say what really happened."""
+        laps = _stored([_lap(9, _M, 48.53, 98263, age=8), _lap(10, _M, 54.65, 103456, age=9),
+                        _lap(11, _M, 1.28, 158234, age=10),     # the artefact, on the red-flag lap
+                        # lap 12 was never stored - the drive back out to the grid
+                        _lap(13, _H, 5.22, 100712, age=12), _lap(14, _H, 7.89, 95903, age=13)],
+                       red_flag=[11])
+        stints = split_tyre_stints(laps, min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints],
+                         [(9, 11), (13, 14)])
+
+    def test_a_lap_without_context_still_splits_where_the_wear_says(self):
+        """The fallback is untouched: ``red_flagged`` is None on a pre-E17 row, so the wear reading
+        is all there is and the old split stands."""
+        stints = split_tyre_stints(_session_12316788(), min_laps=1)
+        self.assertEqual([(s.first_lap_number, s.last_lap_number) for s in stints],
+                         [(1, 1), (2, 10)])
+
+
+class TestGarageReturns(unittest.TestCase):
+    """The fallback path: with nothing stored, fuel separates a *run* from a *set*.
+
+    One set can do several runs, and two fresh sets can do one lap each. Every fixture here is real,
+    read out of the sessions named. These are the rows ingested before PIPELINE_VERSION 4 - the
+    stored-flag half of the same sessions is in ``TestStoredGarageFlag`` above, and both stay.
+    """
     def test_two_fresh_sets_of_the_same_compound_split_on_the_fuel_load(self):
         """Shanghai Q3 (12303182…): two new sets of softs, one lap each. Both report age 0, the same
         compound, and wear that rises rather than resets — only the fuel shows the garage visit,
@@ -419,11 +599,16 @@ class TestStintAverage(unittest.TestCase):
 
     Every number here comes from the same real fixtures as the rules above, so a "simplification"
     that drops an exclusion fails against a real race rather than an invented one.
+
+    Which laps are excluded is decided by ``lap_context``, not here - so these go through
+    ``analyse_session`` exactly as the page does. That is the point: the average and the indicator
+    beside the lap in the Laps box come from one classification. These fixtures carry no stored lap
+    context, so every number below is the *fallback* path still producing what it always did.
     """
 
-    def _stints(self, laps):
-        stints = split_tyre_stints(laps)
-        return stints, in_lap_numbers(stints)
+    def _stints(self, laps, standing_start=True):
+        analysis = analyse_session(laps, standing_start=standing_start)
+        return analysis.stints, analysis.excluded_laps
 
     def test_excludes_the_standing_start_and_the_in_lap(self):
         """``11708585...`` stint 1: lap 1 starts from the grid box, lap 9 is the lap into the pits.
@@ -431,18 +616,18 @@ class TestStintAverage(unittest.TestCase):
         Both in one stint, and both slow for reasons that have nothing to do with the tyres - the
         uncorrected mean is 1:30.214, two thirds of a second adrift.
         """
-        stints, in_laps = self._stints(_session_11708585())
-        average = stint_average_ms(stints[0], in_laps, standing_start=True)
+        stints, excluded = self._stints(_session_11708585())
+        average = stint_average_ms(stints[0], excluded)
         self.assertAlmostEqual(average, 89551.571, places=2)
-        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:29.552")
+        self.assertEqual(stint_average_label(stints[0], excluded), "1:29.552")
 
     def test_excludes_the_out_lap(self):
         """``14435457...`` stint 2 opens at 119.594 s against an 82.7 s median.
 
         Left in, the average reads 1:24.942 - a run that never ran a lap anywhere near it.
         """
-        stints, in_laps = self._stints(_session_14435457())
-        self.assertEqual(stint_average_label(stints[1], in_laps, standing_start=True), "1:22.896")
+        stints, excluded = self._stints(_session_14435457())
+        self.assertEqual(stint_average_label(stints[1], excluded), "1:22.896")
 
     def test_a_stint_of_nothing_but_a_start_and_a_stop_has_no_average(self):
         """``14435457...`` stint 1 is lap 1 (standing start) and lap 2 (in-lap) and nothing else.
@@ -450,9 +635,9 @@ class TestStintAverage(unittest.TestCase):
         The honest answer is "no pace to report", not the mean of the two laps that were about
         something else - and the label says so out loud rather than leaving a blank.
         """
-        stints, in_laps = self._stints(_session_14435457())
-        self.assertIsNone(stint_average_ms(stints[0], in_laps, standing_start=True))
-        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "\u2014")
+        stints, excluded = self._stints(_session_14435457())
+        self.assertIsNone(stint_average_ms(stints[0], excluded))
+        self.assertEqual(stint_average_label(stints[0], excluded), "\u2014")
 
     def test_the_standing_start_rule_is_race_only(self):
         """``13974110...`` is practice: its lap 1 is a flying lap and counts.
@@ -460,30 +645,31 @@ class TestStintAverage(unittest.TestCase):
         Only the in-lap (7) comes out, which is why the flag is passed in rather than assumed -
         a practice session's opening lap is often one of its quickest.
         """
-        stints, in_laps = self._stints(_session_13974110())
-        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=False), "1:39.509")
+        stints, excluded = self._stints(_session_13974110(), standing_start=False)
+        self.assertEqual(stint_average_label(stints[0], excluded), "1:39.509")
         # The same laps read as a race would drop lap 1 as well - the flag is doing the work.
-        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:39.900")
+        race_stints, race_excluded = self._stints(_session_13974110(), standing_start=True)
+        self.assertEqual(stint_average_label(race_stints[0], race_excluded), "1:39.900")
 
     def test_a_removed_artefact_stint_cannot_promote_an_out_lap_to_a_race_start(self):
         """``12316788...``: the 170.8 s lap 2 is an out-lap, and the standing-start rule (lap 1)
         must not reach it - lap 1 belongs to the single-lap stint the minimum-laps rule removed."""
-        stints, in_laps = self._stints(_session_12316788())
-        self.assertEqual(stint_average_label(stints[0], in_laps, standing_start=True), "1:36.603")
-
+        stints, excluded = self._stints(_session_12316788())
+        self.assertEqual(stint_average_label(stints[0], excluded), "1:36.603")
+    
     def test_a_hole_inside_a_stint_does_not_poison_the_average(self):
         """``11708585...`` stint 2 runs 10-18 with the out-lap at 10; nothing is invented for the
         laps that were never stored."""
-        stints, in_laps = self._stints(_session_11708585())
-        self.assertEqual(stint_average_label(stints[1], in_laps, standing_start=True), "1:29.310")
-
+        stints, excluded = self._stints(_session_11708585())
+        self.assertEqual(stint_average_label(stints[1], excluded), "1:29.310")
+    
     def test_untimed_laps_are_ignored_and_the_result_is_a_lap_time(self):
         """A lap the game never timed contributes nothing - it is not a zero."""
         laps = [_lap(1, _M, 2.0, 90000), _lap(2, _M, 4.0, None),
                 _lap(3, _M, 6.0, 92000), _lap(4, _M, 8.0, 94000)]
-        stints, in_laps = self._stints(laps)
-        self.assertEqual(stint_average_ms(stints[0], in_laps), 92000.0)
-        self.assertEqual(stint_average_label(stints[0], in_laps), "1:32.000")
+        stints, excluded = self._stints(laps, standing_start=False)   # practice: lap 1 counts
+        self.assertEqual(stint_average_ms(stints[0], excluded), 92000.0)
+        self.assertEqual(stint_average_label(stints[0], excluded), "1:32.000")
 
     def test_no_in_laps_and_no_flag_is_the_plain_mean(self):
         """The defaults have to be the uncorrected answer, so a caller that forgets an argument

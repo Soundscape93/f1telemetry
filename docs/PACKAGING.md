@@ -1125,6 +1125,21 @@ rows stale — a new capture-derived column, a changed derivation, a new trace c
 it for UI-only work or for an additive column whose value doesn't come from the packets. The release
 notes' "re-ingest needed?" line is then simply "yes" whenever the number moved.
 
+**History.** Each entry is one ingest change; the gate compares the stored number to this one and
+counts nothing but "older than the current pipeline", so several changes landing before a release
+share a single prompt.
+
+| Version | What ingest started producing |
+|---|---|
+| 2 | `is_ai` on classification entries, so league standings stop merging an AI and a human on the same race number (invariant #7) |
+| 3 | `ai_difficulty` on sessions, from the Session packet |
+| 4 | **Lap context** (E17): `driver_status` / `pit_status` from Lap Data, the computed garage / out-lap / in-lap flags, and the Session packet's safety-car and red-flag state. Laps stored earlier read `None` and the charts fall back to the fuel and stint-shape inference, so nothing breaks without the re-ingest — the flags simply stay inferred |
+
+**Bumping past an unreleased number still costs nothing extra, and is usually right.** 3 was never
+released (v0.8.1 shipped 2), so E17 could have ridden it. It bumped to 4 anyway: a released user
+sees one prompt either way, while every *development* database already stamped 3 would otherwise
+never be offered the re-ingest and would quietly keep empty columns.
+
 ---
 
 ## Phase 3 — done

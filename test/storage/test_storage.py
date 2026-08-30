@@ -299,10 +299,16 @@ class DeletedSessionsTest(StorageTestBase):
         self.assertEqual(self.store.deleted_sessions()[0].session_uid, big)
 
 
-class EnsureSchemaTest(unittest.TestCase):
-    """ensure_schema back-fills a column added after a database was first created."""
+class EnsureSchemaLapsTest(unittest.TestCase):
+    """The lap-context columns arrive on an existing database the same additive way.
 
-    def test_adds_missing_column_and_backfills_existing_rows(self):
+    Separate from the entries case above because the *back-fill* differs and the difference is the
+    point: ``nationality_id`` carries a DEFAULT so old rows get 0, while these are nullable with no
+    default, so an old lap reads back NULL. That is what lets the charts tell "the game said the car
+    was on track" from "this lap predates the field" (domain ``Lap.has_lap_context``).
+    """
+
+    def test_adds_the_lap_context_columns_and_leaves_old_rows_null(self):
         from sqlalchemy import create_engine, inspect, text
 
         from f1telemetry.src.storage.migrations import ensure_schema
@@ -313,26 +319,33 @@ class EnsureSchemaTest(unittest.TestCase):
         engine = create_engine(f"sqlite:///{path}")
         self.addCleanup(engine.dispose)
 
-        # a pre-nationality_id database: the entries table with every column except that one
+        # a pre-E17 database: the laps table exactly as PIPELINE_VERSION 3 left it
         with engine.begin() as conn:
             conn.execute(text(
-                "CREATE TABLE classification_entries ("
-                "id INTEGER PRIMARY KEY, session_uid TEXT, vehicle_index INTEGER, position INTEGER, "
-                "driver_name TEXT, team_id INTEGER, race_number INTEGER, is_player BOOLEAN, "
-                "grid_position INTEGER, points INTEGER, num_laps INTEGER, num_pit_stops INTEGER, "
-                "best_lap_time_ms INTEGER, total_race_time_s INTEGER, penalties_time_s INTEGER, "
-                "num_penalties INTEGER, result_status INTEGER, result_reason INTEGER, tyre_stints JSON)"))
-            conn.execute(text("INSERT INTO classification_entries (id, driver_name) VALUES (1, 'Old')"))
+                "CREATE TABLE laps ("
+                "id INTEGER PRIMARY KEY, session_uid TEXT, lap_number INTEGER, lap_time_ms INTEGER, "
+                "sector1_ms INTEGER, sector2_ms INTEGER, sector3_ms INTEGER, is_valid BOOLEAN, "
+                "trace_path TEXT, tyre_actual_compound INTEGER, tyre_visual_compound INTEGER, "
+                "tyre_age_laps INTEGER, tyre_wear JSON, tyre_damage JSON, tyre_blisters JSON, "
+                "tyre_surface_temp JSON, tyre_carcass_temp JSON, damage JSON, fuel_in_tank FLOAT)"))
+            conn.execute(text(
+                "INSERT INTO laps (id, session_uid, lap_number, is_valid) VALUES (1, '7', 1, 1)"))
 
         ensure_schema(engine)
         ensure_schema(engine)   # idempotent: a second run is a no-op, not an error
 
-        cols = {c["name"] for c in inspect(engine).get_columns("classification_entries")}
-        self.assertIn("nationality_id", cols)
+        added = ("driver_status", "pit_status", "preceded_by_garage", "is_out_lap",
+                 "is_in_lap", "safety_car", "red_flagged")
+        cols = {c["name"] for c in inspect(engine).get_columns("laps")}
+        for column in added:
+            with self.subTest(column=column):
+                self.assertIn(column, cols)
         with engine.begin() as conn:
-            value = conn.execute(
-                text("SELECT nationality_id FROM classification_entries WHERE id = 1")).scalar()
-        self.assertEqual(value, 0)   # existing row back-filled by the column's DEFAULT
+            row = conn.execute(
+                text(f"SELECT {', '.join(added)} FROM laps WHERE id = 1")).one()
+        for column, value in zip(added, row):
+            with self.subTest(column=column):
+                self.assertIsNone(value)    # never captured - not a coerced 0 or False
 
 
 class NoClassificationTest(StorageTestBase):

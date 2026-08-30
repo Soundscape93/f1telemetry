@@ -76,6 +76,23 @@ def make_lap(n):
                             surface_temp=(95, 96, 90, 91), carcass_temp=(100, 101, 88, 89)),
         damage=make_damage(),
         fuel_in_tank=48.5,
+        driver_status=3, pit_status=2, preceded_by_garage=True,
+        is_out_lap=True, is_in_lap=False, safety_car=1, red_flagged=False
+    )
+
+
+def make_legacy_lap(n):
+    """A lap as it was stored before PIPELINE_VERSION 4: no lap context at all."""
+    return Lap(
+        lap_number=n, lap_time_ms=80000 + n,
+        sector1_ms=25000, sector2_ms=30000, sector3_ms=25000,
+        is_valid=True, trace=make_trace(),
+        tyre_context=LapTyreContext(actual_compound=16, visual_compound=16,
+                            age_laps=n, wear=(5.0, 6.0, 7.0, 8.0), damage=(2, 3, 4, 5),
+                            blisters=(0, 1, 0, 1),
+                            surface_temp=(95, 96, 90, 91), carcass_temp=(100, 101, 88, 89)),
+        damage=make_damage(),
+        fuel_in_tank=48.5,
     )
 
 
@@ -124,6 +141,44 @@ class LapStoreRoundTripTest(unittest.TestCase):
         self.assertEqual(laps[0].tyre_context.carcass_temp, (100, 101, 88, 89))
         self.assertEqual(laps[0].damage.brake_temp, (350, 360, 420, 430))
         self.assertEqual(laps[0].damage.engine_temp, 118)
+
+    def test_lap_context_round_trips(self):
+        """Every lap-context column, through the row and back - including the false ones.
+
+        ``is_in_lap=False`` and ``red_flagged=False`` are in here on purpose: a mapping that dropped
+        them would read back None, which the charts take as "never captured" and answer with the
+        old inference instead.
+        """
+        self.store.save_laps(123, (make_lap(1),))
+        lap = self.store.load_laps(123)[0]
+        self.assertEqual(lap.driver_status, 3)
+        self.assertEqual(lap.pit_status, 2)
+        self.assertIs(lap.preceded_by_garage, True)
+        self.assertIs(lap.is_out_lap, True)
+        self.assertIs(lap.is_in_lap, False)
+        self.assertEqual(lap.safety_car, 1)
+        self.assertIs(lap.red_flagged, False)
+        self.assertTrue(lap.has_lap_context)
+
+    def test_a_lap_without_context_reads_back_none_and_not_a_coerced_false(self):
+        """The distinction the whole fallback rests on: None means "this was never captured", and
+        False would mean "the game said no". A lap stored before these columns has to read None."""
+        self.store.save_laps(456, (make_legacy_lap(1),))
+        lap = self.store.load_laps(456)[0]
+        for field in ("driver_status", "pit_status", "preceded_by_garage", "is_out_lap",
+                      "is_in_lap", "safety_car", "red_flagged"):
+            with self.subTest(field=field):
+                self.assertIsNone(getattr(lap, field))
+        self.assertFalse(lap.has_lap_context)
+
+    def test_lap_context_survives_the_cheap_listing(self):
+        """``list`` is what the session detail reads, so the context has to come with it - it skips
+        the Parquet files, not the columns."""
+        self.store.save_laps(123, (make_lap(1),))
+        lap = self.store.list(123)[0]
+        self.assertTrue(lap.has_lap_context)
+        self.assertIs(lap.is_out_lap, True)
+        self.assertIsNone(lap.trace)
 
     def test_list_omits_traces_but_keeps_metadata(self):
         self.store.save_laps(123, (make_lap(1), make_lap(2)))

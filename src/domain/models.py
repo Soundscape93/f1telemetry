@@ -156,10 +156,33 @@ class Lap:
     damage: CarDamage | None = None  # non-tyre damage at the line; None until captured/stored
     fuel_in_tank: float | None = None  # kg in the tank at lap start (Car Status); None until captured.
 
+    # --- lap context: what Lap Data and the Sessioon packet said about this lap ---------------------
+    # All None for laps ingested before PIPELINE_VERSION 4. ``has_lap_context`` is the one place
+    # that decides "stored truth or inferred fallback"; nothing else should test a field for None.
+    # Enums ride as raw ints and are read back through ``safe_enum`` (core invariant #9).
+    driver_status: int | None = None            # DriverStatus held for most of the timed lap
+    pit_status: int | None = None               # highest PitStatus seen; 2 = the pit stop is on this lap
+    preceded_by_garage: bool | None = None      # the car was in the garage between the last lap and this
+    is_out_lap: bool | None = None              # this lap began in the pit lane, or after a restart
+    is_in_lap: bool | None = None               # this lap ended by entering the pit lane
+    safety_car: int | None = None               # SafetyCarStatus in force during the lap
+    red_flagged: bool | None = None             # a red-flag period began during this lap
+
     @property
     def is_complete(self) -> bool:
         """True if the lap was completed and has a valid time."""
         return self.lap_time_ms is not None
+
+    @property
+    def has_lap_context(self) -> bool:
+        """Whether this lap carries the stored lap-state fields, or predates them.
+
+        ``driver_status`` is the discriminator because every lap the assembler emits has a timed
+        run and every frame of a timed run carries one - so it is set for all laps ingested at
+        PIPELINE_VERSION 4 or later, and None for all laps ingested before. The booleans beside it
+        cannot serve: ``False`` and "never captured" would read the same.
+        """
+        return self.driver_status is not None
     
 
 @dataclass(frozen=True)

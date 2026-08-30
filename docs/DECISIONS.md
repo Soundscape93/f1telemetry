@@ -766,11 +766,69 @@ what would trigger revisiting it.
   out-lap reports `age 0` at wear `0.00` and the lap after it still reports `age 0`, so that rule
   breaks three race stints that are currently correct. Tested before it was rejected.
 
-  This is knowingly a **proxy**. `driver_status` in the Lap Data packet states outright when the car
-  is in the garage, and would also make the out-lap flag exact rather than inferred from
-  position-in-run — but it needs a new column, a `PIPELINE_VERSION` bump and a re-ingest
-  (PRIORITIES → **E17**, deliberately separate from E15). When it lands it becomes primary and fuel
-  becomes the fallback for rows ingested before the bump.
+  **Replaced 2026-08-27 by what it was standing in for, and kept as the fallback (E17).** The fuel
+  rule was knowingly a proxy, and `driver_status` says it outright: the assembler now stores
+  `preceded_by_garage`, “the car was in the garage between the previous emitted lap and this one's
+  timed run”. Measured against the whole database, the stored flag reproduces **all 11** fuel
+  detections among the stored laps and rejects the **one** false positive — Shanghai sprint
+  `12316788…` lap 4, where a red-flag stoppage made the fuel rise across a missing lap while the
+  game's own tyre stints say the whole race ran on a single set. Fuel is now read only for laps
+  ingested before `PIPELINE_VERSION` 4, and `Lap.has_lap_context` is the single test that chooses;
+  both paths are tested against the same real sessions, so neither can win silently.
+
+  It does **not** replace wear / age / compound. A race never reports `IN_GARAGE` — the game says
+  `IN_PIT_AREA` for a pit stop and keeps the garage for the garage proper — so this is a fourth
+  boundary beside them, not a substitute for them.
+- **One lap classification feeds the Laps box, the stint split and the average pace** *(decided
+  2026-08-27, E17)*. Three parts of the session detail have to agree about what a lap was, and
+  before this each derived its own answer — the pace chart called a practice flying lap an in-lap
+  and left it out of an average the table said nothing about. `ui/sessions/lap_context.py` now
+  classifies each lap once and the other two read it, so a lap the table marks and a lap the average
+  drops are the same lap by construction rather than by two modules happening to agree.
+
+  **Stored truth first, inference only for old rows.** Out-lap is “the pit-lane timer was running as
+  the lap began”, and nothing else — see the red-flag entry below for the half that was tried and
+  removed. In-lap is the pit-lane
+  timer still running at the line, deliberately **not** `driver_status == IN_LAP`, which the game
+  sets on the *planned* in-lap and leaves set while the driver stays out (three laps early in one
+  race here, six in another). Safety car and red flag come off the Session packet, which the
+  assembler already routes — no Event-packet work, which is E15 and unrelated. Evidence in
+  TELEMETRY_NOTES → *What `driver_status` actually reports*.
+
+  **A red-flag restart is a standing start, not an out-lap** *(corrected 2026-08-30, E17)*. The
+  first rule read the restart off `driver_status == OUT_LAP` held for most of the lap, because the
+  pit-lane timer never runs on one. Manual checking of the Shanghai sprint said otherwise and the
+  game agrees: it does not time the drive from the pit lane back to the grid, so that status is left
+  over from a lap that was never emitted, and the lap it lands on begins at rest in the grid box.
+  Scanned across all 470 emitted laps, the `driver_status` half contributed only those two laps and
+  the timer alone missed no real pit exit — so the stored `is_out_lap` is now the timer alone, and
+  the restart is derived in `lap_context` from `red_flagged` on the lap before, chipped `START`. It
+  is the same exclusion either way; what was wrong was the reason shown for it. The same stoppage
+  also makes the game report near-zero tyre wear for one lap, which used to open a false run — the
+  wear boundary is now suppressed on a red-flagged lap while age and compound keep theirs. Evidence
+  in TELEMETRY_NOTES → *What `driver_status` actually reports*.
+
+  **Five indicators, one per reason a lap leaves the average**: `START`, `OUT-LAP`, `IN-LAP`,
+  `SC`, `RED-FLAG`,
+  as short chips in the existing Laps box with the sentence on hover. The set is chosen by a rule
+  rather than by taste — *every* pace exclusion has a chip and *every* chip is a pace exclusion — and
+  that equality is what makes an average readable off the page: a run whose number looks wrong can
+  always be traced to the laps that did not contribute to it. `START` is in for exactly that reason:
+  it was going to be the one silent exclusion left, which is the failure mode this item exists to
+  remove. Chips read in the order the lap ran (`OUT IN` for a lap that left the pits and came back
+  into them), not by severity. A *sixth* is a real decision rather than a small one — it would break
+  the equality, so anything that is context but not an exclusion belongs somewhere else.
+
+  **Two things this knowingly changes**, both measured end-to-end across every capture:
+  **(a)** in practice and qualifying the game never times the lap the driver returns to the pits on,
+  so an emitted practice lap is *never* an in-lap — the old inference labelled one in six practice
+  sessions anyway and dropped a genuine flying lap out of the run average. It is now counted, which
+  moves Sakhir P1's opening run from 1:22.304 to 1:23.939. The higher number is the honest one:
+  `driver_status` reads `FLYING` for every frame of that lap.
+  **(b)** a safety-car lap now comes *out* of the average. Shanghai `6912670…`'s final run read
+  1:55.967 and actually ran 1:36.776. Where every lap of a run is excluded the average reports an em
+  dash rather than a number about something else — sprint `2114813…`'s three-lap final run, an
+  out-lap plus two safety-car laps, does exactly that.
 - **A tyre stint is drawn only from 2 laps up, in every session type** *(decided 2026-08-24)*.
   Chosen so wet qualifying and longer quali runs still get a chart, accepting that a single-timed-lap
   dry qualifying gets none. It also earns its keep as a data filter: pit in-laps produce single-lap

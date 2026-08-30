@@ -110,6 +110,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     already drops the formation lap / out-laps / in-laps, so this is fuel at the racing S/F line,
     falling lap by lap). Distinct from the static garage `Setup.fuel_load`, which is no longer shown
     as live fuel;
+  - *(E17)* captures each lap's **context** — `driver_status` (modal over the timed run) and
+    `pit_status` (peak) from Lap Data, plus three computed flags: `preceded_by_garage` (the car was
+    in the garage between the previous emitted lap and this one's timed run — read from the buffer
+    *ahead* of the selected run, which is where the lap counter's behaviour always puts it),
+    `is_out_lap` and `is_in_lap` (the pit-lane timer at the run's first/last frame — and only that;
+    a red-flag restart also reads `OUT_LAP` and is a grid start, so `lap_context` derives it from
+    `red_flagged` on the lap before instead). `safety_car` and
+    `red_flagged` come off the **Session** packet instead, accumulated per lap number in `feed` —
+    they are session-wide state and never reach the frame join. All seven are additive-nullable and
+    `None` for laps ingested before `PIPELINE_VERSION` 4; `Lap.has_lap_context` is the single test
+    that decides stored truth vs the older inference. Evidence in TELEMETRY_NOTES;
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -136,7 +147,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   re-ingest never wipes manual placements.
 - **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
   their per-lap tyre context (and per-lap start-of-lap fuel, the additive-nullable `fuel_in_tank`
-  column), with each lap's dense `LapTrace` written to a **Parquet file**
+  column, plus the seven additive-nullable **lap-context** columns from E17 — `driver_status`,
+  `pit_status`, `preceded_by_garage`, `is_out_lap`, `is_in_lap`, `safety_car`, `red_flagged`, which
+  round-trip straight through and read back `None`, never a coerced `0`/`False`, for laps stored
+  before them), with each lap's dense `LapTrace` written to a **Parquet file**
   referenced by the lap row (not SQLite rows — see DECISIONS). Write: `save_laps` (replace-by-uid,
   rows + files) / `delete`. Read: `list(uid)` returns a session's laps **without** their traces
   (cheap, for the overview), `load(uid, lap_number)` returns one fully-hydrated lap **with** its
@@ -284,9 +298,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `resolve_capture_path`), then a 4×2 details grid, the shared
   `components.build_classification_table`, a clickable laps box, a penalties box, and a stacked
   pair of charts (tyre life and lap times) sharing one **stint-relative** x-axis, each run's legend
-  entry carrying its **corrected average pace** (`tyre_stints.stint_average_ms` — out-laps, in-laps
-  and a race's standing start are excluded, because they measure the stop or the start rather than
-  the run). `deleted_page.py` is the deleted-sessions manager (E2): a table over
+  entry carrying its **corrected average pace**. The page classifies its laps **once**, in
+  `lap_context.analyse_session` (Qt-free, beside `tyre_stints`), and hands the one `SessionAnalysis`
+  to the laps box, the split and the charts: the box's `START` / `OUT-LAP` / `IN-LAP` / `SC` / `RED-FLAG` chips
+  (one per pace exclusion, and no chip that isn't one),
+  `tyre_stints.stint_average_ms`'s exclusions and the pace tooltips are then the same judgement
+  rather than three that have to agree. Stored lap context (E17) is believed where present, and the
+  older fuel / stint-shape inference is the fallback for laps ingested before it —
+  `Lap.has_lap_context` is the only test. `deleted_page.py` is the deleted-sessions manager (E2): a table over
   `SessionStore.deleted_sessions()`, with Restore and Forget as row buttons and as a context menu.
   It reads `pipeline.restorable_captures` for both its capture column and its chooser — the same
   list `restore_session` resolves through, so what it offers and what the restore accepts cannot

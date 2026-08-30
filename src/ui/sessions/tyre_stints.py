@@ -16,14 +16,20 @@ session that breaks the naive alternative:
 * **A stint needs at least two laps**, in every session type. It also earns its keep as a filter: a
   pit in-lap leaves a one-lap artefact stint from a stale reading, dropped here with no special case.
 * **A stint's first lap is an out-lap when the stint follows a pit stop**, which the pace chart
-  excludes from its y-range - the game bundles the whole pit loss into that lap (+14 to +37 s against
-  a 1-3 s degradation signal). Stint 1 lap 1 is a race start and is *not* excluded.
+  labels - the game bundles the whole pit loss into that lap (+14 to +37 s against a 1-3 s
+  degradation signal). Stint 1 lap 1 is a race start and is *not* an out-lap.
 
 The order of the last two is load-bearing and not interchangeable: the out-lap flag comes from the
 stint's ordinal in the *unfiltered* split, and only then are short stints dropped. Session
 ``12316788...`` is why - its opening stint is a single lap that the filter removes, and reading the
 flag afterwards would promote the 170.8 s post-pit lap behind it to "race start" and stretch the
 pace axis from 4 s to 75 s.
+
+**Two of those rules are now fallbacks.** A lap ingested at PIPELINE_VERSION 4 or later carries what
+Lap Data actually said (``preceded_by_garage``, ``is_out_lap``), and the stored fact wins: the fuel
+proxy and the slow-opener test only run for rows stored before it. Neither path is allowed to win
+silently - ``Lap.has_lap_context`` is the single test, and each rule says in its own docstring which
+side it is on.
 
 Offsets come from real lap *numbers*, never a list index: lap numbers are not contiguous (a red flag
 or a dropped lap leaves a hole), and an index axis would silently close the gap and misplace every
@@ -42,7 +48,6 @@ _MIN_STINT_LAPS = 2             # DECISIONS -> UI: every session type, and it dr
 _PACE_PADDING = 0.05            # gap between the axis floor and the fastest lap, as a fraction of the span
 _PACE_SPAN_MS = 8000.0          # the pace axis is always exactly this tall; see pace_y_range
 _GARAGE_FUEL_DELTA_KG = -0.5    # a lap burns 1.06-1.96 kg; above this: the car was in the garage
-_STANDING_START_LAP = 1         # lap 1 of a race begins at rest in the grid box - not representative pace
 
 
 @dataclass(frozen=True)
@@ -92,9 +97,10 @@ def split_tyre_stints(laps: Sequence, min_laps: int = _MIN_STINT_LAPS) -> tuple[
     context is skipped - a stint is a statement about a set of tyres, and a lap that can't say which
     set it was on can't be placed on one.
 
-    A boundary is a *drop* in the worst wheel's cumulative wear, or a change of visual compound.
-    Stints shorter than ``min_laps`` are dropped only *after* the out-lap flags are assigned, so a
-    removed artefact stint can never promote the stint behind it to "race start".
+    A boundary is a *drop* in the worst wheel's cumulative wear, a fall in the tyre age, a change of
+    visual compound, or a return to the garage. Stints shorter than ``min_laps`` are dropped only
+    *after* the out-lap flags are assigned, so a removed artefact stint can never promote the stint
+    behind it to "race start".
     """
     stored = sorted((lap for lap in laps if lap.tyre_context is not None),
                     key=lambda lap: lap.lap_number)
@@ -125,15 +131,15 @@ def stint_axis_max(stints: Sequence[TyreStint]) -> int:
 
 
 def in_lap_numbers(stints: Sequence[TyreStint]) -> frozenset[int]:
-    """The lap numbers we can honestly call in-laps: the driver pitted at the end of them.
+    """The pre-E17 fallback for in-laps: the lap numbers we can honestly infer the driver pitted on.
 
-    Inferred, not stored - pit events live in Event packets the assembler doesn't read yet
-    (PRIORITIES -> E15). A stint ending immediately before the next one begins means the tyre change
+    Inferred from the shape of the split, because rows stored before PIPELINE_VERSION 4 carry no
+    pit state at all. A stint ending immediately before the next one begins means the tyre change
     happened between those two laps, so the earlier one is the lap into the pits.
 
-    The contiguity check is what makes that safe to say. In ``11708585...`` stint 2's last stored lap
-    is 18 but the next stint opens at 22 - laps 19-20 are missing and 21 was a stale artefact - so
-    lap 18 is *not* the in-lap, and is deliberately not claimed as one.
+    Laps that *do* carry pit state don't come here: ``lap_context`` reads ``Lap.is_in_lap`` instead,
+    which is the pit-lane timer still running as the car crossed the line. See that module for the
+    choice between the two.
     """
     return frozenset(
         stint.last_lap_number
@@ -141,38 +147,26 @@ def in_lap_numbers(stints: Sequence[TyreStint]) -> frozenset[int]:
         if following.first_lap_number == stint.last_lap_number + 1)
 
 
-def stint_average_ms(stint: TyreStint, in_laps: Collection[int] = (), *,
-                     standing_start: bool = False) -> float | None:
+def stint_average_ms(stint: TyreStint, excluded: Collection[int] = ()) -> float | None:
     """A stint's average pace in ms over the laps that represent it, or None when none do.
 
-    A plain mean of a stint's laps is not its pace. Three kinds of lap belong to the pit stop or to
-    the start rather than to the run, and each is worth seconds against a degradation signal
-    measured in tenths:
+    A plain mean of a stint's laps is not its pace: a pit lap, a standing start, a safety-car lap or
+    a red-flagged lap is worth seconds against a degradation signal measured in tenths. **Which**
+    laps those are is not decided here - ``lap_context`` decides it once, for the Laps box and for
+    this average together, and passes the lap numbers in. That is the point of the split: a lap the
+    table flags as excluded and a lap this leaves out are the same lap by construction, not by two
+    modules agreeing.
 
-    * **the out-lap** - the lap after the stop carries the whole pit loss (+14 to +37 s in this
-      database). Already flagged per lap, and flagged from the *unfiltered* stint ordinal, so an
-      artefact stint the minimum-laps rule removed can never promote a post-pit lap to "race start".
-    * **the in-lap** - the lap into the pits, from :func:`in_lap_numbers`, which only claims one
-      where the lap numbers of two stints actually meet.
-    * **the standing start** - lap 1 of a race or sprint begins at rest in the grid box, so it is
-      seconds slower than any lap driven from speed. Keyed on the real lap *number*, not on the
-      stint-relative offset: a race whose opening lap was never stored must not lose a genuine
-      racing lap to this rule.
-
-    Nothing else is excluded, and that limit is worth knowing: a lap spent in the gravel or behind
-    a safety car still counts, because nothing stored says it was one (PRIORITIES -> E15). Fuel is
-    not corrected for either - the charts say so outright, and a correction is Analytics work.
+    Nothing beyond that set is excluded, and the limit is worth knowing: a lap spent in the gravel
+    still counts, because nothing stored says it was one. Fuel is not corrected for either - the
+    charts say so outright, and a correction is Analytics work.
     """
     times = [lap.lap_time_ms for lap in stint.laps
-             if lap.lap_time_ms
-             and not lap.is_out_lap
-             and lap.lap_number not in in_laps
-             and not (standing_start and lap.lap_number == _STANDING_START_LAP)]
+             if lap.lap_time_ms and lap.lap_number not in excluded]
     return (sum(times) / len(times)) if times else None
 
 
-def stint_average_label(stint: TyreStint, in_laps: Collection[int] = (), *,
-                        standing_start: bool = False) -> str:
+def stint_average_label(stint: TyreStint, excluded: Collection[int] = ()) -> str:
     """:func:`stint_average_ms` as a lap time, or an em dash when no lap represents the stint.
 
     An em dash rather than silence: a two-lap opening stint of a standing start and an in-lap
@@ -180,7 +174,7 @@ def stint_average_label(stint: TyreStint, in_laps: Collection[int] = (), *,
     in. Formatted through ``format_lap_time`` so the legend, the tooltips and the laps table all
     print a lap time the same way.
     """
-    average = stint_average_ms(stint, in_laps, standing_start=standing_start)
+    average = stint_average_ms(stint, excluded)
     if average is None:
         return "\u2014"
     # Half-up, not ``round``: an even number of laps timed in whole milliseconds puts the mean on a
@@ -258,36 +252,54 @@ def _starts_new_stint(lap, previous) -> bool:
 
     Four signals, and each is load-bearing - see the helpers for the session that defeats the others.
     """
-    return (_max_wear(lap) < _max_wear(previous)
+    return ((_max_wear(lap) < _max_wear(previous) and not _red_flag_wear_artefact(lap))
             or _age_reset(lap, previous)
             or _compound(lap) != _compound(previous)
             or _returned_to_garage(lap, previous))
 
 
-def _returned_to_garage(lap, previous) -> bool:
-    """Whether the car went back to the garage between these two laps, read from the fuel load.
+def _red_flag_wear_artefact(lap) -> bool:
+    """Whether this lap's wear reading is the near-zero one the game reports under a red flag.
 
-    A full lap burns 1.06-1.96 kg across every session in this database, and fuel cannot be added on
-    track - so a load that rises, or barely falls, means a garage visit and a new run.
+    On the lap a red flag falls, wear is read while the car is being reset in the pit lane, and it
+    comes back as good as new: Shanghai race lap 11 reads 1.28% after lap 10 read 54.65%, and
+    Shanghai sprint lap 2 reads 2.32% after lap 1 read 6.75%. It is not a new set - the tyre age
+    keeps counting up through both (9 -> 10, 0 -> 1), the compound does not change, and the wear
+    picks up where it left off on the restart lap (5.22% and 6.79%). Believing it opens a stint in
+    the middle of a run, which then loses the laps before it to the minimum-laps filter.
 
-    It is the only signal that separates two *fresh sets of the same compound*. A Q3 pair of new
-    softs reads ``age 0`` on both laps, the same compound, and wear that rises rather than resets,
-    so nothing in the tyre data tells them apart; fuel shows -0.22 to +0.05 kg where a lap costs 1.2.
-    Measured across the whole database: 22 detections in practice and qualifying, every one matching
-    a run boundary, against 1 in 322 race transitions - and that one is in ``12316788...``, whose
-    lap 3 is missing and whose lap 2 took 170 s.
-
-    Deliberately *not* ``tyre_age_laps == 0`` on both laps, which looks like the same signal and is
-    not: a post-pit out-lap reports age 0 at wear 0.00 and the lap after it still reports age 0, so
-    that rule breaks three race stints that are currently correct.
-
-    A proxy, and known to be one. ``driver_status`` in the Lap Data packet states outright when the
-    car is in the garage (PRIORITIES -> E17); once that is stored this becomes the fallback for rows
-    ingested before it.
+    So the *wear* signal alone is suppressed here, and only on the red-flagged lap itself. Age and
+    compound keep their say, which is what matters: a team really can change tyres during a
+    stoppage, and when Shanghai race did exactly that the compound went 17 -> 18 on the restart lap
+    and that boundary still stands. A lap stored before PIPELINE_VERSION 4 reads ``red_flagged`` as
+    None and nothing changes for it.
     """
+    return bool(lap.red_flagged)
+
+
+def _returned_to_garage(lap, previous) -> bool:
+    """"Whether the car went back to the garage between these two laps.
+
+    Two ways to answer it, and the stored one wins. A lap ingested at PIPELINE_VERSION 4 or later
+    carries ``preceded_by_garage``, which the assembler read straight off ``driver_status``: the
+    game says outright that the car was in the garage between the previous emitted lap and this
+    one's timed run. A lap stored before that carries nothing, and falls back to the fuel proxy
+    below - which is why ``_fuel_says_garage`` is still here and still tested.
+
+    Measured against the whole database before the switch: the stored flag reproduces all 11 fuel
+    detections among the stored laps and rejects the one false positive - Shanghai sprint lap 4,
+    where the red-flag stoppage made the fuel rise without a garage visit, and where the game's own
+    tyre stints say the whole race ran on one set.
+    """
+    if lap.has_lap_context:
+        return bool(lap.preceded_by_garage)
+    return _fuel_says_garage(lap, previous)
+
+
+def _fuel_says_garage(lap, previous) -> bool:
+    """The pre-E17 fallback: infer a garage visit from the fuel load not falling."""
     now, before = lap.fuel_in_tank, previous.fuel_in_tank
-    return (now is not None and before is not None
-            and now - before > _GARAGE_FUEL_DELTA_KG)
+    return (now is not None and before is not None and now - before > _GARAGE_FUEL_DELTA_KG)
 
 
 def _age_reset(lap, previous) -> bool:
@@ -320,9 +332,16 @@ def _age(lap) -> int | None:
 
 
 def _place_on_axis(group: list, follows_pit: bool) -> tuple[StintLap, ...]:
-    """Put a run's laps on the sint-relative axis, from lap numbers rather than list position."""
+    """Put a run's laps on the stint-relative axis, from lap numbers rather than list position.
+
+    The out-lap flag comes from the lap itself when it was stored (``Lap.is_out_lap``: the pit-lane
+    timer was running as the lap began, or the game called it an out-lap). Only a run whose laps
+    predate that falls back to the opener test below, which is why ``follows_pit`` and
+    ``_is_slow_opener`` are computed lazily - for a stored run they are never consulted at all.
+    """
     base = group[0].lap_number
-    opener_is_out_lap = follows_pit and _is_slow_opener(group)
+    stored = group[0].has_lap_context
+    opener_is_out_lap = (not stored) and follows_pit and _is_slow_opener(group)
     return tuple(
         StintLap(
             lap_number=lap.lap_number,
@@ -330,14 +349,15 @@ def _place_on_axis(group: list, follows_pit: bool) -> tuple[StintLap, ...]:
             lap_time_ms=lap.lap_time_ms,
             tyre_life=100.0 - _max_wear(lap),
             wear=_wear(lap),
-            is_out_lap=(opener_is_out_lap and position == 0)
-        )
+            is_out_lap=(bool(lap.is_out_lap) if lap.has_lap_context
+                        else (opener_is_out_lap and position == 0))
+            )
         for position, lap in enumerate(group)
     )
 
 
 def _is_slow_opener(group: list) -> bool:
-    """Whether a run's first lap really is an out-lap - which is to say, slower than the rest of it.
+    """The pre-E17 fallback: whether a run's first lap really is an out-lap - slower than the rest.
 
     Following a stop is not enough on its own. In a race the first stored lap of a post-pit run *is*
     the out-lap, carrying the whole pit loss. In practice and qualifying the real out-lap is usually
