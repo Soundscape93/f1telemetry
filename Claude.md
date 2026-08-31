@@ -121,7 +121,14 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    `docs/TELEMETRY_NOTES.md`.
 2. **Per-car arrays are indexed by vehicle index, not finishing position.** The classification
    is joined to the roster by vehicle index, then sorted by position only for display.
-3. **Sessions split on `header.session_uid`;** `uid == 0` frames are init noise and ignored.
+3. **Sessions split on `header.session_uid`; `uid == 0` frames are init noise — *except for
+   `EVENT` packets*.** True for the ten packet ids the assembler routed before E15 and **false for
+   the eleventh**: at the end of a session the game re-broadcasts the accumulated penalty log on a
+   zeroed header (`session_uid == 0`, `frame_identifier == 0`), repeated up to seven times. That is
+   **37% of all penalties** — dropping it loses them, ingesting it naively multiplies them by 7. An
+   `EVENT` packet on uid 0 belongs to the session currently being built (`prev_uid == next_uid` in
+   104/104 measured cases); everything else on uid 0 is still noise. See DECISIONS → Storage and
+   TELEMETRY_NOTES → Event packets.
 4. **`session_assignments.session_uid` is deliberately NOT a foreign key** to `sessions`, so
    re-ingesting a capture (replace-by-uid) never wipes manual round placements. The other half of
    that promise is a *guard, not a cascade*: **`pipeline.delete_session` is the only deletion path**

@@ -234,6 +234,79 @@ class TyreStint:
     end_lap: int                    # lap the stint ended on
 
 
+# The penalty types the game itself counts in ``ClassificationEntry.num_penalties``. Measured
+# 2026-09-01 across all 33 captures: of 127 live PENA events, 69 are Warnings, 28 are lap
+# invalidations and 19 are Retirements - the game files all three through the same packet. Counting
+# every PENA row gave 5 of 9 cars matching the stored aggregate; counting only these gave 8, and the
+# uid-0 merge in the assembler took it to 9 of 9, including penalties_time_s. See TELEMETRY_NOTES.
+_SPORTING_PENALTIES = frozenset({0, 1, 2, 4, 6})        # drive-through, stop-go, grid, time, disqualified
+
+
+@dataclass(frozen=True)
+class SessionPenalty:
+    """One penalty the game issued during a session (a ``PENA`` Event packet).
+
+    Field-wide, not player-only: 44.9% of measured PENA events name the player and the rest name
+    another car, so a session carries the whole field's penalties and the display filters.
+
+    Enum ids ride as raw ints and resolve through ``reference.penalty_name`` /
+    ``infringement_name`` at display (core invariant #9). The three optional fields use the spec's
+    255 sentinel on the wire and are ``None`` here: measured, ``time`` is 255 in 124 of 127 rows,
+    ``other_vehicle_index`` in 79 and ``places_gained`` in 47 - while ``places_gained`` is
+    legitimately 0 in 73, so 0 and "not applicable" genuinely differ and cannot share a value.
+
+    ``lap_number`` comes from the packet, not from the frame it arrived on, and is exact: 126 of
+    127 equal that car's ``current_lap_num`` at the event, so it joins the stored lap rows
+    unadjusted. ``frame`` is what separates two otherwise identical penalties (one car took two
+    identical grid penalties eight seconds apart) and is what the assembler's replay merge keys on.
+    """
+
+    vehicle_index: int
+    penalty_type: int                           # see reference.PENALTY_NAMES
+    infringement_type: int                      # see reference.INFRINGEMENT_NAMES
+    lap_number: int
+    other_vehicle_index: int | None = None      # the other car involved; None when not applicable
+    time_s: int | None = None                   # seconds gained, or the penalty's own time; None if n/a
+    places_gained: int | None = None            # None if not applicable; 0 is a real value
+    session_time_s: float = 0.0
+    frame: int = 0                              # 0 for a row recovered from the end-of-session replay
+
+    @property
+    def is_sporting(self) -> bool:
+        """Whether the game counts this in ``num_penalties`` - i.e. not a warning or an invalidation.
+        
+        The cross-check that validated the whole ingest rule, so it lives on the model rather than
+        in a test: summed per car it reproduces the stored aggregate exactly.
+        """
+        return self.penalty_type in _SPORTING_PENALTIES
+
+
+@dataclass(frozen=True)
+class SessionOvertake:
+    """One on-track pass (an ``OVTK`` Event packet), already filtered to two racing cars.
+
+    **Deliberately an event, not a count.** No aggregate derived from OVTK survives measurement:
+    raw it is 4.5x the ``LAP_POSITIONS`` ground truth, filtered to two racing cars 2.6x, and no
+    reversal-cancel window is accurate per race (0.61x-1.91x at the window that matches in total).
+    So the events are the stored fact and every number is read off them - see
+    ``SessionResult.overtakes_for`` and DECISIONS -> Storage.
+
+    The filter the assembler applies before building one of these is the only rule the data
+    supports without qualification: neither car in the pit lane, neither in the garage. It removes
+    58% of raw events, among them 5,112 where the "overtaken" car was in the pit lane and 2,827
+    where it was parked in the garage.
+
+    ``lap_number`` is the overtaking car's lap at the event; the two cars can be on different laps
+    (16.7% of filtered events, all in practice and qualifying - never in a race).
+    """
+
+    overtaking_vehicle_index: int           # the car that passed another on track
+    overtaken_vehicle_index: int            # the car that was passed
+    lap_number: int
+    session_time_s: float = 0.0
+    frame: int = 0                          # 0 for a row recovered from the end-of-session replay
+
+
 @dataclass(frozen=True)
 class Participant:
     """One car/driver in the session, keyed by the session-scoped vehicle index."""
@@ -370,6 +443,12 @@ class SessionResult:
         participants: tuple[Participant, ...] = ()
         laps: tuple[Lap, ...] = ()      # the player's completed laps (with traces)
         setup_history: tuple[SetupSnapshot, ...] = ()  # ordered garage-setup snapshots (mid session changes)
+
+        # Event-packet content (PIPELINE_VERSION 5). Both are field-wide and both are empty for a 
+        # session ingested before Event packets were routed at all - which is every row stored 
+        # before E15, so empty means "not captured" and never "nothing happened".
+        penalties: tuple[SessionPenalty, ...] = ()          # every car's ordered by lap then frame
+        overtakes: tuple[SessionOvertake, ...] = ()         # already filtered to two racing cars
         classification: Classification | None = None
         recorded_at: datetime | None = None     # capture time, for chronological ordering
 
@@ -389,6 +468,32 @@ class SessionResult:
             """
             seen = set(self.weather_seen)
             return bool(seen & _DRY_WEATHER) and bool(seen & _WET_WEATHER)
+
+        def penalties_for(self, vehicle_index: int) -> tuple[SessionPenalty, ...]:
+            """One car's penalties, in stored order (lap, then frame)."""
+            return tuple(p for p in self.penalties if p.vehicle_index == vehicle_index)
+
+        def overtakes_for(self, vehicle_index: int) -> tuple[int, int]:
+            """``(passes made, passes suffered)`` for one car.
+
+            Derived, never stored - the same rule ``is_mixed_weather`` follows, and here it is load
+            bearing rather than tidy: the details grid's ``+N / -M`` and the Race control box's list
+            are on screen together, so the count has to be a reading of the very rows the list
+            shows. Stored separately they could disagree, and the failure mode is a header claiming
+            seven passes above six of them.
+            """
+            made = sum(1 for o in self.overtakes if o.overtaking_vehicle_index == vehicle_index)
+            suffered = sum(1 for o in self.overtakes if o.overtaken_vehicle_index == vehicle_index)
+            return made, suffered
+
+        @property
+        def player_overtakes(self) -> tuple[int, int]:
+            """The player's own ``(made, suffered)`` - what the details grid shows.
+
+            Player-only on purpose: the field-wide figure is ~250 a race and 2.6x the ground truth,
+            while the player's is a handful and every one is a pass the driver can remember.
+            """
+            return self.overtakes_for(self.player_vehicle_index)
 
         def setup_for_lap(self, lap_number: int) -> Setup | None:
             """he setup active on a given lap; the latest snapshot taking effect on or before it.
