@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from ...domain.season import slot_for_session
 from ...protocol.reference import track_name
-from ..components import WeatherIcon, clear_layout, confirm_and_delete
+from ..components import WeatherIcon, clear_layout, confirm_and_delete, session_weather
 from ..formatting import (
     recorded_label,
     session_fastest_lap,
@@ -226,7 +226,7 @@ class OverviewPage(QWidget):
         fastest = session_fastest_lap(session)
         if fastest is not None:
             fields.append(("Fastest lap", fastest))
-        fields.append(("Weather", WeatherIcon(session.weather, size_px=22)))
+        fields.append(("Weather", WeatherIcon(session_weather(session), size_px=22)))
         difficulty = self._ai_difficulty(session)
         if difficulty is not None:
             fields.append(("AI difficulty", difficulty))

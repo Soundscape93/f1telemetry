@@ -17,13 +17,18 @@ from f1telemetry.src.protocol.enums import (
     SessionType,
     Weather
 )
-from f1telemetry.src.session.assembler import _MAX_LAP_START_DISTANCE_M, assemble
+from f1telemetry.src.session.assembler import (
+    _MAX_LAP_START_DISTANCE_M, 
+    _WEATHER_SETTLE_S,
+    assemble
+)
 
 
-def _hdr(pid, uid, frame=0, player=0):
+def _hdr(pid, uid, frame=0, player=0, session_time=0.0):
     """Build a fake packet header for testing."""
     return SimpleNamespace(packet_id=pid, session_uid=uid, frame_identifier=frame,
-                           packet_format=2025, player_car_index=player)
+                           packet_format=2025, player_car_index=player,
+                           session_time=session_time)
 
 
 def _car_lap(lap_num, distance, driver_status=DriverStatus.ON_TRACK,
@@ -43,13 +48,17 @@ def _car_lap(lap_num, distance, driver_status=DriverStatus.ON_TRACK,
 
 
 def session_pkt(uid, stype=SessionType.RACE, laps=5, safety_car=SafetyCarStatus.NONE,
-                red_flag_periods=0):
-    """Build a fake session packet for testing."""
+                red_flag_periods=0, weather=Weather.CLEAR, session_time=10.0):
+    """Build a fake session packet for testing.
+
+    ``session_time`` defaults past ``_WEATHER_SETTLE_S`` so the default packet reads as a
+    settled session; the weather tests pass times inside the window on purpose.
+    """
     return SimpleNamespace(
-        header=_hdr(PacketId.SESSION, uid),
+        header=_hdr(PacketId.SESSION, uid, session_time=session_time),
         season_link_identifier=uid, weekend_link_identifier=uid, session_link_identifier=uid,
         track_id=7, session_type=int(stype), formula=int(Formula.F1_MODERN),
-        weather=int(Weather.CLEAR), game_mode=28, total_laps=laps, ai_difficulty=95,
+        weather=int(weather), game_mode=28, total_laps=laps, ai_difficulty=95,
         num_sessions_in_weekend=0, weekend_structure=[0] * 12,
         safety_car_status=int(safety_car), num_red_flag_periods=red_flag_periods,
         track_length=5000.0, sector_2_lap_distance_start=1500.0, sector_3_lap_distance_start=3000.0,)
@@ -662,6 +671,89 @@ class RaceControlTest(unittest.TestCase):
             with self.subTest(lap=lap.lap_number):
                 self.assertEqual(lap.safety_car, int(SafetyCarStatus.NONE))
                 self.assertFalse(lap.red_flagged)
+
+
+class SessionWeatherTest(unittest.TestCase):
+    """The set of conditions a session ran through, accumulated from its Session packets (E14).
+
+    The scenarios are the measured ones, not invented: the shapes here are the ones the 33
+    captures in this database actually contain - see TELEMETRY_NOTES -> "What the weather field
+    reports". The packets themselves are synthetic, as every assembler test's are.
+    """
+
+    def _stream(self, *session_packets):
+        """A one-lap race whose Session packets are whatever the test hands in."""
+        return [*session_packets, participants_pkt(1),
+                *frames(1, 1, [0, 2500, 5000]),
+                sh_pkt(1, [_lap_entry(90000, 15)])]
+
+    def test_one_condition_yields_one_entry(self):
+        (race,) = list(assemble(self._stream(session_pkt(1, weather=Weather.OVERCAST))))
+        self.assertEqual(race.weather_seen, (Weather.OVERCAST,))
+        self.assertEqual(race.weather, Weather.OVERCAST)
+        self.assertFalse(race.is_mixed_weather)
+
+    def test_distinct_conditions_accumulate_in_first_seen_order(self):
+        """Shanghai P1 (20260705_132157): cloud, overcast, cloud again, overcast, rain, overcast.
+
+        A condition the session returns to is not recorded twice - this is a set, in the order it
+        was first seen, and the repeat is what a timeline would keep and this deliberately doesn't.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=300.0),
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=1400.0),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=2200.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=3400.0))))
+        self.assertEqual(
+            race.weather_seen,
+            (Weather.LIGHT_CLOUD, Weather.OVERCAST, Weather.LIGHT_RAIN))
+        self.assertTrue(race.is_mixed_weather)
+
+    def test_the_snapshot_still_says_which_condition_it_ended_in(self):
+        """Mixed is an *additional* fact. The end-of-session value is untouched by it."""
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=200.0))))
+        self.assertTrue(race.is_mixed_weather)
+        self.assertEqual(race.weather, Weather.OVERCAST)
+
+    def test_the_opening_seconds_are_skipped(self):
+        """Melbourne Q1 (20260704_181644): CLEAR for four packets, then rain for eighteen minutes.
+
+        The regression this guard exists for. Without it that session reads as mixed on the
+        strength of 1.5 seconds in which the game had not finished setting the session up.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.CLEAR, session_time=0.0),
+            session_pkt(1, weather=Weather.CLEAR, session_time=1.5),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=2.0 + _WEATHER_SETTLE_S),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=1080.0))))
+        self.assertEqual(race.weather_seen, (Weather.LIGHT_RAIN,))
+        self.assertFalse(race.is_mixed_weather)
+
+    def test_a_short_stretch_past_the_window_still_counts(self):
+        """Suzuka P1 (20260718_212648): rain for the last 59 seconds of the hour, 18 packets.
+
+        The window is a *settling* window, not a dwell. A real change is kept however brief - and
+        it has to be, because the game fast-forwards the session clock in the garage, so a genuine
+        38-second stretch can arrive as four packets.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=1100.0),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=3541.6))))
+        self.assertEqual(race.weather_seen[-1], Weather.LIGHT_RAIN)
+        self.assertTrue(race.is_mixed_weather)
+
+    def test_a_capture_holding_only_the_opening_seconds_records_no_set(self):
+        """Nothing survives the window, so the set is empty - "not captured", never "not mixed"."""
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.CLEAR, session_time=0.0),
+            session_pkt(1, weather=Weather.CLEAR, session_time=1.5))))
+        self.assertEqual(race.weather_seen, ())
+        self.assertEqual(race.weather, Weather.CLEAR)       # the snapshot is still there
+        self.assertFalse(race.is_mixed_weather)
 
 
 class MotionChannelsTest(unittest.TestCase):

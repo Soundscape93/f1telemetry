@@ -82,7 +82,6 @@ class RoundTripTest(StorageTestBase):
             (loaded.season_link_id, loaded.weekend_link_id, loaded.session_link_id),
             (111, 222, 333))
         
-
     def test_classification_round_trips(self):
         """Test that the classification data is preserved when saving and loading a session."""
         self.store.save(make_session())
@@ -121,6 +120,26 @@ class RoundTripTest(StorageTestBase):
 
         self.store.save(make_session(uid=0x1234))   # default: no structure captured
         self.assertEqual(self.store.load(0x1234).weekend_structure, ())
+
+    def test_weather_seen_round_trips(self):
+        """The conditions a session ran through survive save/load, and drive `is_mixed_weather`.
+
+        Stored as raw ints and read back through safe_enum, like every other enum (invariant #9).
+        A row saved without one comes back with an empty tuple - "not captured", not "not mixed".
+        """
+        seen = (Weather.LIGHT_RAIN, Weather.OVERCAST)
+        mixed = SessionResult(**{**vars(make_session()), "weather_seen": seen})
+        self.store.save(mixed)
+        loaded = self.store.load(0x8000_0000_0000_0000)
+        self.assertEqual(loaded.weather_seen, seen)
+        self.assertIsInstance(loaded.weather_seen, tuple)
+        self.assertTrue(loaded.is_mixed_weather)
+        self.assertEqual(loaded.weather, Weather.CLEAR)     # the snapshot is untouched
+
+        self.store.save(make_session(uid=0x1234))   # default: no set captured
+        again = self.store.load(0x1234)
+        self.assertEqual(again.weather_seen, ())
+        self.assertFalse(again.is_mixed_weather)
 
     def test_track_geometry_round_trip(self):
         """The track length + sector start-distances survive save/load; absent stays None."""

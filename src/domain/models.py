@@ -308,7 +308,13 @@ class Classification:
     def player(self) -> ClassificationEntry | None:
         """The player's entry, or None if not found in the classification."""
         return next((e for e in self.entries if e.is_player), None)
-    
+
+
+# Dry vs wet, for ``SessionResult.is_mixed_weather``. A value outside the enum (safe_enum hands
+# back the raw int) is in neither set, so it can never make a session read as mixed on its own.
+_DRY_WEATHER = frozenset({Weather.CLEAR, Weather.LIGHT_CLOUD, Weather.OVERCAST})
+_WET_WEATHER = frozenset({Weather.LIGHT_RAIN, Weather.HEAVY_RAIN, Weather.STORM})
+
 
 @dataclass(frozen=True)
 class SessionResult:
@@ -345,6 +351,13 @@ class SessionResult:
         # RACE (15), so this is what tells them apart - see domain/season.py:weekend_slots.
         weekend_structure: tuple[int, ...] = ()
 
+        # Every distinct condition the session's Session packets reported, in first-seen order
+        # (PIPELINE_VERSION 4). `weather` above stays the end-of-session snapshot; this is an
+        # *additional* fact, so a session that ran in one condition still says which. Empty means
+        # "not captured" - a row ingested before this existed, or a capture holding only the
+        # opening seconds of a session - and never "one condition".
+        weather_seen: tuple[Weather, ...] = () 
+
         # Static track geometry (metres) from the Session packet, kept together for the map and (future)
         # corner metadata. None for rows saved before this was captured; the game always sends them otherwise.
         # Sector 1 is 0..sector2_start_m. The track map colours its outline by sector and th traces mark the
@@ -365,7 +378,17 @@ class SessionResult:
         def player_participant(self) -> Participant | None:
             """The player's participant object, or None if not found in the roster."""
             return next((p for p in self.participants if p.is_player), None)
-        
+
+        @property
+        def is_mixed_weather(self) -> bool:
+            """Whether the session ran both dry and wet.
+            
+            Derived, never stored: ``weather_seen`` is the raw fact and this is the reading of it,
+            so a future weather timeline widens the same column rather than needing a new one.
+            False for a row with no set - "not captured" is not evidence of a change in conditions.
+            """
+            seen = set(self.weather_seen)
+            return bool(seen & _DRY_WEATHER) and bool(seen & _WET_WEATHER)
 
         def setup_for_lap(self, lap_number: int) -> Setup | None:
             """he setup active on a given lap; the latest snapshot taking effect on or before it.

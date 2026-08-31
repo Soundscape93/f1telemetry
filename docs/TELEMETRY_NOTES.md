@@ -322,6 +322,42 @@ attribution needs no Event ingest (which is PRIORITIES → E15, and unrelated).
 Both fields are named identically in the 2025 and 2026 wire structs, as are `driver_status`,
 `pit_status` and `pit_lane_timer_active`, so none of this is format-branched.
 
+## What the `weather` field reports, and the settling window at session start
+
+*Measured 2026-08-31 across all 33 captures — 73 sessions, 148,778 Session packets.* This is what
+E14 (mixed dry/wet) is built on, and it is the Session packet's own `weather`, not
+`weatherForecastSamples` (rejected — PRIORITIES → E14 gives the three reasons).
+
+- **18 of 73 sessions report more than one condition; 6 report both a dry and a wet one.** One of
+  those six is the artifact below, so **five sessions genuinely ran dry and wet**: three Melbourne
+  Q2 restarts (`20260704_181644`, LIGHT_RAIN → OVERCAST), Shanghai P1 (`20260705_132157`, twenty
+  minutes of rain mid-session), Suzuka P1 (`20260718_212648`, rain in the last 59 seconds).
+- **No frame-to-frame flicker.** 100 contiguous runs across the 73 sessions, and the only runs of
+  ≤ 2 packets are five *whole sessions* that contain just 1-2 Session packets. Every real change is
+  a step that holds. `weather` does **not** behave the way `driver_status` does.
+- **But the first 3-5 packets of a session are a placeholder.** 8 of 73 sessions open with a run
+  that differs from everything after it and is always settled by **session_time 2.0 s**. In 3 of
+  the 8 those packets carry `num_weather_forecast_samples == 0` — the weather block is not
+  populated yet. It is not the previous session's condition carried over: `…629038` follows a
+  session that ended LIGHT_RAIN and its placeholder reads CLEAR.
+- **It costs exactly one false mixed.** Melbourne Q1 `…629038` reads CLEAR for 1.5 s and then
+  LIGHT_RAIN for the remaining 1,079 s. Under "any two distinct values" that session is mixed.
+- **The dwell must be measured in session-time seconds, never in packets.** The game fast-forwards
+  the session clock while the player sits in the garage, so a *genuine* 38-second wet stretch
+  (`…166502`) arrives as **four packets** — the same length as the placeholder run. A `≥ N packets`
+  rule cannot separate them. In seconds they separate enormously: the placeholder is gone by 2.0 s,
+  the shortest real stretch is 26.4 s. Hence `_WEATHER_SETTLE_S = 3.0` in `session/assembler.py`.
+- **No value outside the 0-5 enum, ever** — 148,778 packets. Observed: CLEAR 91,429 · LIGHT_CLOUD
+  24,229 · OVERCAST 25,874 · LIGHT_RAIN 3,289 · STORM 3,957. **HEAVY_RAIN (4) has never occurred**
+  in any capture here, so nothing about it is measured — only inferred from the appendix.
+- Packets arrive at **2 Hz**, and `session_time` restarts at 0 for each session. A capture that
+  starts mid-session simply begins past the window and loses nothing.
+
+Applied to this database, a re-ingest gives **12 of 56 stored sessions** a multi-condition set, of
+which **3 read as mixed** (`…166502`, `…393137`, `…098367`); the other two real ones are among the
+16 tombstones. A session split across two captures takes the set of whichever is ingested last —
+`save()` replaces by uid, which is pre-existing for every field, and `…398583` is that case here.
+
 ## The pit out-lap carries the whole pit loss (+14 to +37 s)
 
 *Measured 2026-08-24 across every 50%-distance race in the database.* The game does not split pit

@@ -50,7 +50,14 @@ from ..domain.normalizer import (
     normalize_car_damage,
     telemetry_sample,
 )
-from ..protocol.enums import DriverStatus, PacketId, PitStatus, SafetyCarStatus
+from ..protocol.enums import (
+    DriverStatus,
+    PacketId,
+    PitStatus,
+    SafetyCarStatus,
+    Weather,
+    safe_enum,
+)
 
 # A cleanly caputred lap begins near the start line. A lap whose sample is well past
 # it was joined mid-way (started recording) or is an out-lap, so no clean trace is kept.
@@ -78,6 +85,19 @@ _LAP_RESET_DROP_M = 300  # meters
 #
 _SAFETY_CAR_NONE = int(SafetyCarStatus.NONE)
 _SAFETY_CAR_DEPLOYED = (int(SafetyCarStatus.FULL), int(SafetyCarStatus.VIRTUAL))
+
+# --- weather (E14) ---------------------------------------------------------------------------
+# The opening Session packets of a session report a condition the packet then corrects. Measured
+# across all 33 captures: 8 of 73 sessions carry such a run, every one of them settled by
+# session_time 2.0 s, and in 3 of the 8 the forecast array is still empty - the game is still
+# setting the session up. Skipping that window is what stops a Melbourne Q1 that read CLEAR for
+# 1.5 s and then rained for eighteen minutes from being called mixed.
+#
+# In SECONDS, not packets. The game fast-forwards the session clock while the player sits in the
+# garage, so a *genuine* 38-second wet stretch can be four packets - the same length as the
+# artifact, which makes a packet count useless as a dwell. The shortest real stretch measured is
+# 26.4 s, so 3.0 clears both edges by an order of magnitude. See TELEMETRY_NOTES -> weather.
+_WEATHER_SETTLE_S = 3.0  # seconds
 
 
 def _sector_ms(minutes_part: int, ms_part: int) -> int:
@@ -293,6 +313,10 @@ class _SessionBuilder:
         self._red_flag_laps: set[int] = set()       # lap_numbers a red-flag period began on
         self._red_flag_periods: int | None = None   # last num_red_flag_periods, to see it rise
 
+        # every distinct condition the Session packets reported, in first-seen order, raw ints
+        # (see _note_weather). The scaffold's `weather` stays the end-of-session snapshot.
+        self._weather_seen: list[int] = []
+
         # lap_number -> candidate runs from that lap's buffer; the timed run is chosen at build
         # time (see _build_laps), once the Session History lap time is known.
         self._lap_runs: dict[int, list[list[Sample]]] = {}
@@ -316,6 +340,7 @@ class _SessionBuilder:
         if pid == PacketId.SESSION:
             self._scaffold = normalize_session(packet)
             self._note_race_control(packet)
+            self._note_weather(packet)
         elif pid == PacketId.PARTICIPANTS:
             # union aross frames: a late (post-race) frame can drop cars, so merge rather
             # than overwrite, keeping the most complete identity seen for each car index.
@@ -444,6 +469,24 @@ class _SessionBuilder:
             self._red_flag_laps.add(lap_number)
         self._red_flag_periods = periods
 
+    def _note_weather(self, packet) -> None:
+        """Accumulate the distinct conditions this session reported, in first-seen order.
+        
+        The Session packet carries one condition and the scaffold keeps the last, so a session
+        that started dry and finished wet stores as wet with nothing saying it changed. This is
+        the other half of that fact - the set is actually ran through it, which
+        ``SessionResult.is_mixed_weather`` reads. Ground truth, unlike ``weatherForecastSamples``
+        (weekend.wide, rolls past samples off, and only a forecast - see PRIORITIES -> E14).
+
+        The opening ``_WEATHER_SETTLE_S`` seconds are skipped; the constant carries the measured
+        reason and why the window is session time rather than a packet count. The filter belongs
+        here and not on read: it is temporal, and the times are gone once this is a set.
+        """
+        if packet.header.session_time < _WEATHER_SETTLE_S:
+            return
+        weather = int(packet.weather)
+        if weather not in self._weather_seen:
+            self._weather_seen.append(weather)
 
     def _record_setup(self, setup) -> None:
         """Append a setup snapshot when the setup changes, deduping consecutive identical ones.
@@ -548,7 +591,8 @@ class _SessionBuilder:
             participants=roster,
             laps=self._build_laps(),
             classification=classification,
-            setup_history=tuple(self._setup_history)
+            setup_history=tuple(self._setup_history),
+            weather_seen=tuple(safe_enum(Weather, w) for w in self._weather_seen)
         )
 
 class SessionAssembler:
