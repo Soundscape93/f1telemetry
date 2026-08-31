@@ -375,32 +375,179 @@ representative laps and let out-laps clip (DECISIONS → UI).
 **The race start is not the same case.** Stint 1 lap 1 runs only +2 to +3 s over its stint median,
 and is sometimes *faster* (low fuel, fresh tyres, no pit loss) — so it needs no exclusion.
 
-## Event packets are captured but never parsed
+## Event packets — what the codes are worth, measured across all 33 captures
 
-*Found 2026-08-24.* `session/assembler.py` dispatches on ten packet ids; **`PacketId.EVENT` (3) is
-not among them**, so every event the game sends is decoded past. The recorder appends *every*
-datagram unfiltered, so the data is already on disk in every capture ever made.
+*Found 2026-08-24 (unparsed); measured 2026-08-31 across all 33 captures — 13,167,492 packets,
+**134,208 EVENT packets**, 73 sessions with a Session packet plus 28 uid-0 pseudo-sessions.*
+This is what PRIORITIES → **E15** is built on. The recorder appends *every* datagram unfiltered, so
+all of this is already on disk in every capture ever made: **a re-ingest recovers it retroactively,
+with no re-recording**.
 
-Decoding one real capture (`20260705_132157.f1cap.gz`, 905 699 packets) gives, by packet id:
+For one capture (`20260705_132157.f1cap.gz`, 905 699 packets), by packet id:
 
     0 MOTION 102238 · 1 SESSION 10238 · 2 LAP_DATA 102266 · 3 EVENT 9629 · 4 PARTICIPANTS 1030
     5 CAR_SETUPS 10240 · 6 CAR_TELEMETRY 102251 · 7 CAR_STATUS 102233 · 8 FINAL_CLASS 22
     10 CAR_DAMAGE 51125 · 11 SESSION_HISTORY 102549 · 12 TYRE_SETS 102267 · 13 MOTION_EX 102252
     15 LAP_POSITIONS 5110 · 16 CAR_TELEMETRY_2 102249
 
-and within those EVENT packets, by event code:
+### The event-code spread, all 33 captures
 
-    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10
-    SEND 5 · SSTA 5 · RTMT 5 · LGOT 3 · SCAR 3 · RDFL 1 · CHQF 1
+    BUTN 106126 (79.1%) · OVTK 14635 (10.9%) · SPTP 12372 (9.2%) · COLL 272 · FTLP 206
+    PENA 202 · STLG 95 · SCAR 78 · SEND 64 · SSTA 62 · LGOT 29 · RTMT 29 · TMPT 16
+    CHQF 12 · DRSE 4 · RCWN 3 · RDFL 2 · DRSD 1
 
-`OVTK` carries the overtaking and overtaken vehicle indices (on-track passes, the real thing — not
-net positions gained). `PENA` carries penalty type, infringement, vehicle index, **lap number** and
-time. Both are what PRIORITIES → **E15** would ingest, and because the packets are already
-captured, **a re-ingest recovers them retroactively — no re-recording**.
+Per session, by type — **Race** BUTN 2660 · OVTK 366 · SPTP 325 · COLL 12.5 · PENA 3.5;
+**Qualifying** OVTK 125 · SPTP 56; **Practice** SPTP 209 · OVTK 161.
+
+**Six codes are not in the `EventDataDetails` union, and none is a gap:** `SSTA SEND LGOT CHQF
+RDFL DRSE` are marker codes carrying no detail payload — `event_string_code` is the whole event.
+
+**One real format difference:** the **2025 `Collision` struct has no `severity` field**; 2026's
+does. 25 of the 272 collisions lack it. Any collision model has to make that field optional.
+
+**`FLBK` has never occurred** in any of the 33 captures — flashback is disabled on the recording
+machine. Nothing about flashback behaviour is measured here, only inferred. Overtake rows carry
+`frame_identifier`, and a flashback rewinds it, so a future rule has its discriminator without a
+schema change.
+
+**Free cross-check for E17:** `RDFL` fires in exactly the two sessions where `num_red_flag_periods`
+rises, and nowhere else. The Session-packet red-flag rule is independently confirmed.
+
+### `OVTK` is a position-swap feed, not a count of overtakes
+
+Five separate measurements, and the aggregate that looked obvious is wrong by 4.5×:
+
+- **It is field-wide, not player-centric.** 6.9% of events involve the player at all (767 passes
+  made, 238 suffered); 93.1% are AI-on-AI.
+- **The indices are clean** — 0 suspect rows in 14,635. Range 0-21, always `< num_active_cars`,
+  never self-referential. This is the one part that needs no defending.
+- **35% of events are not overtakes.** In 5,112 the *overtaken* car is in the pit lane; in 2,827
+  its `driver_status` is `IN_GARAGE`. The game fires `OVTK` for driving past a parked car. Half of
+  all `OVTK` are in practice/qualifying, where the concept is meaningless.
+- **Pass-and-re-pass is rampant, and a track-gap guard provably cannot filter it.** After keeping
+  only events where both cars are racing, 21.7% are reversed by the same pair within 5 s (12.2%
+  within 2 s); one pair swapped 41 times in a single race. But the gap between the two cars at the
+  event frame is **< 0.5 m in ~90% of reversed *and* non-reversed events alike** (medians 0.00 m
+  and 0.10 m) — the game fires `OVTK` on the frame the two `lap_distance` values cross, so the gap
+  is ~0 *by construction*. A 5 m threshold keeps 4.2% of events and discards real passes
+  indiscriminately. This is E14's minimum-packet-count in a new costume.
+- **Against ground truth it is 4.5× high.** `LAP_POSITIONS` (id 15, already registered) gives each
+  car's position at every lap start; its lap-over-lap changes total **1,640 across 17 races**.
+  Raw `OVTK` 7,310 (4.5×); both-cars-racing 4,244 (2.6×); plus a "+30 s still ahead" forward test
+  2,765 (1.7×).
+
+**And no cancel window fixes it.** Cancelling each pass the same pair reverses within *W* seconds:
+
+| W | counted | truth | ratio | median per-race ratio |
+|---|---|---|---|---|
+| 0 s | 4244 | 1640 | 2.59× | 2.34 |
+| 10 s | 2158 | 1640 | 1.32× | 1.28 |
+| **30 s** | **1634** | **1640** | **1.00×** | 0.91 |
+| 60 s | 1528 | 1640 | 0.93× | 0.84 |
+
+W = 30 s matches *in total* — and that is two error populations averaging out, not a fit. **Per
+race it ranges 0.61× to 1.91×.** No window is per-session accurate, so none is used.
+
+**The only rule the evidence supports** is therefore the narrow one: *neither car in the pit lane
+(`pit_status` or `pit_lane_timer_active`), neither in the garage (`driver_status` outside
+`{FLYING_LAP, ON_TRACK}`)*. It drops 58% of raw events and every parked-car pass, needs only the
+current Lap Data frame, and freezes nothing else. Everything past it stays derived.
+
+### `PENA` measures something different from `num_penalties` — and 37% of it arrives on uid 0
+
+**The counts do not match, and the reason is the type mix.** Of 127 live `PENA` events: **69
+Warnings, 28 lap-invalidations, 19 Retirements**, and only 3 Time penalties, 7 Grid, 1 Drive-through.
+The classification's `num_penalties` counts *sporting* penalties only — restricting to
+`penalty_type ∈ {0,1,2,4,6}` takes the per-car match from 5 cars to 8 of 9.
+
+- **`lap_num` is exact**: 126 of 127 equal that car's `current_lap_num` at the event frame. It lines
+  up with the stored lap rows with no adjustment.
+- **255 is the not-applicable sentinel** — on `time` (124/127), `places_gained` (47) and
+  `other_vehicle_idx` (79).
+- **`PENA` is field-wide too** — 44.9% are the player's.
+- **`DTSV` / `SGSV` never fire** in any of the 33 captures, so there is no issued-then-served
+  double count to defend against.
+
+**The trap — core invariant #3 does not hold for Event packets.** 75 of the 202 `PENA` events
+arrive with `header.session_uid == 0`, which `SessionAssembler.process` drops as init noise. They
+are not init noise: **at the end of a session the game re-broadcasts the whole accumulated penalty
+log with a zeroed header** — `frame_identifier == 0`, `session_time` pinned at the session end, the
+preceding packet id 8 (`FINAL_CLASSIFICATION`) in 74 of 104 cases — and it repeats, one 11-row log
+arriving 64 times over. So routing `EVENT` through the existing dispatch **silently loses 37% of all
+penalties**, and ingesting uid 0 naively **multiplies them by up to 7×**.
+
+Attribution is free: `prev_uid == next_uid` in 104/104, so the surrounding packets name the session.
+
+**The merge rule that reproduces the game's own figures** — keep live rows keyed by
+`frame_identifier`; from the uid-0 replay add a detail-key only where the replay's distinct count
+exceeds the live count:
+
+> **9 of 9 cars match `num_penalties` exactly, and `penalties_time_s` matches on every time
+> penalty (3, 5, 3, 3 s).**
+
+Neither half alone gets there. Live-only misses a 3 s time penalty in `20260704_214647`; a naive
+detail-tuple dedupe collapses two genuinely distinct grid penalties for car 13 in
+`20260812_202452` — which the game itself records as `num_penalties = 2`. Total across all 73
+sessions: **129 penalty rows**.
+
+*(The `PENA 79` in this file's earlier single-capture snapshot was 11 live events plus 68 copies
+from that replay — the number was right and its meaning was not.)*
+
+### The session-start burst
+
+247 `OVTK` (1.7%) land before `session_time` 1.0 s, in only 3 of 73 sessions, but they arrive in
+bursts — one frame carrying **70 events** at t = 0.000 (`20260729_200443`). That is the game
+resolving grid order, not racing, and the racing filter above does *not* catch it (every car reads
+`ON_TRACK`). `SSTA` (96.7% < 3 s), `STLG`, `LGOT` and `SCAR` legitimately live in that window —
+they *are* session-start events. `PENA` is essentially unaffected: 2 events < 3 s.
+
+### Codes deliberately not ingested
+
+`BUTN` (79%, controller input, no conceivable consumer) · `SPTP` (9.2%, already on
+`LapData.speed_trap_fastest_speed` per car) · `FTLP` (a running best-so-far feed; the answer is
+already `best_lap_time_ms`) · `RTMT` (`result_reason` is already on every classification entry) ·
+`COLL` (no designed consumer; the 45 that mattered are already `PENA` rows as Small/Big Collision
+infringements) · the marker codes (session and race-control facts E17 already reads off the Session
+packet). See DECISIONS → Storage for the reasoning.
 
 Also unparsed and worth knowing about: **`TYRE_SETS` (id 12)**, ~102k packets per capture, which
 carries per-set wear and remaining life directly. The E1 tyre-life chart does not need it (per-lap
 `tyre_wear` is enough), but it is the better source if that chart ever grows.
+
+## Track / air temperature and time of day: the opening packets are zeroed
+
+*Measured 2026-08-31 across all 33 captures, for the two new details-grid cells (E15).*
+
+`track_temperature`, `air_temperature` and `time_of_day` are **top-level Session fields** — live
+observations, not forecast — and none of them reached the domain layer before E15.
+
+- **All three go blank together, in exactly the same 20 packets, across the same 4 sessions.** The
+  whole payload is zeroed for the first 3-4 Session packets of a session; the fields do not settle
+  independently. Observed: `[0, 0, 0, 0, 24, 24]` for track temp, `[0, 0, 0, 0, 960, 960]` for
+  time of day, in the same packets.
+- **Unlike E14's weather this is a packet-count artifact, not a temporal one** — three of the four
+  sessions clear it while `session_time` is still `0.0`. The `_WEATHER_SETTLE_S = 3.0` guard still
+  works (a settled value in **73/73** sessions), so it is reused rather than a second constant
+  invented for the same artifact; but the mechanism is a zeroed payload, not a value being
+  corrected.
+- **`0` is a legitimate `time_of_day`** (midnight) and never a legitimate track temperature. The two
+  zero together, so the temperature is the honest discriminator if one is ever needed.
+- **`time_of_day` is a real clock**: valid `0..1439` minutes-since-midnight in 73/73 sessions,
+  advancing in 68/73, readings such as 11:00, 15:00, 20:00. **`header.session_time` is not** — it is
+  elapsed session seconds, and is what the E14 settle window measures.
+- **Track temp is stable within a session**: median spread 1 °C, constant in 22/73; max spread 42 °C
+  (a session that opened on the zeroed placeholder).
+- **11 of 73 sessions have no Session packet before `session_time` 3.0 s** — the recording joined
+  mid-session. For those, "at session start" is really "the earliest reading captured". The same is
+  already true of `weather_seen`.
+
+**`rain_percentage` was weighed and rejected for the Conditions row.** It exists only inside
+`weatherForecastSamples`, and availability is not the problem — only 20 of 148,778 Session packets
+carry an empty array, every session has a `time_offset == 0` sample within 3 s, and it survives to
+session end in 73/73. The objection is semantic: it is a **probability of rain**, and it would render
+beside `Conditions`, which is an **observed condition**. `20260704_181644 QUALIFYING_1` reads 83%;
+next to a heavy-rain icon that invites "83% of what?", and next to a clear icon it reads as a
+contradiction. `ui/components/weather.py` already records why the observed field beats that array.
 
 ## Game mode ids: the 2026 career modes are undocumented
 
@@ -420,11 +567,24 @@ Record these as **observed**, not specified — see PRIORITIES → E16.
 Imola is **27** (in the 2025 calendar); Madrid is **42** (new in 2026, replaces Imola in that
 calendar). `official_calendar(year)` encodes the preset order for each.
 
-## Result status / reason
+## Result status / reason — and `result_reason` is meaningless for a finisher
+
 `ResultStatus`: INVALID, INACTIVE, ACTIVE, FINISHED, DID_NOT_FINISH, DISQUALIFIED,
 NOT_CLASSIFIED, RETIRED. `ResultReason` adds detail (RETIRED, TERMINAL_DAMAGE, NOT_ENOUGH_LAPS,
 BLACK_FLAGGED, RED_FLAGGED, MECHANICAL_FAILURE, …). The UI collapses non-finishers to short tags
 (DNF / DSQ / NC / DNS) in `ui/formatting.py`.
+
+**`result_reason` is not usable as a display field, measured 2026-08-31 against `f1league.db`**
+(56 sessions, 1,045 classification entries). The game does not clear it when a car finishes:
+
+- The player's row reads `FINISHED` in 55 of 56 sessions, yet `result_reason` says
+  **`TERMINAL_DAMAGE` on four of them** — including three qualifying sessions finished P1, P2 and
+  P4 — and `INVALID` on sixteen.
+- Across every car: 77 `TERMINAL_DAMAGE` against only **18 non-finishing statuses** in total.
+
+So the field is only meaningful when `result_status != FINISHED`, and gated that way it is blank
+55 times in 56. It was evaluated as the third cell of the details grid's provenance row for E15 and
+**rejected on this evidence** — see DECISIONS → UI.
 
 ## Diagnostic tools (read-only, run from the repo root)
 Built during the roster-blank investigation; keep them for future data-quality work.
