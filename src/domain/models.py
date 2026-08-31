@@ -156,10 +156,33 @@ class Lap:
     damage: CarDamage | None = None  # non-tyre damage at the line; None until captured/stored
     fuel_in_tank: float | None = None  # kg in the tank at lap start (Car Status); None until captured.
 
+    # --- lap context: what Lap Data and the Sessioon packet said about this lap ---------------------
+    # All None for laps ingested before PIPELINE_VERSION 4. ``has_lap_context`` is the one place
+    # that decides "stored truth or inferred fallback"; nothing else should test a field for None.
+    # Enums ride as raw ints and are read back through ``safe_enum`` (core invariant #9).
+    driver_status: int | None = None            # DriverStatus held for most of the timed lap
+    pit_status: int | None = None               # highest PitStatus seen; 2 = the pit stop is on this lap
+    preceded_by_garage: bool | None = None      # the car was in the garage between the last lap and this
+    is_out_lap: bool | None = None              # this lap began in the pit lane, or after a restart
+    is_in_lap: bool | None = None               # this lap ended by entering the pit lane
+    safety_car: int | None = None               # SafetyCarStatus in force during the lap
+    red_flagged: bool | None = None             # a red-flag period began during this lap
+
     @property
     def is_complete(self) -> bool:
         """True if the lap was completed and has a valid time."""
         return self.lap_time_ms is not None
+
+    @property
+    def has_lap_context(self) -> bool:
+        """Whether this lap carries the stored lap-state fields, or predates them.
+
+        ``driver_status`` is the discriminator because every lap the assembler emits has a timed
+        run and every frame of a timed run carries one - so it is set for all laps ingested at
+        PIPELINE_VERSION 4 or later, and None for all laps ingested before. The booleans beside it
+        cannot serve: ``False`` and "never captured" would read the same.
+        """
+        return self.driver_status is not None
     
 
 @dataclass(frozen=True)
@@ -285,7 +308,13 @@ class Classification:
     def player(self) -> ClassificationEntry | None:
         """The player's entry, or None if not found in the classification."""
         return next((e for e in self.entries if e.is_player), None)
-    
+
+
+# Dry vs wet, for ``SessionResult.is_mixed_weather``. A value outside the enum (safe_enum hands
+# back the raw int) is in neither set, so it can never make a session read as mixed on its own.
+_DRY_WEATHER = frozenset({Weather.CLEAR, Weather.LIGHT_CLOUD, Weather.OVERCAST})
+_WET_WEATHER = frozenset({Weather.LIGHT_RAIN, Weather.HEAVY_RAIN, Weather.STORM})
+
 
 @dataclass(frozen=True)
 class SessionResult:
@@ -313,11 +342,21 @@ class SessionResult:
         game_mode: int          # raw mode id; see reference.game_mode_name (used to bucket sessions into mode-based windows)
         player_vehicle_index: int   # which car is in the roster is the player's
 
+        # AI difficulty rating (0..110) from the Session packet; 0 means "not captured" - either stored before PIPELINE_VERSION 3 or a session with no AI.
+        ai_difficulty: int = 0
+
         # The ordered session types that make up this weekend (from the Session packet's
         # weekend_structure array, truncated to num_sessions_in_weekend). Empty for rows saved
         # before it was captured. Both the Sprint Race and the Grand Prix report session_type
         # RACE (15), so this is what tells them apart - see domain/season.py:weekend_slots.
         weekend_structure: tuple[int, ...] = ()
+
+        # Every distinct condition the session's Session packets reported, in first-seen order
+        # (PIPELINE_VERSION 4). `weather` above stays the end-of-session snapshot; this is an
+        # *additional* fact, so a session that ran in one condition still says which. Empty means
+        # "not captured" - a row ingested before this existed, or a capture holding only the
+        # opening seconds of a session - and never "one condition".
+        weather_seen: tuple[Weather, ...] = () 
 
         # Static track geometry (metres) from the Session packet, kept together for the map and (future)
         # corner metadata. None for rows saved before this was captured; the game always sends them otherwise.
@@ -339,7 +378,17 @@ class SessionResult:
         def player_participant(self) -> Participant | None:
             """The player's participant object, or None if not found in the roster."""
             return next((p for p in self.participants if p.is_player), None)
-        
+
+        @property
+        def is_mixed_weather(self) -> bool:
+            """Whether the session ran both dry and wet.
+            
+            Derived, never stored: ``weather_seen`` is the raw fact and this is the reading of it,
+            so a future weather timeline widens the same column rather than needing a new one.
+            False for a row with no set - "not captured" is not evidence of a change in conditions.
+            """
+            seen = set(self.weather_seen)
+            return bool(seen & _DRY_WEATHER) and bool(seen & _WET_WEATHER)
 
         def setup_for_lap(self, lap_number: int) -> Setup | None:
             """he setup active on a given lap; the latest snapshot taking effect on or before it.

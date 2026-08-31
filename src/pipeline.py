@@ -26,7 +26,7 @@ from .protocol.registry import build_registry
 from .session.assembler import assemble
 from .storage.captures import CaptureStore
 from .storage.meta import LEGACY_PIPELINE_VERSION, MetaStore
-from .storage.sessions import SessionStore
+from .storage.sessions import DeletedSession, SessionStore
 from .version import PIPELINE_VERSION
 
 log = logging.getLogger(__name__)
@@ -827,3 +827,243 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
     )
     log.info("Import finished: %s", summary)
     return summary
+
+
+# --- deleting a stored session --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DeleteOutcome:
+    """What one guarded delete did, or refused to do and why."""
+
+    deleted: bool
+    session_uid: int
+    season_id: int | None = None
+    round_number: int | None = None
+    laps_removed: int = 0
+
+    @property
+    def refused_assigned(self) -> bool:
+        """Whether the delete was refused because the session sits in a season round.
+        
+        The one case a caller must tell apart fom an ordinary miss: both leave ``deleted``
+        False, but only this one is worth reporting - and only this one is fixable by the user
+        (unassing, then delete).
+        """
+        return not self.deleted and self.season_id is not None
+
+
+def delete_session(session_uid: int, session_store: SessionStore, season_store, * ,
+                   lap_store=None) -> DeleteOutcome:
+    """Delete a stored session and its laps, refusing while it is assigned to a season round.
+
+    The single write point for deleting a session, and the enforcer of the invariant
+    ``SessionStore.delete``'s docstring used to merely assert. It lives here rather than on the
+    store because the guard needs the *season* aggregate, and a store must not import a sibling
+    store (repository-per-aggregate) - so this sits with the other multi-store orchestration,
+    beside ``reingest_all`` and ``import_captures``.
+
+    **Refuses rather than cleans up.** ``season_assignments`` is deliberately not FK'd to
+    ``sessions`` (core invariant #4) precisely so a re-ingest cannot wipe a manual round
+    placement; a delete must not either. Dropping the assignment on the way out would silently
+    remove a result from the standings, and delete's whole premise - the capture survives, so
+    the session can come back - would not hold for the placement, which nothing would restore.
+    Refusing costs the user one Unassign click and is reversible; cleanup is not.
+
+    Laps go with the session. Nothing else calls ``LapStore.delete``, so without this a deleted
+    session left its lap rows and its Parquet traces under ``lap_traces/<uid>/`` forever -
+    invisible, because the laps overview iterates *stored* sessions, but still on disk.
+    ``lap_store`` is optional only so a caller that has none (tests, a future headless path) can
+    still delete; pass it wherever one exists.
+    """
+    uid = int(session_uid)
+    placement = season_store.assignment_for(uid)
+    if placement is not None:
+        season_id, round_number = placement
+        log.info("Refusing to delete session %s: assigned to season %s round %s", 
+                 uid, season_id, round_number)
+        return DeleteOutcome(deleted=False, session_uid=uid,
+                             season_id=season_id, round_number=round_number)
+
+    if not session_store.delete(uid):
+        log.info("Delete: no stored session %s", uid)
+        return DeleteOutcome(deleted=False, session_uid=uid)
+
+    laps_removed = lap_store.delete(str(uid)) if lap_store is not None else 0
+    log.info("Deleted session %s (%d lap row(s), traces removed)", uid, laps_removed)
+    return DeleteOutcome(deleted=True, session_uid=uid, laps_removed=laps_removed)
+
+
+# --- restoring a deleted session --------------------------------------------------------------
+#
+# Restore is not "clear the tombstone": ``SessionStore.restore`` only does that half, and a
+# cleared tombstone with no session row is a *worse* state than a deleted session (the next full
+# re-ingest resurrects it silently). The feature is a single-capture re-ingest - find a capture
+# that holds the uid, clear the tombstone, ingest that one file - because ``ingest_capture``
+# replaces by uid, so one file holding it is sufficient and idempotent. Rebuilding one session by
+# decompressing every archive in the database is what the guided re-ingest under Help is for.
+
+
+class RestoreProblem(Enum):
+    """Why a restore could not go ahead - the one thing the caller must tell apart."""
+
+    NOT_DELETED = auto()           # the uid isn't tombstoned; there is nothing to bring back
+    NO_CAPTURE_ROW = auto()         # nothing records which file held it -> only Forget can help
+    ARCHIVE_MISSING = auto()        # the capture is known, but its bytes can't be found
+    AMBIGUOUS_CAPTURE = auto()      # several findable captures and no content_hash: ask first
+    INGEST_FAILED = auto()          # ingest raised; the tombstone was rolled back
+    NOT_IN_CAPTURE = auto()         # ingest worked, but the file didn't hold the uid after all
+
+
+@dataclass(frozen=True)
+class RestoreOutcome:
+    """What one restore attempt did, or refused to do and why.
+
+    ``reason`` is an enum, never a message: the wording belongs to the UI, which has two quite
+    different things to say about a missing archive (try Help -> Find moved captures...) and about
+    a session no capture row mentions at all (Forget is the only way out). ``error`` carries the
+    ingest exception, and only that - every other refusal is fully described by ``reason``.
+    """
+
+    restored: bool
+    session_uid: int
+    capture_name: str = ""              # the capture used, or the one that could not be found
+    reason: RestoreProblem | None = None
+    error: str = ""                     # the ingest failure's text; INGEST_FAILED only
+
+
+def _ingest_order(meta: CaptureMeta) -> datetime:
+    """Sort key for "newest ingest first", tolerant of the two shapes an ingest stamp arrives in.
+
+    SQLite hands datetimes back **naive** while a freshly built ``CaptureMeta`` carries an aware
+    one, and the column is nullable - so comparing them raw raises ``can't compare offset-naive
+    and offset-aware datetimes`` the moment an unstamped row shares a list with a stored one.
+    Everything is written as UTC, so normalizing to naive UTC orders correctly; a row with no
+    stamp sorts oldest rather than taking the chooser down with it.
+    """
+    stamp = meta.ingested_at
+    if stamp is None:
+        return datetime.min
+    return stamp.astimezone(timezone.utc).replace(tzinfo=None) if stamp.tzinfo else stamp
+
+
+def restorable_captures(session_uid: int, capture_store: CaptureStore,
+                        captures_dir: str | os.PathLike | None = None) -> list[tuple[CaptureMeta, str]]:
+    """``(capture, path)`` for every known capture holding ``session_uid`` whose archive is findable.
+
+    Newest ``ingested_at`` first. Shared on purpose: :func:`restore_session` resolves through it,
+    and the deleted-sessions view offers exactly this list when more than one capture holds the
+    uid. Two copies of a session are usually a member's original plus an imported copy, but they
+    can differ in completeness (someone stopped recording early) and nothing here can tell which
+    is better without decompressing both - so the choice is the user's, and both halves of the app
+    must agree on what there is to choose from. A page computing its own list would eventually
+    offer a file that restore then refuses as missing.
+    """
+    found: list[tuple[CaptureMeta, str]] = []
+    for meta in sorted(capture_store.for_session(str(session_uid)), key=_ingest_order, reverse=True):
+        path = resolve_capture_path(meta, captures_dir)
+        if path is not None:
+            found.append((meta, path))
+    return found
+
+
+def _re_tombstone(session_store: SessionStore, tomb: DeletedSession, lap_store=None) -> None:
+    """Put a failed restore's tombstone back exactly as it was - the rollback this design exists for.
+
+    Two half-states are possible once the tombstone has been cleared, and both are covered here:
+
+    * **cleared, no session row** - the ordinary failure (a corrupt archive, a capture that turned
+      out not to hold the uid). ``delete()`` writes nothing when there is no row, so the tombstone
+      has to be re-written directly.
+    * **cleared, row present** - a capture holding several sessions where ours was saved before a
+      later one raised. ``delete()`` removes the resurrected row, and its laps go with it exactly
+      as they do in :func:`delete_session`; nothing else calls ``LapStore.delete``.
+
+    ``tombstone()`` runs last in both cases, with the original values, so the end state is
+    identical to before the attempt - including ``deleted_at``, which must not jump to "just now"
+    because a restore failed.
+    """
+    if session_store.delete(tomb.session_uid) and lap_store is not None:
+        lap_store.delete(str(tomb.session_uid))
+    session_store.tombstone(tomb.session_uid, track_id=tomb.track_id, 
+                            session_type=tomb.session_type, recorded_at=tomb.recorded_at,
+                            deleted_at=tomb.deleted_at)
+
+
+def restore_session(session_uid: int, session_store: SessionStore, capture_store: CaptureStore, *, 
+                    lap_store=None, content_hash: str | None = None, 
+                    captures_dir: str | os.PathLike | None = None,
+                    ingest: Callable[..., list[SessionResult]] = ingest_capture) -> RestoreOutcome:
+    """Bring a deleted session back by re-ingesting one capture that holds it, or refuse honestly.
+
+    The Qt-free half of Restore; ``RestoreWorker`` is a thin wrapper that runs it on a background
+    thread, the same split as ``reingest_all`` / ``ReingestWorker``. ``ingest`` is injectable for
+    the same reason: the ordering and the rollback are testable without a real archive.
+
+    **The ordering is the safety property.** ``ingest_capture`` reads ``deleted_uids()`` at the
+    *start*, so the tombstone must be cleared before ingesting - which opens a window where the
+    uid is un-tombstoned with no session row. Everything that can be decided is therefore decided
+    *before* the tombstone is touched (is it deleted at all, is there a capture row, can its
+    archive be found, is the choice unambiguous), and anything that fails after it has been
+    cleared rolls back through :func:`_re_tombstone`. A restore either completes or leaves the
+    database exactly as it found it; it never half-succeeds.
+
+    **The capture is verified, not assumed.** ``capture_sessions`` rows can be stale - pruned,
+    re-recorded, or written by an older ingest - so the returned sessions are checked for the uid
+    rather than trusting the row that pointed here. Passing ``capture_store`` through to the
+    ingest also *corrects* such a row as a side effect (``record`` replaces by hash with what the
+    file actually holds), so a ``NOT_IN_CAPTURE`` refusal leaves the session honestly shown as
+    having no capture, and Forget as its way out.
+
+    ``content_hash`` picks one capture when several hold the uid; without it, several findable
+    captures are refused as ``AMBIGUOUS_CAPTURE`` rather than guessed at - see
+    :func:`restorable_captures`.
+    """
+    uid = int(session_uid)
+    # One read serves three purposes: the "is it even deleted?" gate, and the track/type/deleted_at
+    # values the rollback has to put back - which are unreadable once the tombstone is cleared.
+    tomb = next((row for row in session_store.deleted_sessions() if row.session_uid == uid), None)
+    if tomb is None:
+        log.info("Restore: session %s is not deleted", uid)
+        return RestoreOutcome(restored=False, session_uid=uid, reason=RestoreProblem.NOT_DELETED)
+    
+    found = restorable_captures(uid, capture_store, captures_dir)
+    if content_hash is not None:
+        found = [(meta, path) for meta, path in found if meta.content_hash == content_hash]
+    if not found:
+        # Nothing to ingest - but *why* decides what the user can do about it, so tell the two
+        # apart with the one extra read that costs nothing on the failure path.
+        known = capture_store.for_session(str(uid))
+        if content_hash is not None:
+            known = [meta for meta in known if meta.content_hash == content_hash]
+        if not known:
+            log.info("Restore: no capture recorded for session %s", uid)
+            return RestoreOutcome(restored=False, session_uid=uid, 
+                                  reason=RestoreProblem.NO_CAPTURE_ROW)
+        newest = max(known, key=_ingest_order)
+        log.info("Restore: the capture holding session %s is missing (%s)", uid, newest.file_name)
+        return RestoreOutcome(restored=False, session_uid=uid, capture_name=newest.file_name,
+                              reason=RestoreProblem.ARCHIVE_MISSING)
+    if len(found) > 1:
+        log.info("Restore: %d captures hold session %s, you must pick one", len(found), uid)
+        return RestoreOutcome(restored=False, session_uid=uid, 
+                              reason=RestoreProblem.AMBIGUOUS_CAPTURE)
+
+    meta, path = found[0]
+    session_store.restore(uid)        # from here on, every exit either succeeds or rolls back
+    try:
+        sessions = ingest(path, session_store, lap_store=lap_store,
+                          capture_store=capture_store, recorded_by=meta.recorded_by)
+    except Exception as exc:            # a failed restore must not leave the uid un-tombstoned
+        log.exception("Restore failed for session %s from %s", uid, path)
+        _re_tombstone(session_store, tomb, lap_store)
+        return RestoreOutcome(restored=False, session_uid=uid, capture_name=meta.file_name,
+                              reason=RestoreProblem.INGEST_FAILED, error=str(exc))
+
+    if uid not in {int(session.session_uid) for session in sessions}:
+        log.info("Restore: %s does not hold session %s after all", meta.file_name, uid)
+        _re_tombstone(session_store, tomb, lap_store)
+        return RestoreOutcome(restored=False, session_uid=uid, capture_name=meta.file_name,
+                              reason=RestoreProblem.NOT_IN_CAPTURE)
+
+    log.info("Restored session %s from %s", uid, meta.file_name)
+    return RestoreOutcome(restored=True, session_uid=uid, capture_name=meta.file_name)

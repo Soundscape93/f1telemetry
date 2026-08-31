@@ -190,6 +190,38 @@ class AssignmentTest(StoreTestBase):
         self.assertEqual(len(austria.sessions), 1, "Austria round should still have 1 session assigned after reingestion")
         self.assertEqual(austria.sessions[0].classification.winner.driver_name, "After",
                          "Austria round should have the reingested session's classification after reingestion")
+
+    def test_assignment_for_hit_and_miss(self):
+        """The reverse lookup the delete guard runs: where does this session live?"""
+        self.sessions.save(make_session(1007))
+        self.seasons.assign_session(1007, self.season.season_id, 7)
+        self.assertEqual(self.seasons.assignment_for(1007), (self.season.season_id, 7))
+        self.assertIsNone(self.seasons.assignment_for(4242), "unassigned uid has no placement")
+
+    def test_assignment_for_follows_a_move_and_an_unassign(self):
+        """assign_session moves rather than duplicates, so this reports one current round."""
+        self.sessions.save(make_session(1008))
+        self.seasons.assign_session(1008, self.season.season_id, 3)
+        self.seasons.assign_session(1008, self.season.season_id, 9)
+        self.assertEqual(self.seasons.assignment_for(1008), (self.season.season_id, 9))
+        self.seasons.unassign_session(1008)
+        self.assertIsNone(self.seasons.assignment_for(1008))
+
+    def test_assigned_uids_spans_every_season(self):
+        """The picker must mark sessions placed in ANY season, not just the one on screen -
+        the whole reason the weekend picker could delete an assigned session."""
+        other = self.seasons.create_season(SeasonMode.LEAGUE, 2, 2025,
+                                           rounds=official_calendar(2025))
+        self.sessions.save(make_session(1009))
+        self.sessions.save(make_session(1010))
+        self.assertEqual(self.seasons.assigned_uids(), set())
+
+        self.seasons.assign_session(1009, self.season.season_id, 1)
+        self.seasons.assign_session(1010, other.season_id, 4)
+        self.assertEqual(self.seasons.assigned_uids(), {1009, 1010})
+
+        self.seasons.unassign_session(1009)
+        self.assertEqual(self.seasons.assigned_uids(), {1010})
         
 
 class RosterSeasonModesTest(unittest.TestCase):

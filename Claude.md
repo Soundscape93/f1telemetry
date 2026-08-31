@@ -123,12 +123,22 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    is joined to the roster by vehicle index, then sorted by position only for display.
 3. **Sessions split on `header.session_uid`;** `uid == 0` frames are init noise and ignored.
 4. **`session_assignments.session_uid` is deliberately NOT a foreign key** to `sessions`, so
-   re-ingesting a capture (replace-by-uid) never wipes manual round placements.
+   re-ingesting a capture (replace-by-uid) never wipes manual round placements. The other half of
+   that promise is a *guard, not a cascade*: **`pipeline.delete_session` is the only deletion path**
+   — it refuses a session that is assigned to a round (naming the season and round) and otherwise
+   takes the session's laps and trace files with it. `SessionStore.delete` is the primitive
+   underneath and enforces nothing; every UI entry point goes through
+   `ui/components/session_actions.confirm_and_delete`.
 5. **Slot (Q1/Q2/Q3/Sprint/Race) is derived, never stored** — but not from `session_type`
-   alone: the Sprint Race and the Grand Prix *both* report `session_type` RACE (15), so they're
+   alone: the Sprint Race and the Grand Prix *can both* report `session_type` RACE (15), so they're
    told apart by their position in the weekend. `domain/season.py:weekend_slots` resolves this
    from the game's `weekend_structure` (persisted per session), falling back to `session_link_id`
    order for legacy rows — the Grand Prix is the weekend's final race; earlier races are Sprints.
+   **Do not read the number in the type as an ordinal for display.** This database's sprint weekend
+   reports `[1, 10, 11, 12, 15, 5, 6, 7, 16]` — the Sprint as RACE (15), the Grand Prix as RACE_2
+   (16) — so rendering the raw enum name put "Race 2" on every sprint weekend's Grand Prix until
+   2026-08-26. `ui/formatting.slot_label` renders **every** non-sprint race type as "Race"; position
+   decides which race it is, never the value.
 6. **Traces are indexed by lap DISTANCE, not time.** The header is 29 bytes. The recorder binds
    `0.0.0.0:20777` (set the game's UDP to broadcast).
 7. **Race numbers are unique only among humans**, so league identity never keys on a number
@@ -233,8 +243,17 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   per-track assets). **2b.1 made the map canonical:** it now draws a **distance-resampled median
   racing line** over the race weekend's valid Motion laps (`analysis/track_layout` +
   `ui/laps/track_layout`), so the shape is clean and identical per track regardless of the viewed
-  lap; too few laps → it falls back to the driven line. Dashboard / Sessions / Analytics remain
+  lap; too few laps → it falls back to the driven line. Dashboard and Analytics remain
   placeholders.
+- **Sessions (E1/E2): complete.** Every stored session as foldable cards, newest first, with a
+  track/session filter; a detail page with the final classification, a 4×2 read-out, the player's
+  laps (click one to open its telemetry on the Laps surface), penalties, the circuit outline, and
+  stacked pace / tyre-life charts per *run* on a stint-relative axis with each run's corrected
+  average pace. Deleting a session lives here too, behind `pipeline.delete_session` (invariant #4).
+  `Deleted sessions (N)` opens the **deleted-sessions manager**: every tombstone with **Restore** —
+  a single-capture re-ingest with a tombstone rollback, on `RestoreWorker`, asking which file when
+  several hold the session — and **Forget**, which clears a tombstone without restoring so a session
+  no capture row mentions can still leave the list.
 - **Done:** lap-view **2c — a car-status graphic** (an in-game-style car silhouette with
   colour-coded tyre / engine / body-damage zones; tyres as corner gauges). SVG-authored
   `QGraphicsScene` path items (`car_status_graphic.py`) over a Qt-free, tested `car_status.py`

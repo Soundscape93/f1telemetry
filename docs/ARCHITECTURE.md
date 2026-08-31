@@ -110,6 +110,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
     already drops the formation lap / out-laps / in-laps, so this is fuel at the racing S/F line,
     falling lap by lap). Distinct from the static garage `Setup.fuel_load`, which is no longer shown
     as live fuel;
+  - *(E17)* captures each lap's **context** — `driver_status` (modal over the timed run) and
+    `pit_status` (peak) from Lap Data, plus three computed flags: `preceded_by_garage` (the car was
+    in the garage between the previous emitted lap and this one's timed run — read from the buffer
+    *ahead* of the selected run, which is where the lap counter's behaviour always puts it),
+    `is_out_lap` and `is_in_lap` (the pit-lane timer at the run's first/last frame — and only that;
+    a red-flag restart also reads `OUT_LAP` and is a grid start, so `lap_context` derives it from
+    `red_flagged` on the lap before instead). `safety_car` and
+    `red_flagged` come off the **Session** packet instead, accumulated per lap number in `feed` —
+    they are session-wide state and never reach the frame join. All seven are additive-nullable and
+    `None` for laps ingested before `PIPELINE_VERSION` 4; `Lap.has_lap_context` is the single test
+    that decides stored truth vs the older inference. Evidence in TELEMETRY_NOTES;
   - emits one `SessionResult` per session (the last flushed at stream end).
 
 ### storage/ — SQLite persistence (repository-per-aggregate)
@@ -136,7 +147,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   re-ingest never wipes manual placements.
 - **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
   their per-lap tyre context (and per-lap start-of-lap fuel, the additive-nullable `fuel_in_tank`
-  column), with each lap's dense `LapTrace` written to a **Parquet file**
+  column, plus the seven additive-nullable **lap-context** columns from E17 — `driver_status`,
+  `pit_status`, `preceded_by_garage`, `is_out_lap`, `is_in_lap`, `safety_car`, `red_flagged`, which
+  round-trip straight through and read back `None`, never a coerced `0`/`False`, for laps stored
+  before them), with each lap's dense `LapTrace` written to a **Parquet file**
   referenced by the lap row (not SQLite rows — see DECISIONS). Write: `save_laps` (replace-by-uid,
   rows + files) / `delete`. Read: `list(uid)` returns a session's laps **without** their traces
   (cheap, for the overview), `load(uid, lap_number)` returns one fully-hydrated lap **with** its
@@ -274,6 +288,38 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
   names through `display_name_fn` (captured public alias first, roster `online_names` fallback)
   injected into `race_winner_summary` and the classification tables built via `components/`.
+- **`sessions/`** — the Sessions surface (E1), same thin-container pattern as `seasons/`:
+  `view.py` (`SessionsView`) owns a `QStackedWidget` and wires navigation signals; pages never
+  reference siblings. `overview_page.py` lists every stored session as foldable cards, newest
+  first, with a track/session filter — one query, no `LapStore` read — and a compact summary line
+  (session, winner, fastest lap, weather icon, AI difficulty) plus a shared delete.
+  `detail_page.py` is the per-session page: a header (track, slot label, recorded time, weather ·
+  laps · uid, and the **source capture** resolved via `CaptureStore.for_session` +
+  `resolve_capture_path`), then a 4×2 details grid, the shared
+  `components.build_classification_table`, a clickable laps box, a penalties box, and a stacked
+  pair of charts (tyre life and lap times) sharing one **stint-relative** x-axis, each run's legend
+  entry carrying its **corrected average pace**. The page classifies its laps **once**, in
+  `lap_context.analyse_session` (Qt-free, beside `tyre_stints`), and hands the one `SessionAnalysis`
+  to the laps box, the split and the charts: the box's `START` / `OUT-LAP` / `IN-LAP` / `SC` / `RED-FLAG` chips
+  (one per pace exclusion, and no chip that isn't one),
+  `tyre_stints.stint_average_ms`'s exclusions and the pace tooltips are then the same judgement
+  rather than three that have to agree. Stored lap context (E17) is believed where present, and the
+  older fuel / stint-shape inference is the fallback for laps ingested before it —
+  `Lap.has_lap_context` is the only test. `deleted_page.py` is the deleted-sessions manager (E2): a table over
+  `SessionStore.deleted_sessions()`, with Restore and Forget as row buttons and as a context menu.
+  It reads `pipeline.restorable_captures` for both its capture column and its chooser — the same
+  list `restore_session` resolves through, so what it offers and what the restore accepts cannot
+  drift — and it **refuses nothing itself**: it confirms, picks the capture when several hold the
+  session, then emits `restore_requested(uid, content_hash)` upward. `sessions_changed` is the
+  non-navigation signal, re-emitted for `MainWindow` to fan out exactly as `SeasonsView` does; so is
+  `restore_requested`, which asks for a *job* rather than a page, because the window owns workers.
+  **Two cross-cutting rules live here.** Points are rendered only for race/sprint sessions because
+  the stored value is a carried-over championship figure on every other type (DECISIONS → UI);
+  and a lap row emits `lap_requested(uid, lap_number)` upward, which `MainWindow` turns into a
+  sidebar switch plus `LapsView.show_lap` — a **cross-surface** hop, since the no-sibling rule
+  forbids the page reaching `LapsView` itself. `LapsView.show_lap` stores a pending target that
+  `showEvent` consumes, because `showEvent` otherwise resets to the overview and would clobber the
+  navigation.
 - **`laps/`** — the Laps surface, same thin-container pattern as `seasons/`: `view.py` (`LapsView`)
   owns a `QStackedWidget` of two pages and wires their navigation signals. `overview_page.py` lists
   foldable per-session cards (track + session label header, lap-count/best/recorded meta; expand →
@@ -326,6 +372,19 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   (children by cascade) so a re-ingest stops listing archives that will never come back. It
   **re-resolves every hash at delete time** rather than trusting the caller's list, keeping
   anything that turned up meanwhile; it touches no file and no session. See DECISIONS → Storage.
+  It also owns the two **single-session** write points, both here rather than on a store because
+  each needs a second aggregate and a store must not import a sibling store:
+  `delete_session(uid, session_store, season_store, lap_store=None)` → `DeleteOutcome`, which
+  **refuses** a session assigned to a season round (naming the season and round) and otherwise takes
+  the session's laps and Parquet traces with it; and `restore_session(uid, session_store,
+  capture_store, ...)` → `RestoreOutcome`, a **single-capture re-ingest** — resolve a capture
+  holding the uid through `restorable_captures` (newest ingest first, findable archives only), clear
+  the tombstone, ingest that one file, and verify the uid actually came back. `ingest_capture`
+  reads `deleted_uids()` at the *start*, so the tombstone must be cleared **before** the ingest;
+  everything decidable is therefore decided first (is it deleted, is there a capture row, is the
+  archive findable, is the choice unambiguous) and every later failure rolls back the tombstone
+  field-for-field, removing a row the failed ingest had already saved. `ingest` is injectable, as
+  it is for `reingest_all`. See DECISIONS → UI.
 
 ## Capture compression
 
@@ -380,7 +439,17 @@ reports `progress(index, total, file_name)` to a modeless progress dialog, and i
 is a `threading.Event` polled between captures — a capture is never interrupted mid-way, so the
 store never holds a partial session. It writes the new `PIPELINE_VERSION` stamp only when the pass
 completed without errors or a cancel. `MainWindow` disables the record/ingest controls while it
-runs, so there is never a second writer.
+runs, so there is never a second writer. **`RelocateWorker`** and **`ImportWorker`** repeat the
+shape for the folder search and the league import.
+
+**`RestoreWorker`** is the same shape for one session coming back: its three stores (session, lap,
+capture) are built on its own thread and disposed in one `finally`, and it emits
+`done(RestoreOutcome)` / `failed(str)`. It has **no cancel and no progress** — `reingest_all` polls
+its stop event *between* captures, while this is a single capture, and `ingest_capture` offers
+neither an interruption point nor a progress callback — so a restore is one indeterminate wait that
+the window shows as busy. The window owns it, not the page: the deleted-sessions view confirms and
+picks the capture on the GUI thread, then asks upward. A refusal (a missing archive, no capture row)
+arrives through `done`, not `failed`: it is a normal answer, not a worker failure.
 
 ## Invariants (see also CLAUDE.md and DECISIONS.md)
 

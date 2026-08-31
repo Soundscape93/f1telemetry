@@ -7,33 +7,60 @@ from __future__ import annotations
 from types import SimpleNamespace
 import unittest
 
-from f1telemetry.src.protocol.enums import Formula, PacketId, ResultStatus, SessionType, Weather
-from f1telemetry.src.session.assembler import assemble
+from f1telemetry.src.protocol.enums import (
+    DriverStatus,
+    Formula,
+    PacketId,
+    PitStatus,
+    ResultStatus,
+    SafetyCarStatus,
+    SessionType,
+    Weather
+)
+from f1telemetry.src.session.assembler import (
+    _MAX_LAP_START_DISTANCE_M, 
+    _WEATHER_SETTLE_S,
+    assemble
+)
 
 
-def _hdr(pid, uid, frame=0, player=0):
+def _hdr(pid, uid, frame=0, player=0, session_time=0.0):
     """Build a fake packet header for testing."""
     return SimpleNamespace(packet_id=pid, session_uid=uid, frame_identifier=frame,
-                           packet_format=2025, player_car_index=player)
+                           packet_format=2025, player_car_index=player,
+                           session_time=session_time)
 
 
-def _car_lap(lap_num, distance):
+def _car_lap(lap_num, distance, driver_status=DriverStatus.ON_TRACK,
+             pit_status=PitStatus.NONE, pit_lane_timer_active=0):
     """A minimal Lap Data entry for the player's car. Carries the classification-fallback fields
     (position/grid/stops/penalties/status) that reconstruct_classification reads when a stream has
-    no Final Classification packet - as these assembler streams don't."""
+    no Final Classification packet - as these assembler streams don't.
+
+    The lap-state fields default to a plain racing lap, so every stream that isn't about them reads
+    as one; ``frames`` passes them through for the ones that are.
+    """
     return SimpleNamespace(current_lap_num=lap_num, lap_distance=distance,
                            car_position=1, grid_position=1, num_pit_stops=0,
-                           penalties=0, result_status=int(ResultStatus.FINISHED))
+                           penalties=0, result_status=int(ResultStatus.FINISHED),
+                           driver_status=int(driver_status), pit_status=int(pit_status),
+                           pit_lane_timer_active=pit_lane_timer_active)
 
 
-def session_pkt(uid, stype=SessionType.RACE, laps=5):
-    """Build a fake session packet for testing."""
+def session_pkt(uid, stype=SessionType.RACE, laps=5, safety_car=SafetyCarStatus.NONE,
+                red_flag_periods=0, weather=Weather.CLEAR, session_time=10.0):
+    """Build a fake session packet for testing.
+
+    ``session_time`` defaults past ``_WEATHER_SETTLE_S`` so the default packet reads as a
+    settled session; the weather tests pass times inside the window on purpose.
+    """
     return SimpleNamespace(
-        header=_hdr(PacketId.SESSION, uid),
+        header=_hdr(PacketId.SESSION, uid, session_time=session_time),
         season_link_identifier=uid, weekend_link_identifier=uid, session_link_identifier=uid,
         track_id=7, session_type=int(stype), formula=int(Formula.F1_MODERN),
-        weather=int(Weather.CLEAR), game_mode=28, total_laps=laps,
+        weather=int(weather), game_mode=28, total_laps=laps, ai_difficulty=95,
         num_sessions_in_weekend=0, weekend_structure=[0] * 12,
+        safety_car_status=int(safety_car), num_red_flag_periods=red_flag_periods,
         track_length=5000.0, sector_2_lap_distance_start=1500.0, sector_3_lap_distance_start=3000.0,)
 
 
@@ -74,16 +101,24 @@ def sh_pkt(uid, entries, player=0, best_lap_num=0, car_idx=None):
 
 
 _frame = [0]
-def frames(uid, lap_num, distances, player=0):
+def frames(uid, lap_num, distances, player=0, driver_status=DriverStatus.ON_TRACK,
+           pit_status=PitStatus.NONE, pit_lane_timer_active=0, speed=200):
     """Build a sequence of fake Lap Data + Car Telemetry packets for testing.
     Each distance in `distances` is a separate frame, and the frame identifier is incremented for each frame.
-    The lap number is constant for all frames, and the session UID is constant"""
+    The lap number is constant for all frames, and the session UID is constant.
+
+    The lap-state arguments apply to every frame of the call, so a lap made of several ``frames``
+    calls can change state part-way through - which is how a real in-lap or out-lap reads.
+    ``speed`` matters whenever a lap number carries more than one pass: the assembler picks the
+    timed run by integrating distance/speed, so a pit-lane run has to be *slow* or it competes with
+    the flying lap on distance alone."""
     out = []
     for d in distances:
         _frame[0] += 1
         f = _frame[0]
         out.append(SimpleNamespace(header=_hdr(PacketId.LAP_DATA, uid, frame=f, player=player),
-                                   lap_data=[_car_lap(lap_num, d)]))
+                                   lap_data=[_car_lap(lap_num, d, driver_status, pit_status,
+                                                      pit_lane_timer_active)]))
         out.append(SimpleNamespace(header=_hdr(PacketId.CAR_TELEMETRY, uid, frame=f, player=player),
                                    car_telemetry_data=[SimpleNamespace(
                                        speed=200, throttle=1.0, brake=0.0, steer=0.0,
@@ -234,16 +269,52 @@ class InLapDroppedTest(unittest.TestCase):
 
 
 class DistanceGuardTest(unittest.TestCase):
-    """A lap that starts far from the line is not emitted, even if Session History has a time for it,"""
+    """The guard that keeps a mid-lap join out of the results, and what it must not catch."""
+
     def test_lap_starting_far_from_line_is_not_emitted(self):
-        """The first lap starts far from the line, so it is not emitted, even though Session History has a time for it."""
+        """A lap joined well past the line is dropped, even though Session History has a time for it.
+
+        Derived from the constant rather than pinned to a number: a fixture sitting on the exact
+        threshold is how a later widening of the bound went unnoticed.
+        """
         stream = [session_pkt(1), participants_pkt(1)]
-        stream += frames(1, 1, [250, 1500, 3000])
+        stream += frames(1, 1, [_MAX_LAP_START_DISTANCE_M + 100, 1500, 3000])
         stream += frames(1, 2, [5, 1500, 3000])           # trailing, starts near line
         stream.append(sh_pkt(1, [_lap_entry(90000, 0x0F),
                                  _lap_entry(85000, 0x0F)]))
         (race,) = list(assemble(stream))
         self.assertEqual([l.lap_number for l in race.laps], [2])
+
+    def test_a_standing_start_from_a_distant_grid_slot_is_kept(self):
+        """A race's lap 1 begins at its grid slot, which can sit a long way past the timing line.
+
+        The bound is set by pole, not by the back of the grid: the grid queues *backwards* from P1
+        towards the line, so a slot further down sits nearer to it — and on a circuit where pole is
+        already close, the lower slots fall behind the line entirely and their lap 1 starts from a
+        few metres, well inside the guard. So the deepest case on the calendar is P1 at COTA, about
+        323 m. Measured here: Jeddah 246.5 m, Shanghai 175.7 m.
+
+        These are real opening laps, not mid-lap joins, and a bound that clips them loses the race
+        start silently — the session simply has no lap 1.
+        """
+        for start_m in (175.7, 246.5, 323.0):
+            with self.subTest(grid_slot_m=start_m):
+                stream = [session_pkt(1), participants_pkt(1)]
+                stream += frames(1, 1, [start_m, 1500, 3000])
+                stream += frames(1, 2, [5, 1500, 3000])
+                stream.append(sh_pkt(1, [_lap_entry(90000, 0x0F),
+                                         _lap_entry(85000, 0x0F)]))
+                (race,) = list(assemble(stream))
+                self.assertEqual([l.lap_number for l in race.laps], [1, 2])
+
+    def test_the_bound_clears_the_deepest_known_grid_slot(self):
+        """COTA's pole slot is the furthest past the line on the calendar, about 323 m.
+
+        Pinned because the reason for the number is circuit geometry, not anything visible in the
+        code — so a later tightening that looks harmless would go back to dropping race starts with
+        nothing to say so.
+        """
+        self.assertGreater(_MAX_LAP_START_DISTANCE_M, 323)
 
 
 class TimingDetailTest(unittest.TestCase):
@@ -365,6 +436,324 @@ class TyreContextTest(unittest.TestCase):
         self.assertFalse(lap1.damage.engine_blown)
         self.assertEqual(lap1.damage.brake_temp, (300, 300, 300, 300))
         self.assertEqual(lap1.damage.engine_temp, 110)
+
+
+class LapContextTest(unittest.TestCase):
+    """What the assembler reads out of Lap Data about the state the car was in.
+
+    Every stream here is shaped like a real one: ``current_lap_num`` only advances when the line is
+    crossed at the end of a *timed* lap, so an in-lap, a garage stop and the out-lap that follows
+    all carry the lap number of the flying lap they lead into. That is why the garage frames of a
+    practice run sit in the buffer of the lap they precede, and it is what the boundary flag reads.
+    """
+
+    def _practice_run_boundary(self):
+        """P1: a flying lap, then in-lap + garage + out-lap under lap 2's number, then lap 2."""
+        return [
+            session_pkt(1, stype=SessionType.PRACTICE_1),
+            participants_pkt(1),
+            *frames(1, 1, [0, 2500, 5200], driver_status=DriverStatus.FLYING_LAP),
+            # The counter does not advance at the line when the car is on an in-lap, in the pit
+            # lane, or on an out-lap - so all three carry lap 2's number, ahead of lap 2's own run.
+            *frames(1, 2, [5400, 5600], driver_status=DriverStatus.IN_LAP,
+                    pit_status=PitStatus.PITTING, speed=60),
+            *frames(1, 2, [220, 225], driver_status=DriverStatus.IN_GARAGE,
+                    pit_status=PitStatus.PITTING, speed=60),
+            *frames(1, 2, [280, 3000, 5600], driver_status=DriverStatus.OUT_LAP, speed=60),
+            *frames(1, 2, [0, 2500, 5200], driver_status=DriverStatus.FLYING_LAP),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(91000, 15)]),
+        ]
+
+    def test_a_garage_visit_between_two_emitted_laps_is_flagged_on_the_later_one(self):
+        result = next(assemble(self._practice_run_boundary()))
+        by_number = {lap.lap_number: lap for lap in result.laps}
+        self.assertEqual(sorted(by_number), [1, 2])
+        self.assertFalse(by_number[1].preceded_by_garage)
+        self.assertTrue(by_number[2].preceded_by_garage)
+
+    def test_the_timed_lap_of_a_practice_run_is_a_flying_lap_not_an_in_or_out_lap(self):
+        """The lap the driver pits on is never timed, so it is never emitted - measured across
+        every capture here, where all 159 non-race laps read FLYING end to end."""
+        result = next(assemble(self._practice_run_boundary()))
+        for lap in result.laps:
+            with self.subTest(lap=lap.lap_number):
+                self.assertEqual(lap.driver_status, int(DriverStatus.FLYING_LAP))
+                self.assertFalse(lap.is_out_lap)
+                self.assertFalse(lap.is_in_lap)
+
+    def test_a_normal_lap_to_lap_transition_flags_nothing(self):
+        stream = [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0, 2500, 5000]),
+            *frames(1, 2, [0, 2500, 5000]),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(89000, 15)]),
+        ]
+        result = next(assemble(stream))
+        for lap in result.laps:
+            with self.subTest(lap=lap.lap_number):
+                self.assertFalse(lap.preceded_by_garage)
+                self.assertFalse(lap.is_out_lap)
+                self.assertFalse(lap.is_in_lap)
+                self.assertEqual(lap.driver_status, int(DriverStatus.ON_TRACK))
+                self.assertEqual(lap.pit_status, int(PitStatus.NONE))
+
+    def test_a_race_pit_stop_flags_the_in_lap_and_the_out_lap_from_the_pit_lane_timer(self):
+        """Lap 1 enters the pit lane before the line; lap 2 leaves it after. The stop itself is on
+        lap 2 (``pit_status`` reaches IN_PIT_AREA), which is where the pit loss lands here."""
+        stream = [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0, 2500, 4800]),
+            *frames(1, 1, [5000, 5200], driver_status=DriverStatus.IN_LAP,
+                    pit_status=PitStatus.PITTING, pit_lane_timer_active=1),
+            *frames(1, 2, [10, 200], driver_status=DriverStatus.IN_LAP,
+                    pit_status=PitStatus.IN_PIT_AREA, pit_lane_timer_active=1),
+            *frames(1, 2, [300, 2500, 5000], driver_status=DriverStatus.OUT_LAP),
+            *frames(1, 3, [0, 2500, 5000]),
+            sh_pkt(1, [_lap_entry(92000, 15), _lap_entry(115000, 15), _lap_entry(89000, 15)]),
+        ]
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertTrue(by_number[1].is_in_lap)
+        self.assertFalse(by_number[1].is_out_lap)
+        self.assertTrue(by_number[2].is_out_lap)
+        self.assertEqual(by_number[2].pit_status, int(PitStatus.IN_PIT_AREA))
+        self.assertFalse(by_number[3].is_out_lap)
+        # A race never reports the garage - the game says IN_PIT_AREA for a stop and keeps
+        # IN_GARAGE for the garage proper, so this stays an *extra* run boundary, not a replacement.
+        self.assertFalse(by_number[2].preceded_by_garage)
+
+    def test_a_red_flag_restart_is_not_an_out_lap_however_the_status_reads(self):
+        """Shanghai sprint lap 4 and Shanghai race lap 13, the two laps this rule turns on.
+
+        After a red flag the game does not time the lap that drives out of the pit lane to the
+        grid, so ``driver_status`` still reads OUT_LAP for 94-95% of the lap it *does* time - and
+        that lap is a standing start from the grid box. The lane timer, which never ran, is right
+        and the status is stale. ``lap_context`` marks the restart from ``red_flagged``.
+        """
+        stream = [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0, 2500, 5000]),
+            *frames(1, 2, [0, 1000, 2000, 3000], driver_status=DriverStatus.OUT_LAP),
+            *frames(1, 2, [4000], driver_status=DriverStatus.ON_TRACK),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(99000, 15)]),
+        ]
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertFalse(by_number[2].is_out_lap)
+        self.assertFalse(by_number[1].is_out_lap)
+        # the raw status is still stored, so nothing is lost by not acting on it here
+        self.assertEqual(by_number[2].driver_status, int(DriverStatus.OUT_LAP))
+
+    def test_only_the_lane_timer_makes_an_out_lap(self):
+        """The same frames, with the lane timer running at the line: now it is an out-lap.
+
+        Across all 470 emitted laps in this database the timer flags 15 and misses none - every
+        real pit-lane exit carries a pit stop too.
+        """
+        stream = [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0, 2500, 5000]),
+            *frames(1, 2, [0, 1000], driver_status=DriverStatus.OUT_LAP,
+                    pit_status=PitStatus.IN_PIT_AREA, pit_lane_timer_active=1),
+            *frames(1, 2, [2000, 3000, 4000], driver_status=DriverStatus.ON_TRACK),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(99000, 15)]),
+        ]
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertTrue(by_number[2].is_out_lap)
+
+    def test_one_stale_out_lap_frame_does_not_label_the_lap_after_an_out_lap(self):
+        """Sakhir race lap 15 and Shanghai race lap 11 each carry exactly one stale OUT_LAP frame.
+
+        Nothing reads ``driver_status`` for the out-lap flag any more, so this cannot mislabel
+        them - the test stays as the guard that it does not come back.
+        """
+        stream = [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0], driver_status=DriverStatus.OUT_LAP),
+            *frames(1, 1, [1000, 2000, 3000, 4000, 5000]),
+            sh_pkt(1, [_lap_entry(90000, 15)]),
+        ]
+        self.assertFalse(next(assemble(stream)).laps[0].is_out_lap)
+
+    def test_a_session_whose_garage_frames_were_never_emitted_flags_nothing(self):
+        """The garage sits in a buffer of its own that never became a lap - the trailing "driver
+        parked at the end of the session" case. Nothing is invented for the laps that did emit."""
+        stream = [
+            session_pkt(1, stype=SessionType.PRACTICE_1), participants_pkt(1),
+            *frames(1, 1, [0, 2500, 5000], driver_status=DriverStatus.FLYING_LAP),
+            *frames(1, 2, [0, 2500, 5000], driver_status=DriverStatus.FLYING_LAP),
+            *frames(1, 3, [100, 105], driver_status=DriverStatus.IN_GARAGE),   # no lap 3 time
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(89500, 15), _lap_entry(0, 15)]),
+        ]
+        result = next(assemble(stream))
+        self.assertEqual([lap.lap_number for lap in result.laps], [1, 2])
+        self.assertFalse(any(lap.preceded_by_garage for lap in result.laps))
+
+    def test_laps_from_a_stream_with_lap_data_always_carry_context(self):
+        """``has_lap_context`` is what the charts test to choose stored truth over inference, so
+        every lap the assembler emits has to satisfy it."""
+        stream = [session_pkt(1), participants_pkt(1),
+                  *frames(1, 1, [0, 2500, 5000]), sh_pkt(1, [_lap_entry(90000, 15)])]
+        self.assertTrue(next(assemble(stream)).laps[0].has_lap_context)
+
+
+class RaceControlTest(unittest.TestCase):
+    """Safety car and red flag: session-wide state, attributed to the lap that was in progress."""
+
+    def _stream(self, during_lap_two):
+        """A two-lap race, with Session packets arriving *inside* each lap as the game sends them.
+
+        The interleaving is the test as much as the assertion is: race control is attributed to the
+        lap the frame join is filling, so a Session packet that lands between the last frame of one
+        lap and the first frame of the next belongs to the earlier lap - the car has not crossed the
+        line yet. Putting them mid-lap is what a real stream looks like at the game's 2 Hz.
+        """
+        return [
+            session_pkt(1), participants_pkt(1),
+            *frames(1, 1, [0, 2500]),
+            session_pkt(1),                             # mid lap 1: nothing happening
+            *frames(1, 1, [5000]),
+            *frames(1, 2, [0]),
+            during_lap_two,                             # mid lap 2
+            *frames(1, 2, [2500, 5000]),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(130000, 15)]),
+        ]
+
+    def test_the_safety_car_lands_on_the_lap_it_was_deployed_in(self):
+        stream = self._stream(session_pkt(1, safety_car=SafetyCarStatus.FULL))
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertEqual(by_number[1].safety_car, int(SafetyCarStatus.NONE))
+        self.assertEqual(by_number[2].safety_car, int(SafetyCarStatus.FULL))
+
+    def test_a_deployment_beats_the_formation_lap_and_survives_going_green(self):
+        """Race lap 1 sees the formation lap and then green; a lap that sees FULL and then green
+        is still a safety-car lap. Whichever arrives second must not overwrite the deployment."""
+        stream = [
+            session_pkt(1, safety_car=SafetyCarStatus.FORMATION_LAP), participants_pkt(1),
+            *frames(1, 1, [0]),
+            session_pkt(1, safety_car=SafetyCarStatus.FORMATION_LAP),
+            *frames(1, 1, [2500]),
+            session_pkt(1, safety_car=SafetyCarStatus.NONE),     # green, still lap 1
+            *frames(1, 1, [5000]),
+            *frames(1, 2, [0]),
+            session_pkt(1, safety_car=SafetyCarStatus.FULL),
+            *frames(1, 2, [2500]),
+            session_pkt(1, safety_car=SafetyCarStatus.NONE),     # returned, still lap 2
+            *frames(1, 2, [5000]),
+            sh_pkt(1, [_lap_entry(95000, 15), _lap_entry(130000, 15)]),
+        ]
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertEqual(by_number[1].safety_car, int(SafetyCarStatus.FORMATION_LAP))
+        self.assertEqual(by_number[2].safety_car, int(SafetyCarStatus.FULL))
+
+    def test_a_red_flag_is_the_counter_rising_not_the_counter_being_set(self):
+        """The Shanghai sprint's ``num_red_flag_periods`` went 0 -> 1 on lap 2 and back to 0 on lap
+        10, so only the rise can be trusted - reading the value would flag the whole restart."""
+        stream = self._stream(session_pkt(1, red_flag_periods=1))
+        by_number = {lap.lap_number: lap for lap in next(assemble(stream)).laps}
+        self.assertFalse(by_number[1].red_flagged)
+        self.assertTrue(by_number[2].red_flagged)
+
+    def test_a_counter_that_falls_again_flags_nothing_further(self):
+        stream = [
+            session_pkt(1, red_flag_periods=1), participants_pkt(1),
+            *frames(1, 1, [0]),
+            session_pkt(1, red_flag_periods=1),
+            *frames(1, 1, [2500, 5000]),
+            *frames(1, 2, [0]),
+            session_pkt(1, red_flag_periods=0),         # falls back - not a second red flag
+            *frames(1, 2, [2500, 5000]),
+            sh_pkt(1, [_lap_entry(90000, 15), _lap_entry(91000, 15)]),
+        ]
+        self.assertFalse(any(lap.red_flagged for lap in next(assemble(stream)).laps))
+
+    def test_a_clean_race_flags_neither(self):
+        result = next(assemble(self._stream(session_pkt(1))))
+        for lap in result.laps:
+            with self.subTest(lap=lap.lap_number):
+                self.assertEqual(lap.safety_car, int(SafetyCarStatus.NONE))
+                self.assertFalse(lap.red_flagged)
+
+
+class SessionWeatherTest(unittest.TestCase):
+    """The set of conditions a session ran through, accumulated from its Session packets (E14).
+
+    The scenarios are the measured ones, not invented: the shapes here are the ones the 33
+    captures in this database actually contain - see TELEMETRY_NOTES -> "What the weather field
+    reports". The packets themselves are synthetic, as every assembler test's are.
+    """
+
+    def _stream(self, *session_packets):
+        """A one-lap race whose Session packets are whatever the test hands in."""
+        return [*session_packets, participants_pkt(1),
+                *frames(1, 1, [0, 2500, 5000]),
+                sh_pkt(1, [_lap_entry(90000, 15)])]
+
+    def test_one_condition_yields_one_entry(self):
+        (race,) = list(assemble(self._stream(session_pkt(1, weather=Weather.OVERCAST))))
+        self.assertEqual(race.weather_seen, (Weather.OVERCAST,))
+        self.assertEqual(race.weather, Weather.OVERCAST)
+        self.assertFalse(race.is_mixed_weather)
+
+    def test_distinct_conditions_accumulate_in_first_seen_order(self):
+        """Shanghai P1 (20260705_132157): cloud, overcast, cloud again, overcast, rain, overcast.
+
+        A condition the session returns to is not recorded twice - this is a set, in the order it
+        was first seen, and the repeat is what a timeline would keep and this deliberately doesn't.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=300.0),
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=1400.0),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=2200.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=3400.0))))
+        self.assertEqual(
+            race.weather_seen,
+            (Weather.LIGHT_CLOUD, Weather.OVERCAST, Weather.LIGHT_RAIN))
+        self.assertTrue(race.is_mixed_weather)
+
+    def test_the_snapshot_still_says_which_condition_it_ended_in(self):
+        """Mixed is an *additional* fact. The end-of-session value is untouched by it."""
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=200.0))))
+        self.assertTrue(race.is_mixed_weather)
+        self.assertEqual(race.weather, Weather.OVERCAST)
+
+    def test_the_opening_seconds_are_skipped(self):
+        """Melbourne Q1 (20260704_181644): CLEAR for four packets, then rain for eighteen minutes.
+
+        The regression this guard exists for. Without it that session reads as mixed on the
+        strength of 1.5 seconds in which the game had not finished setting the session up.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.CLEAR, session_time=0.0),
+            session_pkt(1, weather=Weather.CLEAR, session_time=1.5),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=2.0 + _WEATHER_SETTLE_S),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=1080.0))))
+        self.assertEqual(race.weather_seen, (Weather.LIGHT_RAIN,))
+        self.assertFalse(race.is_mixed_weather)
+
+    def test_a_short_stretch_past_the_window_still_counts(self):
+        """Suzuka P1 (20260718_212648): rain for the last 59 seconds of the hour, 18 packets.
+
+        The window is a *settling* window, not a dwell. A real change is kept however brief - and
+        it has to be, because the game fast-forwards the session clock in the garage, so a genuine
+        38-second stretch can arrive as four packets.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.LIGHT_CLOUD, session_time=10.0),
+            session_pkt(1, weather=Weather.OVERCAST, session_time=1100.0),
+            session_pkt(1, weather=Weather.LIGHT_RAIN, session_time=3541.6))))
+        self.assertEqual(race.weather_seen[-1], Weather.LIGHT_RAIN)
+        self.assertTrue(race.is_mixed_weather)
+
+    def test_a_capture_holding_only_the_opening_seconds_records_no_set(self):
+        """Nothing survives the window, so the set is empty - "not captured", never "not mixed"."""
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, weather=Weather.CLEAR, session_time=0.0),
+            session_pkt(1, weather=Weather.CLEAR, session_time=1.5))))
+        self.assertEqual(race.weather_seen, ())
+        self.assertEqual(race.weather, Weather.CLEAR)       # the snapshot is still there
+        self.assertFalse(race.is_mixed_weather)
 
 
 class MotionChannelsTest(unittest.TestCase):

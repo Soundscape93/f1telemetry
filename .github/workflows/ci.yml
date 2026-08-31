@@ -8,9 +8,15 @@ on:
     # already-open PR.
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
+# A hung or superseded run must not sit on a runner while you push a fix.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out into a folder named f1telemetry
         uses: actions/checkout@v4
@@ -21,10 +27,14 @@ jobs:
           python-version: "3.14"
       - name: Install
         working-directory: f1telemetry
+        timeout-minutes: 8
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1
+          # PySide6's QtGui links libEGL.so.1 at import time, so even the offscreen suite needs it.
+          # The helper no-ops when the runner image already ships it, which takes the most
+          # frequently run job in the repo off the Ubuntu mirrors entirely.
+          bash .github/scripts/apt-install.sh libegl1
       - name: Version files agree
         working-directory: f1telemetry
         run: python packaging/check_version.py
@@ -41,6 +51,7 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'minor') ||
        contains(github.event.pull_request.labels.*.name, 'patch'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +74,7 @@ jobs:
   source-branch:
     if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Only staging may merge to main
         env:
@@ -74,15 +86,18 @@ jobs:
           fi
   # The guide PDF used to build only during a release, so one missing TeX package took a release
   # down with the tag already pushed. Building it here costs ~2 min (nearly all apt) and fails on
-  # the PR instead. Keep the two steps in sync with release.yml's guide-pdf job.
+  # the PR instead. This job mirrors release.yml's guide-pdf: same apt set, same pandoc calls, both
+  # PDFs. NOTICE.pdf was missing here until now - so a NOTICE.md change that broke the PDF passed
+  # every PR check and failed the release AFTER tag.yml had already pushed the tag.
   guide-pdf:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install pandoc + xelatex
+        timeout-minutes: 12
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash .github/scripts/apt-install.sh \
             pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu
       - name: Build USER_GUIDE.pdf
         run: |
@@ -93,7 +108,19 @@ jobs:
             -V mainfont="DejaVu Serif" \
             -V monofont="DejaVu Sans Mono" \
             -V colorlinks=true
+      - name: Build NOTICE.pdf          # keeps this job honest against release.yml's guide-pdf
+        run: |
+          pandoc NOTICE.md -o NOTICE.pdf \
+            --pdf-engine=xelatex \
+            -V geometry:margin=2.5cm \
+            -V mainfont="DejaVu Serif" \
+            -V monofont="DejaVu Sans Mono" \
+            -V colorlinks=true
       - uses: actions/upload-artifact@v4      # download it from the PR to eyeball the arrows
         with:
           name: user-guide-pdf-preview
           path: USER_GUIDE.pdf
+      - uses: actions/upload-artifact@v4      # download the NOTICE.pdf from the PR
+        with:
+          name: notice-pdf-preview
+          path: NOTICE.pdf

@@ -249,6 +249,7 @@ def normalize_session(packet: "PacketSessionData") -> SessionResult:
         total_laps=packet.total_laps,
         game_mode=packet.game_mode,
         player_vehicle_index=header.player_car_index,
+        ai_difficulty=packet.ai_difficulty,
         weekend_structure=tuple(packet.weekend_structure[:packet.num_sessions_in_weekend]),
         track_length_m=packet.track_length,
         sector2_start_m=packet.sector_2_lap_distance_start,
@@ -275,6 +276,13 @@ class Sample(NamedTuple):
     g_long: float = float('nan')
     fuel: float = float('nan')      # Car Status fuel_in_tank (kg); a lap-start scaler, NOT a trace channel
 
+    # Lap Data's own account of what the car was doint this frame. Lap-state scalars like ``fuel``,
+    # not trace channels - the assembler reduces them to one value per lap once it knows which run
+    # was the timed lap (session/assembler.py -> _build_laps). Raw ints, per core invariant #9.
+    driver_status: int = -1             # DriverStatus -1 = no Lap Data frame carried one
+    pit_status: int = 0                 # PitStatus: 0 none, 1 pitting, 2 in the pit area (the stop)
+    pit_lane_timer_active: int = 0      # 1 while the car is in the pit lane and the lane timer runs
+
 
 def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> Sample:
     """Combine one frame's player rows into a single trace sample.
@@ -284,6 +292,10 @@ def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> S
     zeros when omitted). `motion` is the normalized ``MotionSample`` for the frame -
     position + g-force - or None (older streams / no Motion), in which case those channels are
     NaN placeholders.
+
+    ``driver_status`` / ``pit_status`` / ``pit_lane_timer_active`` come straight off Lap Data and
+    are **not** format-branched: both wire structs name them identically, so there is nothing here
+    for 2025 and 2026 to disagree about (the same reason ``ai_difficulty`` needed no branch).
     """
     if car_status is not None:
         ers_store_energy = car_status.ers_store_energy
@@ -312,7 +324,10 @@ def telemetry_sample(lap_data, car_telemetry, car_status=None, motion=None) -> S
         pos_z=pos_z,
         g_lat=g_lat,
         g_long=g_long,
-        fuel=fuel
+        fuel=fuel,
+        driver_status=lap_data.driver_status,
+        pit_status=lap_data.pit_status,
+        pit_lane_timer_active=lap_data.pit_lane_timer_active,
     )
 
 

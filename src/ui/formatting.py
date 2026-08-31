@@ -15,8 +15,9 @@ so they line up with the classification order.
 
 from __future__ import annotations
 
-from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType
-from ..protocol.reference import team_display_name
+from ..pipeline import RestoreProblem
+from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType, Weather
+from ..protocol.reference import game_mode_name, team_display_name, track_name
 
 # Position-change glyphs (race Pos cell): filled triangles read closer to the game than
 # the arrowhead code points, and bold cleanly. Em dash = no change / unknown grid.
@@ -40,6 +41,15 @@ _STATUS_LABELS = {
     ResultStatus.DISQUALIFIED: "DSQ",
     ResultStatus.NOT_CLASSIFIED: "NC",
     ResultStatus.INACTIVE: "DNS"
+}
+
+_WEATHER_LABELS = {
+    Weather.CLEAR: "Clear",
+    Weather.LIGHT_CLOUD: "Light cloud",
+    Weather.OVERCAST: "Overcast",
+    Weather.LIGHT_RAIN: "Light rain",
+    Weather.HEAVY_RAIN: "Heavy rain",
+    Weather.STORM: "Storm"
 }
 
 
@@ -76,11 +86,25 @@ def estimate_points(position: int, result_status: ResultStatus, is_sprint_race: 
 def slot_label(session_type, is_sprint_race: bool = False) -> str:
     """Return prettified session-type name, e.g. RACE -> Race.
 
-    ``is_sprint_race`` overrides the RACE label to "Sprint Race" - both report SessionType.RACE,
-    so only the weekend context (see domain.season.weekend_slots) can tell them apart.
+    Two race-shaped corrections, both display-only:
+
+    ``is_sprint_race`` overrides the label to "Sprint Race". Only weekend context can decide it
+    (``domain.season.weekend_slots``), so a caller with no weekend - the deleted-sessions manager -
+    cannot pass it, and a deleted sprint reads as "Race" there.
+
+    **Every other race type reads "Race", never "Race 2".** On a sprint weekend the game reports
+    the Sprint as ``RACE`` (15) and the Grand Prix as ``RACE_2`` (16) - verified against this
+    database's ``weekend_structure`` of ``[1, 10, 11, 12, 15, 5, 6, 7, 16]`` - so the raw enum name
+    put "Race 2" on the Grand Prix in every view that labels a session. The weekend's *final* race
+    is the Grand Prix and earlier races are Sprints (core invariant #5), which ``weekend_slots``
+    already resolves by position; the ordinal inside the enum name is not something a user needs.
+    It also makes the number useful where there is no weekend at all: a tombstone reading 16 is a
+    Grand Prix whatever else is unknown about it.
     """
     if is_sprint_race:
         return "Sprint Race"
+    if is_race(session_type):
+        return "Race"
     name = getattr(session_type, "name", None)
     return name.replace("_", " ").title() if name else str(session_type)
 
@@ -233,3 +257,277 @@ def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str
         return None
     return f"{name_of(winner)} / {team_display_name(winner.team_id)}"
 
+
+def weather_label(weather) -> str:
+    """'Clear' / 'Light rain' for a Weather value, tolerant of a raw int from ``safe_enum``.
+    
+    Enums are stored as raw ints (core invariant #9), so a value newer than our enum arrives
+    here as a plain int rather than a member - it must render as something, not crash.
+    """
+    label = _WEATHER_LABELS.get(weather)
+    if label is not None:
+        return label
+    name = getattr(weather, "name", None)
+    return name.replace("_", " ").capitalize() if name else str(weather)
+
+
+def recorded_label(recorded_at) -> str:
+    """Local-time 'YYYY-MM-DD HH:MM' for a session's ``recorded_at``, or an em dash if unset.
+
+    Stored as UTC: a tz-aware value is converted to local time, a naive one (older rows) shown
+    as-is. Shared, because it had already been copied into the laps overview and the weekend
+    page before the sessions surface would have made it a fourth copy.
+    """
+    if recorded_at is None:
+        return "\u2014"
+    if recorded_at.tzinfo is not None:
+        recorded_at = recorded_at.astimezone()
+    return recorded_at.strftime("%Y-%m-%d %H:%M")
+
+
+def session_fastest_lap(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """The session's fastest lap as ``Driver - M:SS.mmm``, or None if unavailable.
+
+    Reads the classification's own ``best_lap_time_ms``, so a caller listing every session stays
+    at one query - no ``LapStore`` hydration, which would also only ever cover the player's car.
+
+    ``0`` means "no time set", not "instant lap", which is why this is a min over the non-zero
+    entries: a plain ``min`` would report a driver who never completed a lap as the fastest of
+    the session. Entries arrive in finishing order, so a tie resolves to the higher-placed
+    driver.
+    """
+    if session.classification is None:
+        return None
+    timed = [e for e in session.classification.entries if e.best_lap_time_ms]
+    if not timed:
+        return None
+    best = min(timed, key=lambda entry: entry.best_lap_time_ms)
+    return f"{name_of(best)} — {format_lap_time(best.best_lap_time_ms)}"
+
+
+def session_leader(session, name_of=lambda entry: entry.driver_name) -> str | None:
+    """The name at the top of the classification, whatever the session type.
+    
+    Every session has one: a race has a winner, and a practice or qualifying session has whoever
+    ended up P1. ``Classification.winner`` is already "the first-place entry" rather than
+    anything race-specific, so this is a thin wrapper over it - what a caller *labels* it is the
+    caller's business. Distinct from :func:`race_winner_summary`, which is races-only and adds
+    the team, and which the seasons detail page still wants.
+    """
+    if session.classification is None:
+        return None
+    leader = session.classification.winner
+    return None if leader is None else name_of(leader)
+
+
+def _player_entry(session):
+    """The player's classification entry, or None.
+    
+    Iterates the entries rather than using ``Classification.player`` so this module keeps working
+    on any object that merely exposes ``entries`` - which is what the unit tests build, and what
+    every other helper already assumes.
+    """
+    entries = session.classification.entries if session.classification else ()
+    return next((entry for entry in entries if entry.is_player), None)
+
+
+def session_best_lap_ms(session) -> int | None:
+    """The fastest lap of the whole session in milliseconds, or None if nobody set one.
+
+    The raw counterpart to :func:`session_fastest_lap`, which formats a driver + time for display.
+    The detail page needs the bare number to decide whether *my* fastest lap is also the
+    session's - i.e. whether it is painted blue or green.
+
+    ``0`` means "no time set", so this is a min over the non-zero entries (see
+    :func:`session_fastest_lap` for why that matters).
+    """
+    entries = session.classification.entries if session.classification else ()
+    timed = [entry.best_lap_time_ms for entry in entries if entry.best_lap_time_ms]
+    return min(timed) if timed else None
+
+
+def player_best_lap_ms(laps) -> int | None:
+    """The fastest of the player's own stored laps in milliseconds, or None if none is timed."""
+    timed = [lap.lap_time_ms for lap in laps if lap.lap_time_ms]
+    return min(timed) if timed else None
+
+
+def lap_gap_label(lap_time_ms: int | None, best_ms: int | None) -> str:
+    """The Laps box's Gap cell: a gap to the driver's own personal best, not the sessions.
+    
+    An em dash for the reference lap itself, for a lap with no time, and when there is no
+    reference. Two laps that tie on the best time both read as the reference - honest, and rare
+    enough not to be worth breaking the tie arbitrarily.
+    """
+    if not lap_time_ms or not best_ms or lap_time_ms == best_ms:
+        return _EM_DASH
+    return format_gap((lap_time_ms - best_ms) / 1000)
+
+
+def player_points_label(session, is_sprint_race: bool = False) -> str | None:
+    """The details grid's points cell - the player's points, or an em dash outside a race.
+
+    **The gate is a correctness fix, not a tidiness one.** The stored value is only meaningful for
+    a race: checked against real captures, ``PRACTICE_1`` player rows carry ``points 25`` and
+    ``QUALIFYING_1`` rows carry ``25`` and ``8``, because the game reports a carried-over
+    championship figure in the Final Classification packet on non-race session types. Printing it
+    would state a number that is simply untrue.
+
+    A **reconstructed** race has no official points, so it shows the same muted ``~N`` estimate the
+    classification table shows rather than a bare ``0`` - the two are on screen together and must
+    not disagree.
+    """
+    if not is_race(session.session_type):
+        return _EM_DASH
+    player = _player_entry(session)
+    if player is None:
+        return _EM_DASH
+    if session.classification is not None and session.classification.is_reconstructed:
+        estimate = estimate_points(player.position, player.result_status, is_sprint_race)
+        return _EM_DASH if estimate is None else f"~{estimate}"
+    return str(player.points)
+
+
+def laps_completed_label(session, stored_laps: int = 0) -> str:
+    """The details grid's laps cell: ``29 / 29`` in a race, a bare count elsewhere.
+
+    A stand-in for on-track overtakes, which are not stored - the game sends them as ``OVTK``
+    Event packets and the assembler never reads Event packets at all (PRIORITIES -> E15). This
+    cell becomes real overtakes once that lands.
+
+    Two data facts shape it. The count comes from the classification's ``num_laps`` rather than
+    from the stored lap rows, because a recording that started late stores fewer laps than were
+    actually driven (real captures show 27 stored against 29 completed). And the ``/ total`` only
+    appears for races: ``total_laps`` is the *race* distance and is meaningless elsewhere - real
+    practice sessions carry ``total_laps 1`` against 7 laps actually run.
+    """
+    player = _player_entry(session)
+    completed = player.num_laps if player is not None and player.num_laps else stored_laps
+    if is_race(session.session_type) and session.total_laps > 0:
+        return f"{completed} / {session.total_laps}"
+    return str(completed)
+
+
+def session_context_label(session, session_label: str) -> str:
+    """The details grid's context cell: team, game mode and session type.
+
+    ``session_label`` is the caller's already-resolved slot label, because only the weekend
+    context can tell a Sprint Race from a Grand Prix (core invariant #5).
+    """
+    bits = []
+    player = _player_entry(session)
+    if player is not None:
+        bits.append(team_display_name(player.team_id))
+    bits.append(game_mode_name(session.game_mode))
+    bits.append(session_label)
+    return "  ·  ".join(bits)
+
+
+# --- the deleted-session manager ------------------------------------------------------------
+
+def format_size(num_bytes: int) -> str:
+    """Bytes as MB/GB - an import moves hundreds of MB, and a capture chooser has to say so.
+
+    Promoted out of ``main_window`` when the restore chooser became its second caller: two copies
+    of one session differ in size before they differ in anything else a person can see.
+    """
+    mb = num_bytes / (1024 * 1024)
+    return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+def deleted_session_cells(deleted) -> tuple[str, str, str, str]:
+    """The deleted-sessions table's four descriptive columns for one tombstone.
+
+    Every field but the uid is nullable - a tombstone written by an older build, or rolled back
+    from a failed restore of a session whose row was already gone, may know nothing else at all -
+    so each column falls back to an em dash instead of inventing a value.
+
+    **The session column cannot say "Sprint Race".** The tombstone carries ``session_type``, and a
+    sprint reports RACE (15) exactly as an ordinary race does; only the weekend the session sat in
+    separates them (core invariant #5), and that is gone with the session. A sprint weekend's Grand
+    Prix *is* recoverable - it reports RACE_2 (16), which ``slot_label`` renders as "Race" - so the
+    limitation is narrower than it looks: it bites type 15 only. The view says so in a tooltip
+    rather than guessing here.
+    """
+    return (
+        _EM_DASH if deleted.session_type is None else slot_label(deleted.session_type),
+        _EM_DASH if deleted.track_id is None else track_name(deleted.track_id),
+        recorded_label(deleted.recorded_at),
+        recorded_label(deleted.deleted_at),
+    )
+
+
+def deleted_capture_label(known_names, found_names) -> str:
+    """The manager's capture column: the file a restore would read, or why there isn't one.
+
+    Three answers, because they mean different things and have different ways out - the same three
+    the session detail page gives for a stored session, in the width a table cell has:
+
+    * **no capture row at all** - pruned, or ingested before capture metadata was recorded. This
+      session can never be restored, and Forget is the only way its row leaves the list.
+    * **rows, but nothing findable** - the file moved or was deleted. Every known name is shown,
+      not a chosen one, so it always matches what a refusal will name, and Help → Find moved
+      captures may bring it back.
+    * **findable** - the file restore would read. Several are counted rather than listed, because
+      the chooser is where they get named properly.
+    """
+    if not known_names:
+        return "not recorded"
+    if not found_names:
+        return f"{', '.join(known_names)}  (archive not found)"
+    if len(found_names) > 1:
+        return f"{found_names[0]}  (+{len(found_names) - 1} more)"
+    return found_names[0]
+
+
+def capture_choice_label(capture) -> str:
+    """One line of the "which recording?" chooser: file, who recorded it, size, when it was read.
+
+    Every field is there because it is something that tells two copies of one session apart: the
+    same session recorded by two league members gives two files of different sizes, and the same
+    file imported twice gives two ingest stamps. ``recorded_by`` is unset for a capture made on
+    this machine as well as for one whose recorder was never recorded, so it says "unknown" rather
+    than claiming either (it is a property of the *file* - E13's, not Sessions').
+    """
+    return "  ·  ".join((
+        capture.file_name,
+        f"recorded by {capture.recorded_by}" if capture.recorded_by else "recorder unknown",
+        format_size(capture.file_size),
+        f"read {recorded_label(capture.ingested_at)}",
+    ))
+
+
+def restore_message(outcome) -> str:
+    """What a finished restore says to the user - one sentence per ``RestoreProblem``.
+
+    The wording lives here, Qt-free and tested, rather than at the call site, because a refusal is
+    a *normal* answer for this job and two of them have to be told apart carefully: a recording
+    whose file has gone missing can be found again, while a session no capture row mentions can
+    never be restored at all and only Forget will clear it. Reading the same in both cases would
+    send someone hunting for a file that was never recorded (E1/E2 plan -> Restore = single-capture
+    re-ingest).
+    """
+    name = outcome.capture_name or "the recording"
+    if outcome.restored:
+        return f"Restored the session from {name}, with its laps and their traces."
+    if outcome.reason is RestoreProblem.ARCHIVE_MISSING:
+        return (f"The recording for this session can't be found ({name}). Restore needs it — try "
+                "Help → Find moved captures, or import it again. The session is still listed as "
+                "deleted.")
+    if outcome.reason is RestoreProblem.NO_CAPTURE_ROW:
+        return ("Nothing in the database records which recording held this session, so it can't "
+                "be restored. Forget removes the row; if you import or re-read that recording "
+                "later, the session comes back on its own.")
+    if outcome.reason is RestoreProblem.AMBIGUOUS_CAPTURE:
+        return ("Several recordings hold this session, so nothing was guessed at — choose one and "
+                "try again.")
+    if outcome.reason is RestoreProblem.NOT_IN_CAPTURE:
+        return (f"{name} turned out not to hold this session after all. Nothing was changed, the "
+                "session is still listed as deleted, and its capture record has been corrected.")
+    if outcome.reason is RestoreProblem.INGEST_FAILED:
+        detail = f" ({outcome.error})" if outcome.error else ""
+        return (f"Reading {name} failed{detail}. Nothing was changed and the session is still "
+                "listed as deleted.")
+    if outcome.reason is RestoreProblem.NOT_DELETED:
+        return "This session isn't deleted — the list was out of date and has been re-read."
+    return "The session could not be restored for an unkown reason."

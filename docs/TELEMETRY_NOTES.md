@@ -196,6 +196,226 @@ single missing lap number bracketed by a slow lap is a red-flag restart and is e
 several consecutive laps missing, usually with the Final Classification gone too, is lost telemetry.
 Only the second one is a bug.
 
+## `tyre_age_laps` is unreliable at the lap boundary — split stints on wear
+
+*Found 2026-08-24 while specifying the E1 tyre-life chart.*
+
+`LapTyreContext.age_laps` comes from Car Status snapshotted as the car crosses the line, and the
+snapshot straddles the game's own increment. Inside a **single** stint the stored sequence looks
+like this (session `11708585…`, laps 1-9, one set of mediums):
+
+    lap 1 age 0 | lap 2 age 2 | lap 3 age 2 | lap 4 age 4 | lap 5 age 4 | lap 6 age 5 …
+
+Age both jumps by 2 and repeats. **Do not derive stint boundaries from it.** A rule of
+"new stint when age does not increment by exactly 1" turns that 27-lap race into **fourteen**
+stints.
+
+**Use cumulative wear instead.** `LapRow.tyre_wear` is monotonically non-decreasing within a stint
+and resets to ~0 on a new set, so a *drop* in wear (or a compound change) is the reliable boundary.
+That rule gives the correct 3 stints for `14435457…` and matches the classification's own
+`tyre_stints`.
+
+Two related traps in the same data:
+
+- **Pit laps leave single-lap artefact stints.** In `11708585…` laps 19-20 are absent and lap 21
+  reports the *old* compound at 49.8% wear — a stale in-lap reading — before lap 22 starts the
+  fresh set. Any stint rule will emit a 1-lap stint there. The E1 chart's "minimum 2 laps per
+  stint" rule drops it without a special case.
+- **Lap numbers are not contiguous.** Plot against lap number, never list index (see also the
+  red-flag note above).
+
+Coverage is good: **406 of 406** stored laps carry `tyre_wear`, `tyre_age_laps` and
+`tyre_visual_compound`.
+
+## What `driver_status` actually reports, and what it does not
+
+*Measured 2026-08-27 across every capture in this database (33 files, 484 emitted laps) while
+implementing E17. The scan replayed each capture through the assembler's own run-splitting, so what
+is described here is what the assembler sees, not what the spec promises.*
+
+**The lap counter only advances at the end of a *timed* lap.** Crossing the line on an in-lap, in
+the pit lane, or on an out-lap does not increment `current_lap_num`. So in practice and qualifying a
+single lap number covers the whole sequence between two timed laps:
+
+    lap 3 | FLYING  100.2 s  -> IN_LAP   (pit entry at 5638 m, line crossed in the pit lane)
+    lap 3 | IN_GARAGE 206 s  -> OUT_LAP  (garage at d=228 m, out-lap from d=267 m)
+    lap 3 | FLYING   93.1 s            <- this is Session History lap 3 (93.219)
+
+Three consequences, all load-bearing:
+
+- **A garage visit is always *before* the timed run of the lap that follows it.** Across all 484
+  emitted laps: 69 have garage frames ahead of the selected run, **none** inside it and **none**
+  after it. Checked separately: no garage sits in a buffer that was never emitted while a later lap
+  was — the only non-emitted garage buffers are trailing ones (the driver parked at the end).
+  This is what `Lap.preceded_by_garage` reads, and it is why the flag is computed at the boundary
+  rather than stored as a raw per-lap status.
+- **The lap on which a driver returns to the pits is never timed in practice or qualifying**, so it
+  is never stored. Every one of the 159 emitted non-race laps here reads `FLYING` end to end — no
+  in-laps, no out-laps, no garage frames inside the lap. Any rule that labels a stored practice lap
+  an in-lap or an out-lap is inventing it.
+- **A race never reports `IN_GARAGE`.** The game says `pit_status = IN_PIT_AREA` for a pit stop and
+  keeps `IN_GARAGE` for the garage proper. So the garage flag is an *additional* run boundary beside
+  wear / age / compound, never a replacement for them.
+
+**`driver_status == IN_LAP` is not "the lap you pitted on".** The game sets it when the *planned*
+in-lap comes up and leaves it set while the driver stays out. Melbourne `14435457…` reads `IN_LAP`
+for the whole of laps 19, 20 **and** 21, and the stop is on 21; Suzuka `267662079…` reads it for its
+last six laps and never pits again. Use `pit_lane_timer_active` instead — active on the lap's last
+frames means the pit lane was entered, active on its first frames means it was left.
+
+**`pit_status == IN_PIT_AREA` marks the lap that carries the stop, and which lap that is depends on
+the circuit.** Where the pit box sits before the timing line (Melbourne, Sakhir) the stationary time
+lands on the **in**-lap: `14435457…` lap 3 runs 119.594 s and lap 4 runs 87.341 s. Where it sits
+after (Suzuka, Shanghai) it lands on the out-lap. Both laps are excluded from a run's average pace
+for that reason.
+
+**A red-flag restart reads as `OUT_LAP` and is not one.** Shanghai sprint `12316788…` lap 4 and
+Shanghai race `10247048…` lap 13 are 94 % and 95 % `OUT_LAP` with the pit-lane timer never active,
+and the first rule written for E17 believed them — "lane timer at the lap's start **or** `OUT_LAP`
+for most of the lap". That was wrong, and this document already said why two sections up (*A red
+flag skips a lap number*): the game does not time the trip from the pit lane back to the grid, so
+the status is left over from a lap that was never emitted, and the lap it lands on is a **standing
+start from the grid box**. Confirmed in-game 2026-08-30.
+
+The corrected rule is one signal: **out-lap is the pit-lane timer running as the lap began, and
+nothing else**. Scanned over all 470 emitted laps in this database (2026-08-30), the timer flags 15
+laps and every one of them also carries a pit stop; `driver_status` flags those same 15 plus exactly
+the two restarts above, and flags nothing the timer misses. The restart is read instead from the lap
+*before* it — `red_flagged` on the previous emitted lap — and classified as a standing start
+(`ui/sessions/lap_context.py` → `_restart_laps`). Only for a session that starts on the grid: a
+practice or qualifying restart really is a pit-lane exit, and the timer catches it.
+
+**Under a red flag the game reports the tyres as good as new.** On the lap the flag falls, wear is
+read while the car is being reset in the pit lane and comes back near zero — Shanghai race lap 11
+reads 1.28 % after lap 10 read 54.65 %, Shanghai sprint lap 2 reads 2.32 % after lap 1 read 6.75 %.
+No set was fitted: `tyre_age_laps` counts straight through both (9 → 10 and 0 → 1), the compound is
+unchanged, and the wear picks up where it left off on the restart lap (5.22 % and 6.79 %). Believing
+it opens a stint in the middle of a run, and the laps stranded in front of it then vanish to the
+minimum-laps filter — which is exactly what the Shanghai sprint's chart did, losing lap 1 entirely
+and putting every remaining lap one place early on the stint axis. So the *wear* boundary alone is
+suppressed on a red-flagged lap; age and compound keep their say, and when Shanghai race really did
+change mediums for hards during its stoppage that boundary still stands.
+
+## Safety car and red flag come from the Session packet, not from Event packets
+
+*Measured 2026-08-27, same scan.* Both are already on a packet the assembler routes, so per-lap
+attribution needs no Event ingest (which is PRIORITIES → E15, and unrelated).
+
+- **Safety car** is `PacketSessionData.safety_car_status`, per frame. Three real deployments exist in
+  this database: `2114813…` (sprint) laps 19-22, `10247048…` laps 11-13, `6912670…` laps 23-26.
+  Attribution is "the state seen while this lap number was current", which is exact for a race — one
+  lap-distance pass per lap number.
+- **The `SCAR` Event packet is worse for this**, which is worth recording because it looks like the
+  obvious source. 59 of them exist and most are noise: `sc_status = 0, event_type = 3` ("Resume
+  Race") fired in practice and qualifying, plus a formation-lap pair at every race start. In
+  `10247048…` the deploy and resume events are 4 seconds apart while the Session field correctly
+  spans three laps.
+- **`FORMATION_LAP` is reported on lap 1 of every race here**, so it is stored honestly and then
+  ignored by the classification — it is not a safety car, and the standing-start rule already
+  accounts for that lap.
+- **Red flag** is a *rise* in `num_red_flag_periods`. Only a rise: the counter is not monotonic —
+  the Shanghai sprint's went 0 → 1 during lap 2 and back to 0 at lap 10 — so reading the value
+  itself would flag every lap of the restart and then stop. **Thin evidence, stated as such:** this
+  database holds exactly two red flags (`12316788…` lap 2, `10247048…` lap 11) and both land on the
+  right lap. Revisit if a third behaves differently.
+
+Both fields are named identically in the 2025 and 2026 wire structs, as are `driver_status`,
+`pit_status` and `pit_lane_timer_active`, so none of this is format-branched.
+
+## What the `weather` field reports, and the settling window at session start
+
+*Measured 2026-08-31 across all 33 captures — 73 sessions, 148,778 Session packets.* This is what
+E14 (mixed dry/wet) is built on, and it is the Session packet's own `weather`, not
+`weatherForecastSamples` (rejected — PRIORITIES → E14 gives the three reasons).
+
+- **18 of 73 sessions report more than one condition; 6 report both a dry and a wet one.** One of
+  those six is the artifact below, so **five sessions genuinely ran dry and wet**: three Melbourne
+  Q2 restarts (`20260704_181644`, LIGHT_RAIN → OVERCAST), Shanghai P1 (`20260705_132157`, twenty
+  minutes of rain mid-session), Suzuka P1 (`20260718_212648`, rain in the last 59 seconds).
+- **No frame-to-frame flicker.** 100 contiguous runs across the 73 sessions, and the only runs of
+  ≤ 2 packets are five *whole sessions* that contain just 1-2 Session packets. Every real change is
+  a step that holds. `weather` does **not** behave the way `driver_status` does.
+- **But the first 3-5 packets of a session are a placeholder.** 8 of 73 sessions open with a run
+  that differs from everything after it and is always settled by **session_time 2.0 s**. In 3 of
+  the 8 those packets carry `num_weather_forecast_samples == 0` — the weather block is not
+  populated yet. It is not the previous session's condition carried over: `…629038` follows a
+  session that ended LIGHT_RAIN and its placeholder reads CLEAR.
+- **It costs exactly one false mixed.** Melbourne Q1 `…629038` reads CLEAR for 1.5 s and then
+  LIGHT_RAIN for the remaining 1,079 s. Under "any two distinct values" that session is mixed.
+- **The dwell must be measured in session-time seconds, never in packets.** The game fast-forwards
+  the session clock while the player sits in the garage, so a *genuine* 38-second wet stretch
+  (`…166502`) arrives as **four packets** — the same length as the placeholder run. A `≥ N packets`
+  rule cannot separate them. In seconds they separate enormously: the placeholder is gone by 2.0 s,
+  the shortest real stretch is 26.4 s. Hence `_WEATHER_SETTLE_S = 3.0` in `session/assembler.py`.
+- **No value outside the 0-5 enum, ever** — 148,778 packets. Observed: CLEAR 91,429 · LIGHT_CLOUD
+  24,229 · OVERCAST 25,874 · LIGHT_RAIN 3,289 · STORM 3,957. **HEAVY_RAIN (4) has never occurred**
+  in any capture here, so nothing about it is measured — only inferred from the appendix.
+- Packets arrive at **2 Hz**, and `session_time` restarts at 0 for each session. A capture that
+  starts mid-session simply begins past the window and loses nothing.
+
+Applied to this database, a re-ingest gives **12 of 56 stored sessions** a multi-condition set, of
+which **3 read as mixed** (`…166502`, `…393137`, `…098367`); the other two real ones are among the
+16 tombstones. A session split across two captures takes the set of whichever is ingested last —
+`save()` replaces by uid, which is pre-existing for every field, and `…398583` is that case here.
+
+## The pit out-lap carries the whole pit loss (+14 to +37 s)
+
+*Measured 2026-08-24 across every 50%-distance race in the database.* The game does not split pit
+time across the in-lap and out-lap: the **first lap of each post-pit stint** absorbs it.
+
+    comp 18  laps 3-20   stintlap1 119.594s   median-rest 82.737s   delta +36.857s
+    comp 18  laps 14-29  stintlap1 112.245s   median-rest 91.487s   delta +20.758s
+    comp 17  laps 22-29  stintlap1 107.636s   median-rest 88.814s   delta +18.822s
+
+This matters for any per-stint pace chart: the interesting degradation signal is **1-3 s**, so an
+auto-scaled y-axis that includes out-laps compresses it to near-invisibility — badly so on a
+stint-relative axis, where every out-lap lands on the same x position. Derive the range from the
+representative laps and let out-laps clip (DECISIONS → UI).
+
+**The race start is not the same case.** Stint 1 lap 1 runs only +2 to +3 s over its stint median,
+and is sometimes *faster* (low fuel, fresh tyres, no pit loss) — so it needs no exclusion.
+
+## Event packets are captured but never parsed
+
+*Found 2026-08-24.* `session/assembler.py` dispatches on ten packet ids; **`PacketId.EVENT` (3) is
+not among them**, so every event the game sends is decoded past. The recorder appends *every*
+datagram unfiltered, so the data is already on disk in every capture ever made.
+
+Decoding one real capture (`20260705_132157.f1cap.gz`, 905 699 packets) gives, by packet id:
+
+    0 MOTION 102238 · 1 SESSION 10238 · 2 LAP_DATA 102266 · 3 EVENT 9629 · 4 PARTICIPANTS 1030
+    5 CAR_SETUPS 10240 · 6 CAR_TELEMETRY 102251 · 7 CAR_STATUS 102233 · 8 FINAL_CLASS 22
+    10 CAR_DAMAGE 51125 · 11 SESSION_HISTORY 102549 · 12 TYRE_SETS 102267 · 13 MOTION_EX 102252
+    15 LAP_POSITIONS 5110 · 16 CAR_TELEMETRY_2 102249
+
+and within those EVENT packets, by event code:
+
+    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10
+    SEND 5 · SSTA 5 · RTMT 5 · LGOT 3 · SCAR 3 · RDFL 1 · CHQF 1
+
+`OVTK` carries the overtaking and overtaken vehicle indices (on-track passes, the real thing — not
+net positions gained). `PENA` carries penalty type, infringement, vehicle index, **lap number** and
+time. Both are what PRIORITIES → **E15** would ingest, and because the packets are already
+captured, **a re-ingest recovers them retroactively — no re-recording**.
+
+Also unparsed and worth knowing about: **`TYRE_SETS` (id 12)**, ~102k packets per capture, which
+carries per-set wear and remaining life directly. The E1 tyre-life chart does not need it (per-lap
+`tyre_wear` is enough), but it is the better source if that chart ever grows.
+
+## Game mode ids: the 2026 career modes are undocumented
+
+*Observed 2026-08-24.* `game_mode 78` is **Driver Career '26** — every "Driver Career with the 2026
+cars" recording carries it, confirmed in the database against the session detail view. It is **not
+in the UDP specification**; EA has not published the '26 mode ids, and `GAME_MODE_NAMES` stops at
+30/75/127, so it currently renders `Unknown game mode (78)`.
+
+- **My Team '26 is still unknown** — no My Team '26 recording exists yet. Capture one, read the
+  value, add it.
+- **Grand Prix Multiplayer "Championship"** (league racing, also on 2026 cars) reports
+  `Online Custom` correctly, so only the *career* mode ids shifted.
+
+Record these as **observed**, not specified — see PRIORITIES → E16.
+
 ## Track ids worth remembering
 Imola is **27** (in the 2025 calendar); Madrid is **42** (new in 2026, replaces Imola in that
 calendar). `official_calendar(year)` encodes the preset order for each.

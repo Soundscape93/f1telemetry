@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -49,6 +50,33 @@ def _setup_to_dict(setup: Setup) -> dict:
 def _setup_from_dict(data: dict) -> Setup:
     """Rebuild a Setup from its stored dict (tyre_pressures list -> tuple)."""
     return Setup(**{**data, "tyre_pressures": tuple(data["tyre_pressures"])})
+
+
+@dataclass(frozen=True)
+class DeletedSession:
+    """One tombstone, described: what the deleted session was, and when it went.
+
+    A read model for the ``deleted_sessions`` table, deliberately **not** a domain object.
+    Nothing below this layer produces or consumes one - no normalizer emits it, no assembler
+    builds it, no analysis reads it. It exists only because rows persist (DECISIONS -> Storage:
+    re-ingesting a capture would otherwise resurrect sessions the user deleted on purpose), so
+    it lives beside the store that reads it, the way ``pipeline`` keeps ``DeleteOutcome`` and
+    ``ReingestSummary`` beside the functions that return them.
+
+    Every field but the uid is nullable: a tombstone written by an older build, or rolled back
+    from a failed restore of a session whose row was already gone, may know nothing but the uid.
+    The deleted-sessions view shows what it has.
+
+    **It cannot tell a Sprint Race from a Grand Prix** - both report ``session_type`` RACE (15)
+    and only ``weekend_structure`` separates them (core invariant #5), which the tombstone does
+    not carry. A deleted sprint therefore reads as "Race".
+    """
+
+    session_uid: int
+    deleted_at: datetime | None = None
+    track_id: int | None = None
+    session_type: SessionType | int | None = None         # raw int for values newer than the enum
+    recorded_at: datetime | None = None
 
 
 class SessionStore:
@@ -91,23 +119,67 @@ class SessionStore:
         results are removed; the underlying capture in ``captures/`` is kept. A tombstone is
         recorded so re-ingesting that capture skips this session rather than resurrecting it
         (see ``DeletedSessionRow`` / ``restore``). Any season assignment for this uid lives in
-        the separate ``season_assignments`` table (no FK) and is not touched here - callers
-        delete only unassigned sessions, so there is nothing to clean up.
+        the separate ``season_assignments`` table (no FK) and is not touched here.
+
+        **This is the primitive, not the guard**: it will happily delete a session that is
+        assigned to a round, and it does not remove the session's laps or traces. Callers go
+        through ``pipeline.delete_session``, which refuses an assigned session and takes the
+        laps with it. This used to claim "callers delete only unassigned sessions, so there is
+        nothing to clean up" - an invariant the UI did not actually keep.
         """
         with self._Session.begin() as db:
             row = db.get(SessionRow, str(session_uid))
             if row is None:
                 return False
-            db.merge(DeletedSessionRow(              # merge -> idempotent if already tombstoned
-                session_uid=row.session_uid,
-                deleted_at=datetime.now(timezone.utc),
-                track_id=row.track_id,
-                session_type=row.session_type,
-                recorded_at=row.recorded_at,
-            ))
+            self._write_tombstone(db, row.session_uid, track_id=row.track_id, 
+                                  session_type=row.session_type, recorded_at=row.recorded_at)
             db.delete(row)                          # cascade removes its entries
             return True
 
+    def tombstone(self, session_uid: int, *, track_id: int | None = None, 
+                  session_type: SessionType | int | None = None,
+                  recorded_at: datetime | None = None,
+                  deleted_at: datetime | None = None) -> None:
+        """Record a tombstone for ``session_uid`` **without requiring a session row**.
+
+        ``delete()`` cannot serve this: it returns False and writes nothing when the row is
+        already gone, which is exactly the state a failed restore has to recover from. Restore
+        clears the tombstone *before* ingesting (``ingest_capture`` reads ``deleted_uids()`` at
+        the start), so an ingest that then fails would leave the uid un-tombstoned with no
+        session row - a half-state where the next full re-ingest silently resurrects a session
+        the user believes is deleted. ``pipeline.restore_session`` rolls back through here.
+
+        Idempotent by uid (a merge), so re-tombstoning an existing tombstone overwrites its
+        descriptive fields rather than failing. ``deleted_at`` defaults to now but is settable
+        precisely so a rollback can put the *original* deletion time back: a failed restore must
+        not re-date the deletion in the deleted-sessions view.
+        """
+        with self._Session.begin() as db:
+            self._write_tombstone(db, str(session_uid), track_id=track_id,
+                                  session_type=session_type, recorded_at=recorded_at,
+                                  deleted_at=deleted_at)
+
+    @staticmethod
+    def _write_tombstone(db, session_uid: str, *, track_id: int | None,
+                         session_type: SessionType | int | None,
+                         recorded_at: datetime | None, 
+                         deleted_at: datetime | None = None) -> None:
+        """Merge one tombstone row inside an already-open transaction.
+
+        Shared by ``delete`` and ``tombstone`` so the two write paths cannot drift. It takes the
+        open ``db`` rather than calling the public method because ``delete`` does its read, merge
+        and remove in a single transaction - opening a second Session on the same SQLite file
+        while the first holds the write lock is a deadlock, not a nested transaction.
+        """
+        db.merge(DeletedSessionRow(
+            session_uid=str(session_uid),
+            deleted_at=deleted_at or datetime.now(timezone.utc),
+            track_id=track_id,
+            # enums are stored as raw ints (core invariant #9); coerced here, in the mapping layer
+            session_type=None if session_type is None else int(session_type),
+            recorded_at=recorded_at,
+        ))
+    
     def deleted_uids(self) -> set[int]:
         """The set of tombstoned session uids - the sessions ingest should skip re-creating."""
         with self._Session.begin() as db:
@@ -117,6 +189,30 @@ class SessionStore:
         """Whether ``session_uid`` is tombstoned (deleted and not restored)."""
         with self._Session.begin() as db:
             return db.get(DeletedSessionRow, str(session_uid)) is not None
+
+    def deleted_sessions(self) -> list[DeletedSession]:
+        """Every tombstone with its descriptive fields, most recently deleted first.
+
+        What ``deleted_uids()`` cannot feed: that returns bare uids for ingest to skip, while the
+        deleted-sessions view has to show *what* each tombstone was - track, type and when it was
+        recorded - without the capture. ``pipeline.restore_session`` reads it too, for the values
+        it must put back if the restore fails.
+        """
+        with self._Session.begin() as db:
+            rows = db.scalars(
+                select(DeletedSessionRow).order_by(DeletedSessionRow.deleted_at.desc())).all()
+            return [
+                DeletedSession(
+                    session_uid=int(row.session_uid),
+                    deleted_at=row.deleted_at,
+                    track_id=row.track_id,
+                    session_type=(None if row.session_type is None 
+                                  else safe_enum(SessionType, row.session_type)),
+                    recorded_at=row.recorded_at,
+                )
+                for row in rows
+            ]
+        
 
     def restore(self, session_uid: int) -> bool:
         """Clear a session's tombstone so its capture can be re-ingested again.
@@ -204,7 +300,9 @@ class SessionStore:
             total_laps=result.total_laps,
             game_mode=result.game_mode,
             player_vehicle_index=result.player_vehicle_index,
+            ai_difficulty=result.ai_difficulty,
             weekend_structure=list(result.weekend_structure),
+            weather_seen=[int(w) for w in result.weather_seen],
             track_length_m=result.track_length_m,
             sector2_start_m=result.sector2_start_m,
             sector3_start_m=result.sector3_start_m,
@@ -271,7 +369,9 @@ class SessionStore:
             total_laps=row.total_laps,
             game_mode=row.game_mode,
             player_vehicle_index=row.player_vehicle_index,
+            ai_difficulty=row.ai_difficulty or 0,
             weekend_structure=tuple(row.weekend_structure or ()),
+            weather_seen=tuple(safe_enum(Weather, w) for w in (row.weather_seen or ())),
             track_length_m=row.track_length_m,
             sector2_start_m=row.sector2_start_m,
             sector3_start_m=row.sector3_start_m,

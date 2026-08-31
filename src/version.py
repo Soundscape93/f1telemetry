@@ -12,9 +12,13 @@ the bump. See docs/PACKAGING.md.
 """
 from __future__ import annotations
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 # Bump only when ingest output changes (see docs/PACKAGING.md "DB migration & pipeline-version").
 # 2: classification entries carry ``is_ai`` (AI vs human), so league standings stop confusing
 # drivers with the same race number
-PIPELINE_VERSION = 2
+# 3: sessions carry ``ai_difficulty`` from the Session packet; rows ingested before this read 0
+# 4: laps carry their context - ``driver_status`` / ``pit_status`` from Lap Data, the computed
+#    garage, out-lap and in-lap flags, and the Session packet's safety-car and red-flag state;
+#    rows ingested before this read None and fall back to the fuel/stint-shape inference
+PIPELINE_VERSION = 4

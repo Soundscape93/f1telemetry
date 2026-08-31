@@ -34,7 +34,8 @@ class LapTraceTest(unittest.TestCase):
 
 class TelemetrySampleTest(unittest.TestCase):
     def test_telemetry_sample_uses_car_status_ers_fields(self) -> None:
-        lap_data = SimpleNamespace(lap_distance=123.4)
+        lap_data = SimpleNamespace(lap_distance=123.4, driver_status=4, pit_status=0,
+                                   pit_lane_timer_active=0)
         car_telemetry = SimpleNamespace(
             speed=245,
             throttle=0.75,
@@ -54,7 +55,8 @@ class TelemetrySampleTest(unittest.TestCase):
         self.assertEqual(sample.fuel, 48.5)
 
     def test_telemetry_sample_defaults_ers_to_zero_without_car_status(self) -> None:
-        lap_data = SimpleNamespace(lap_distance=50.0)
+        lap_data = SimpleNamespace(lap_distance=50.0, driver_status=4, pit_status=0,
+                                   pit_lane_timer_active=0)
         car_telemetry = SimpleNamespace(
             speed=180,
             throttle=0.5,
@@ -83,6 +85,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     session_uid=1,
                     packet_format=2026,
                     player_car_index=0,
+                    session_time=0.0,
                 ),
                 season_link_identifier=10,
                 weekend_link_identifier=20,
@@ -94,6 +97,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                 game_mode=28,
                 total_laps=2,
                 num_sessions_in_weekend=0,
+                ai_difficulty=95,
                 weekend_structure=[0] * 12,
                 track_length=5000.0,
                 sector_2_lap_distance_start=1500.0,
@@ -153,7 +157,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=200,
                     player_car_index=0,
                 ),
-                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=25.0)],
+                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=25.0,
+                                          driver_status=4, pit_status=0,
+                                          pit_lane_timer_active=0)],
             )
         )
         builder.feed(
@@ -209,7 +215,9 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     frame_identifier=201,
                     player_car_index=0,
                 ),
-                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=50.0)],
+                lap_data=[SimpleNamespace(current_lap_num=1, lap_distance=50.0,
+                                          driver_status=4, pit_status=0,
+                                          pit_lane_timer_active=0)],
             )
         )
         builder.feed(

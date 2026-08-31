@@ -31,6 +31,7 @@ jobs:
   # Everything that can reject a bad tag in seconds, before a ~10 minute Windows build.
   preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out into a folder named f1telemetry
         uses: actions/checkout@v4
@@ -60,10 +61,11 @@ jobs:
 
       - name: Install runtime deps (for the test suite)
         working-directory: f1telemetry
+        timeout-minutes: 8
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1
+          bash .github/scripts/apt-install.sh libegl1
 
       - name: Run the test suite
         env:
@@ -82,20 +84,22 @@ jobs:
   # engine must be xelatex with a unicode font (Latin Modern silently drops the arrows).
   guide-pdf:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: preflight
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
       - name: Install pandoc + xelatex
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          # Both extras are only *Recommends* of texlive-xetex, so --no-install-recommends drops
-          # them, and each fails the build with an error naming a font rather than a package:
+          # Both extras are only *Recommends* of texlive-xetex, and the helper always passes
+          # --no-install-recommends, so each must be named here. Each failure names a font, not a
+          # package:
           #   texlive-fonts-recommended -> pzdr.tfm (ZapfDingbats), used by hyperref's xetex driver
           #   lmodern                   -> lmodern.sty, loaded unconditionally by pandoc's template
           # fontspec/unicode-math need no line: texlive-xetex -> -latex-extra -> -latex-recommended.
-          sudo apt-get install -y --no-install-recommends \
+          bash .github/scripts/apt-install.sh \
             pandoc texlive-xetex texlive-fonts-recommended lmodern fonts-dejavu
       - name: Build USER_GUIDE.pdf
         run: |
@@ -129,6 +133,7 @@ jobs:
 
   windows-build:
     runs-on: windows-latest
+    timeout-minutes: 45
     needs: [preflight, guide-pdf]
     steps:
       - name: Check out into a folder named f1telemetry
@@ -254,6 +259,7 @@ jobs:
   # for older distros means an older container, which is not worth it for a best-effort artifact.
   linux-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     needs: [preflight, guide-pdf]
     steps:
       - name: Check out into a folder named f1telemetry
@@ -267,11 +273,12 @@ jobs:
       
       - name: Install the app + PyInstaller
         working-directory: f1telemetry
+        timeout-minutes: 12
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[package]"
           # Qt needs these to link at build time; the runner image does not carry them all.
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1
+          bash .github/scripts/apt-install.sh libegl1 libgl1
       
       - name: Build the one-folder bundle
         working-directory: f1telemetry
@@ -323,6 +330,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [guide-pdf, windows-build, linux-build]
     if: inputs.tag != '' || github.ref_type == 'tag'
     permissions:

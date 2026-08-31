@@ -69,6 +69,31 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
+- **E18 — a fuller "Conditions" read-out: track temperature, air temperature and rain chance.**
+  *Idea recorded 2026-08-31, placement undecided.* E14 made a session's conditions honest about
+  changing between dry and wet, but "conditions" is currently only the weather icon. The Session
+  packet also carries `track_temperature` and `air_temperature` (both °C, `int8`), and each
+  `weatherForecastSample` carries a `rain_percentage` (0-100) alongside its own weather and
+  `time_offset`. None of the three is stored or shown today.
+
+  **The open question is where it belongs, and it is genuinely open**: on the *session* view,
+  beside the weather icon, as the conditions the session ran in; or on the *laps* view, per lap, as
+  the conditions that lap was driven in. They are different features, not two places for one
+  feature — a session-level read-out is a summary and needs the same "it changed" problem E14 just
+  solved for weather (temperatures drift all session, so a single number is the same lie the
+  end-of-session weather snapshot was), while a per-lap read-out is a real channel and is the one
+  that would explain a lap time.
+
+  **The rain percentage is the awkward one.** It is a *forecast* field, so it inherits the caveats
+  that got `weatherForecastSamples` rejected as E14's source (PRIORITIES → E14): the samples are
+  weekend-wide, past offsets roll off as the session runs, and `forecast_accuracy` may mark the
+  whole set Approximate. Sample 0 is the current one, so "rain chance right now" is probably
+  readable — but that needs measuring against the captures before it is promised, exactly as the
+  weather field was.
+
+  Not scheduled. Worth doing after the Sessions surface settles (E1d), so it lands in whichever
+  view survives the rework rather than being built twice.
+
 - **E13 — a captures / maintenance surface.** The Help page has accumulated five actions that are
   not Help content: *Import captures…*, *Re-read captures*, *Find moved captures…*, *Clean up
   missing captures* and *Back up database…*. They landed there because Help was the only real page
@@ -80,21 +105,71 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   captures surface that lists the `captures` table (file, size, sessions, recorded by, last seen)
   would answer "which capture holds this session?" — the direction `CaptureStore.for_session` was
   built for, and the first thing that would actually *read* `recorded_by`.
-- **Sessions** — a list of every captured session; likely also a *session-centric* assignment
-  path (complement to the round-centric one in the weekend view). The per-session detail renders
-  its classification via `ui/components/classification_table.py` (the same builder the weekend
-  view uses). *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
+
+  **The boundary against Sessions, decided 2026-08-20 and unchanged by E1 shipping.** *Sessions*
+  answers **"what did I record, and what happened in it"** — sessions, results, laps. *Captures*
+  answers **"what files do I have, where are they, who sent them"** — the `captures` table plus the
+  five actions above. Two consequences follow, and both already bind:
+
+  - **`recorded_by` belongs here, not on a session.** It is a property of the *file*: one session
+    can live in two captures with different `recorded_by` values, so there is no single truthful
+    value for a session row. The only capture-shaped thing Sessions took is a read-only **source
+    capture** line on the detail page (file name, or "archive not found"), because that is the fact
+    Restore depends on — and it is the natural hand-off point to this surface later.
+  - **"Is this recording safe to delete?" is this surface's question** (PRIORITIES → E13 note,
+    2026-08-26). A capture routinely holds a whole weekend, so a *Delete capture* action needs every
+    session in the file and each one's state — stored, deleted, or assigned to a round — which is
+    exactly the table this surface is. Offer it only when every session in the file is deleted;
+    refuse with the list when it is not.
+- **Sessions** — **shipped, complete** (E1, branches 0-4): a filterable list of every captured
+  session, and a per-session detail page carrying the result, the player's laps, any penalties, the
+  circuit outline, and two stacked charts — tyre life and observed lap time, per *run*, on a shared
+  stint-relative axis, each run labelled with its **corrected average pace** (the laps into and out
+  of the pits and a race's standing start are left out of the mean, because they are the stop and
+  the start rather than the run). Deleting a session is here too, through the same guard the weekend
+  picker uses, and `Deleted sessions (N)` opens the manager below. Still likely to gain a
+  *session-centric* assignment path (complement to the round-centric one in the weekend view). The
+  per-session detail renders its classification via `ui/components/classification_table.py` (the
+  same builder the weekend view uses).
+
+  *Known limitation of the charts:* a run boundary is read from the tyres where it can be (wear
+  reset, compound change, age reset) and otherwise inferred from the **fuel load**, since a lap
+  burns 1.06-1.96 kg and fuel cannot be added on track. That proxy catches every case measured, but
+  it is a proxy: a same-set two-run pair whose refuel happens to look like a normal lap's burn can
+  still draw as one line. `driver_status` in the Lap Data packet states it outright — tracked as
+  **E17**, which needs a `PIPELINE_VERSION` bump and a re-ingest. A second limitation, deliberate:
+  the pace axis is a fixed 8-second window, so in a **mixed dry/wet session** an intermediate or wet
+  run can sit entirely on the clipped top edge (Shanghai P1 does). Widening it automatically would
+  undo what the fixed window is for, so an opt-in expansion is banked rather than built. *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
   "Delete from database…" on the weekend capture picker (unassigned captures only — an assigned
   session must be unassigned first, which drops it back into the picker). Delete removes the
   stored results only; the `captures/` recording is kept, so a re-ingest recreates the session.
   This action moves to (or is shared with) the Sessions surface when it lands. The picker shows
   a "Recorded" column stamped from the capture's real packet time (see DECISIONS → `recorded_at`),
   so repeated attempts of one session are separable by time — the keeper is the latest.
-- **Deleted-sessions manager** — a view listing tombstoned sessions (track / type / recorded-at,
-  already stored on `deleted_sessions`) with a Restore button. The store side is done
-  (`SessionStore.deleted_uids` / `is_deleted` / `restore`; delete tombstones by default and
-  `ingest_capture` skips tombstoned uids); only the UI is pending. Likely lives on the Sessions
-  surface.
+- **Deleted-sessions manager** — **shipped** (E2, E1 branches 3-4), on the Sessions surface: a
+  table of every tombstoned session (session / track / recorded / deleted / the capture that holds
+  it) with two actions, as row buttons and as a right-click.
+
+  **Restore is a single-capture re-ingest, not a cleared tombstone.** `pipeline.restore_session`
+  finds a capture holding the uid, clears the tombstone, and ingests *that one file* —
+  `ingest_capture` replaces by uid, so one file is enough and it is idempotent. The ordering is the
+  safety property: `ingest_capture` reads `deleted_uids()` at the *start*, so the tombstone must be
+  cleared first, and every failure after that point rolls it back with its original `deleted_at`.
+  A restore either completes or leaves the database exactly as it found it. It runs on
+  `RestoreWorker` because a league capture is minutes of parsing.
+
+  **Three refusals, worded apart on purpose.** A findable archive is read; an archive that has moved
+  or gone points at *Help → Find moved captures*; a session no `captures` row mentions can never be
+  restored at all. That last case is why the manager needs **Forget** — clear the tombstone without
+  restoring, so the row can leave the list and a later import or re-read of that recording brings
+  the session back on its own. When several captures hold one session the user is **asked** rather
+  than guessed at: two copies are usually a member's original plus an imported one and they can
+  differ in completeness, which nothing can tell without decompressing both.
+
+  *Known limitation, stated in the view's own tooltip:* the tombstone carries `session_type` but not
+  `weekend_structure`, so a deleted **Sprint Race** reads as "Race" (invariant #5). A sprint
+  weekend's Grand Prix is not affected — it reports `RACE_2`, which is unambiguous on its own.
 - **Laps** — per-lap browser + lap detail; the next surface to build, and the driver for the
   dense-trace persistence below. Scoped into iterations (see DECISIONS → the Laps/Analytics split):
   - *1a — persistence backbone (no UI). DONE (commit 73d2c35).* Assembler captures the player's
@@ -199,6 +274,11 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   lap-time trends, AI-difficulty analysis, team-performance trends, ERS-deployment views. (The
   single-lap and same-context overlay graphs moved into the Laps surface — see above.) In-memory
   `LapTrace` analytics stay desktop-bound regardless of any web future.
+  **Fuel-corrected lap time lands here, not on the session detail** *(2026-08-24)*: E1's chart shows
+  raw *observed* lap time by stint, which mixes tyre degradation with fuel burn-off. Correcting for
+  it is a derived metric needing a track/car-dependent kg→seconds coefficient and an uncertainty
+  story — Analytics' remit. The input is already stored (`fuel_in_tank`, per lap, fully populated),
+  so this is analysis work, not ingest work.
 - **Dashboard** — recent sessions / summaries (the record header already lives above it).
 
 ## Packaging (before sharing a built app with colleagues)

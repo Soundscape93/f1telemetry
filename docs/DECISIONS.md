@@ -48,6 +48,30 @@ what would trigger revisiting it.
   implementation stays dumb:* record-on-change + dedupe consecutive identical setups; if the game
   emits transitional values during a garage visit we may get an extra snapshot or two — acceptable,
   and debouncing can be added later without touching the model or schema.
+- **A session that ran both dry and wet stores the *set* of conditions it saw, not a `mixed`
+  flag** (E14, PIPELINE_VERSION 4). `SessionResult.weather` is the condition at the *end* of the
+  session — the assembler's scaffold is last-write-wins — so a race that started dry and finished
+  wet read as wet with nothing saying it changed. The fix adds `weather_seen`, the distinct
+  conditions the Session packets reported in first-seen order, as a JSON column beside the
+  snapshot (same additive pattern as `weekend_structure`; `ensure_schema` ALTERs it in). **The
+  snapshot is untouched** — mixed is an *additional* fact, and a session that ran in one condition
+  must still say which. `ui/components/weather.MIXED` is then selected on read.
+  - *Why the set and not a boolean `weather_mixed`.* Same one additive column, but the boolean is a
+    conclusion: once stored, "which conditions did it run in" can never be answered without another
+    re-ingest, and that is exactly what a weather timeline would need. Storing the raw fact and
+    reading it is what invariant #9 already does for `game_mode`, `driver_status` and `safety_car`.
+    A timeline later widens this column rather than adding a second one.
+  - *Why it also resolves the type mismatch.* `MIXED` is a string sentinel and deliberately not a
+    `Weather` member, while the domain field is a `Weather` and the column an `int`. Deriving it at
+    the one UI seam (`weather.session_weather`) means nothing ever tries to put a non-`Weather`
+    value into either — the alternative shapes all end in widening the enum or the column.
+  - *Why the settling filter runs at ingest, not on read.* The first 3-5 Session packets of a
+    session report a placeholder condition (TELEMETRY_NOTES → "What the `weather` field reports"),
+    and discarding it needs the packet times — which are gone once this is a set. Same reasoning as
+    `_modal_driver_status`, `_peak_pit_status` and the safety-car rule: the assembler reduces raw
+    frames to a stored judgement, and the judgement is documented where it is made.
+  - *An empty set means "not captured", never "one condition"* — a row ingested before the column
+    existed, or a capture holding only a session's opening seconds. Both read as not mixed.
 - **Repository-per-aggregate.** One store file per aggregate root, named after it
   (`sessions.py`, `seasons.py`, future `laps.py`), each owning its table cluster; `schema.py` is
   the shared table layer. No mega-repository, no per-table files, and no abstract base until a
@@ -701,6 +725,372 @@ what would trigger revisiting it.
   and engine temp beside engine wear. The assembler carries the latest Car Telemetry entry forward (like
   Car Status) and reads it in `normalize_tyre_context` / `normalize_car_damage` at the line. Pre-2c rows
   load with zero-temp defaults; a re-ingest populates them.
+
+- **The session detail view shows points only for races and sprints — because the stored value is
+  wrong elsewhere** *(decided 2026-08-24, E1 branch 2b)*. This looks like a presentation choice and
+  is not. Checked against the real database: `PRACTICE_1` player rows carry `points 25`, and
+  `QUALIFYING_1` rows carry `25` and `8`. The game reports a carried-over championship figure in
+  the Final Classification packet for non-race sessions, so rendering it would state a number that
+  is simply untrue. The cell is gated on `is_race(session_type)` (with `slot.is_sprint_race` for
+  the sprint table) and shows an em dash otherwise.
+- **`Laps completed` stands in for overtakes until E15** *(decided 2026-08-24)*. On-track overtakes
+  are not stored — `OVTK` events exist in every capture but the assembler never reads Event packets
+  (PRIORITIES → E15). The cell shows `laps I completed / total laps` meanwhile. Chosen over
+  *positions gained*, which is not the same thing (it nets out on-track passes against pit-stop and
+  retirement shuffles) **and** is already rendered as the ▲/▼ glyph in the classification table
+  beside it. **When E15 lands this cell becomes real overtakes** — it is a placeholder with a named
+  successor, not a permanent field.
+- **The penalties box has two states, not one** *(decided 2026-08-24)*. Only the aggregate is
+  stored (`num_penalties`, `penalties_time_s` on the player's classification entry — real: eight
+  rows currently carry `1 penalty / +3s`); type and lap are not. So a clean session shows
+  `No penalties were recorded for this session.`, and a penalised one shows the aggregate **plus** a
+  muted `Per-penalty detail (type and lap) isn't stored yet.` A single empty state would print "no
+  penalties" for a session that demonstrably had one — the box would be lying rather than merely
+  incomplete.
+- **Tyre life is the worst wheel, not the mean of four** *(decided 2026-08-24, E1 branch 2c)*. The
+  line plots `100 − max(wear)` across the four corners. The worst corner is what forces the stop,
+  so it is the strategy-relevant number; a mean smooths away exactly the signal being looked for.
+  Per-wheel values go in the tooltip, so nothing is lost.
+- **A charted "stint" is a *run*, not a tyre set: split on fresh tyres or a return to the
+  garage, never on age increments** *(decided 2026-08-24, extended 2026-08-25)*. Age is unreliable at the lap boundary — the Car Status
+  snapshot straddles the game's increment, giving runs like `age 0, 2, 2, 4, 4` inside one stint —
+  and a naive age-based split turned one 27-lap race into fourteen stints. Cumulative wear is
+  monotonic within a stint and resets to ~0 on a new set, so a drop is the reliable boundary.
+  Details and the raw evidence in TELEMETRY_NOTES.
+
+  **Revised 2026-08-24, during implementation: a *fall* in `tyre_age_laps` is a second boundary.**
+  Wear alone can miss a set change. In a career practice session a tyre-saving programme is followed
+  by a qualifying simulation on a **fresh set of the same compound**, and the new set's first wear
+  reading can be *higher* than the old set's last: `10198131…` (Jeddah P1) reads 9.51, then 15.92,
+  then 17.97 across the change. Compound unchanged, wear never drops, so the two runs merged into
+  one curve claiming a single set had worn 9.51 → 17.97 — a straightforwardly false statement about
+  what happened. A fall in the age counter is the missing signal, and it is **not** the rule warned
+  against above: that concerns age *increments*, which the snapshot mangles. Only a fresh set can
+  put a lower number there. Verified across all 406 stored laps — it adds exactly one stint
+  boundary, and changes one session of 54. The two tests are complementary, not redundant: 26 of the
+  27 age falls already coincide with a wear drop, and 4 wear drops have no age fall.
+
+  **Extended 2026-08-25: a return to the garage also ends a run, read from the fuel load.** Checking
+  every session's charts showed the three tyre signals are not enough, because **a run and a set are
+  different things**. In a race they coincide — the car leaves the garage once — but practice and
+  qualifying are full of one set doing several runs, and of two *fresh sets of the same compound*
+  doing a single lap each. Nothing in the tyre data separates the latter: a Q3 pair of new softs
+  reads `age 0` on both laps, the same compound, and wear that *rises* rather than resets. Drawing
+  them as one line claims a continuity that did not happen.
+
+  `fuel_in_tank` resolves it, and is already stored 406 of 406. A full lap burns **1.06-1.96 kg**
+  across every session here, and fuel cannot be added on track — so a load that rises, or barely
+  falls, means the car was in the garage. Measured: **22 detections in practice and qualifying**,
+  every one matching a run boundary the driver confirmed, against **1 in 322 race transitions** —
+  and that one is `12316788…`, whose lap 3 is missing and whose lap 2 took 170 s. It independently
+  settled two open questions about real sessions (Suzuka Q2 was two runs on one set of inters;
+  Suzuka Q1 was one run).
+
+  **Not** `tyre_age_laps == 0` on both laps, which looks like the same signal and is not: a post-pit
+  out-lap reports `age 0` at wear `0.00` and the lap after it still reports `age 0`, so that rule
+  breaks three race stints that are currently correct. Tested before it was rejected.
+
+  **Replaced 2026-08-27 by what it was standing in for, and kept as the fallback (E17).** The fuel
+  rule was knowingly a proxy, and `driver_status` says it outright: the assembler now stores
+  `preceded_by_garage`, “the car was in the garage between the previous emitted lap and this one's
+  timed run”. Measured against the whole database, the stored flag reproduces **all 11** fuel
+  detections among the stored laps and rejects the **one** false positive — Shanghai sprint
+  `12316788…` lap 4, where a red-flag stoppage made the fuel rise across a missing lap while the
+  game's own tyre stints say the whole race ran on a single set. Fuel is now read only for laps
+  ingested before `PIPELINE_VERSION` 4, and `Lap.has_lap_context` is the single test that chooses;
+  both paths are tested against the same real sessions, so neither can win silently.
+
+  It does **not** replace wear / age / compound. A race never reports `IN_GARAGE` — the game says
+  `IN_PIT_AREA` for a pit stop and keeps the garage for the garage proper — so this is a fourth
+  boundary beside them, not a substitute for them.
+- **One lap classification feeds the Laps box, the stint split and the average pace** *(decided
+  2026-08-27, E17)*. Three parts of the session detail have to agree about what a lap was, and
+  before this each derived its own answer — the pace chart called a practice flying lap an in-lap
+  and left it out of an average the table said nothing about. `ui/sessions/lap_context.py` now
+  classifies each lap once and the other two read it, so a lap the table marks and a lap the average
+  drops are the same lap by construction rather than by two modules happening to agree.
+
+  **Stored truth first, inference only for old rows.** Out-lap is “the pit-lane timer was running as
+  the lap began”, and nothing else — see the red-flag entry below for the half that was tried and
+  removed. In-lap is the pit-lane
+  timer still running at the line, deliberately **not** `driver_status == IN_LAP`, which the game
+  sets on the *planned* in-lap and leaves set while the driver stays out (three laps early in one
+  race here, six in another). Safety car and red flag come off the Session packet, which the
+  assembler already routes — no Event-packet work, which is E15 and unrelated. Evidence in
+  TELEMETRY_NOTES → *What `driver_status` actually reports*.
+
+  **A red-flag restart is a standing start, not an out-lap** *(corrected 2026-08-30, E17)*. The
+  first rule read the restart off `driver_status == OUT_LAP` held for most of the lap, because the
+  pit-lane timer never runs on one. Manual checking of the Shanghai sprint said otherwise and the
+  game agrees: it does not time the drive from the pit lane back to the grid, so that status is left
+  over from a lap that was never emitted, and the lap it lands on begins at rest in the grid box.
+  Scanned across all 470 emitted laps, the `driver_status` half contributed only those two laps and
+  the timer alone missed no real pit exit — so the stored `is_out_lap` is now the timer alone, and
+  the restart is derived in `lap_context` from `red_flagged` on the lap before, chipped `START`. It
+  is the same exclusion either way; what was wrong was the reason shown for it. The same stoppage
+  also makes the game report near-zero tyre wear for one lap, which used to open a false run — the
+  wear boundary is now suppressed on a red-flagged lap while age and compound keep theirs. Evidence
+  in TELEMETRY_NOTES → *What `driver_status` actually reports*.
+
+  **Five indicators, one per reason a lap leaves the average**: `START`, `OUT-LAP`, `IN-LAP`,
+  `SC`, `RED-FLAG`,
+  as short chips in the existing Laps box with the sentence on hover. The set is chosen by a rule
+  rather than by taste — *every* pace exclusion has a chip and *every* chip is a pace exclusion — and
+  that equality is what makes an average readable off the page: a run whose number looks wrong can
+  always be traced to the laps that did not contribute to it. `START` is in for exactly that reason:
+  it was going to be the one silent exclusion left, which is the failure mode this item exists to
+  remove. Chips read in the order the lap ran (`OUT IN` for a lap that left the pits and came back
+  into them), not by severity. A *sixth* is a real decision rather than a small one — it would break
+  the equality, so anything that is context but not an exclusion belongs somewhere else.
+
+  **Two things this knowingly changes**, both measured end-to-end across every capture:
+  **(a)** in practice and qualifying the game never times the lap the driver returns to the pits on,
+  so an emitted practice lap is *never* an in-lap — the old inference labelled one in six practice
+  sessions anyway and dropped a genuine flying lap out of the run average. It is now counted, which
+  moves Sakhir P1's opening run from 1:22.304 to 1:23.939. The higher number is the honest one:
+  `driver_status` reads `FLYING` for every frame of that lap.
+  **(b)** a safety-car lap now comes *out* of the average. Shanghai `6912670…`'s final run read
+  1:55.967 and actually ran 1:36.776. Where every lap of a run is excluded the average reports an em
+  dash rather than a number about something else — sprint `2114813…`'s three-lap final run, an
+  out-lap plus two safety-car laps, does exactly that.
+- **A tyre stint is drawn only from 2 laps up, in every session type** *(decided 2026-08-24)*.
+  Chosen so wet qualifying and longer quali runs still get a chart, accepting that a single-timed-lap
+  dry qualifying gets none. It also earns its keep as a data filter: pit in-laps produce single-lap
+  artefact stints from stale readings, and this rule drops them without a special case.
+
+  **Confirmed 2026-08-24 against how the sessions are actually driven, after measuring what the rule
+  removes.** Splitting runs correctly showed the minimum drops far more outside races than the
+  original wording implied — by session type: RACE 3 of 25 runs dropped, PRACTICE_1 3 of 12,
+  PRACTICE_2 2 of 8, PRACTICE_3 4 of 5, QUALIFYING_1 5 of 8, QUALIFYING_2 6 of 8, QUALIFYING_3 5 of
+  10. That reads alarming and is not: it matches how the sessions are driven. **Dry qualifying is
+  one flying lap per session**, so there is no stint to draw and nothing is lost; a **wet** session
+  runs longer, so Suzuka's Q1/Q2/Q3 do get both charts. **P1 and P3 are practice programmes and own
+  quali sims** — one or two laps, then back to the garage — so they are correctly not charted.
+  **P2 is where the race simulations are driven** (Suzuka, Sakhir, Melbourne here), and those
+  sessions do get their charts, which is the case that matters. A one-lap graph carries no
+  information at all — it is a single point, with no degradation to show — so the floor stays at 2.
+  Three was considered and rejected: the longer practice simulation runs are exactly the non-race
+  case worth charting, and some are two laps.
+- **No synthetic 100% starting point on the tyre-life chart** *(decided 2026-08-24)*. The first
+  stored sample of stint 1 already reads ~4% wear — there is no 100% sample in the data. The y-axis
+  runs 0–100% so a stint starting at 95.7% reads as "near 100" on its own; drawing an invented
+  anchor point would be fabricating a measurement. Relatedly, stint offsets are computed from real
+  lap *numbers*, never from list index: lap numbers are not contiguous (a red flag or a dropped lap
+  leaves a gap), and an index axis would silently close that gap and misplace everything after it.
+- **The session detail's track map is the driven fastest lap, not the canonical median line**
+  *(decided 2026-08-24)*. The Laps surface draws the weekend's median racing line via
+  `TrackLayoutProvider`; the session detail draws the player's fastest lap through
+  `TrackMap.set_trace`. Two measured reasons: the provider walks every Motion lap of the whole
+  weekend, ~1 s of Parquet reading on the GUI thread before its cache warms, against ~10 ms for
+  one lap; and it lives in `ui/laps/`, which the Sessions surface must not import from. The
+  fastest lap specifically, because an out-lap or a spin would draw an excursion as if it were the
+  circuit. If this ever needs the median, the honest fix is moving the provider into
+  `ui/components/` and giving it a home on the window - not a cross-surface import.
+- **The classification box names the session type in its own title** *(decided 2026-08-24)*.
+  It duplicates the page header, which normally argues against it - but the box is screenshotted
+  and shared on its own, and a results table that doesn't say which session it is has lost the
+  thing that makes it readable to someone who wasn't there.
+- **The pace and tyre-life charts are stacked full-width on a shared *stint-relative* x-axis**
+  *(decided 2026-08-24, superseding the left/right split agreed earlier the same day)*. Two
+  decisions in one, both measured rather than assumed:
+  **(a) Stacked, not side by side.** The default window is `resize(900, 600)`, so a half-width plot
+  is ~320 px — roughly **8 px per lap** over a 38-lap race, too tight to pick out a single slow lap.
+  Full-width gives ~18 px/lap. It also matches `trace_plot.py`'s existing idiom (stacked plots
+  sharing one axis) and lets wear fall-off and pace fall-off be read on one vertical line.
+  **(b) Stint-relative, not absolute race lap.** Degradation is a function of stint age, so every
+  stint restarts at stint lap 1 and the axis runs to the longest stint; that is what makes two
+  compounds comparable. The real race lap goes in the tooltip.
+- **The pace chart's y-axis is a fixed 8 s window starting just under the quickest lap**
+  *(decided 2026-08-24, replaced 2026-08-25)*. This is what makes the stint-relative axis viable at all. Measured across every
+  50%-distance race in the database, the first lap of each *post-pit* stint carries **+14 to +37 s**
+  (the game bundles the pit loss into it). On an absolute axis those spikes sit at different x
+  positions and read as "that's the stop"; on a stint-relative axis they all stack at x = 1, so an
+  auto-scaled y-axis would span ~37 s and squash the real 1–3 s degradation signal into ~5% of the
+  plot height. So the range is derived from the representative laps and out-laps draw as a clipped
+  marker with the true time in the tooltip — measured data is never hidden, only kept from
+  dictating the scale. **Stint 1 lap 1 is not excluded**: it is a race start, a much milder
+  +2 to +3 s, and sometimes faster than the stint median.
+
+  **Revised 2026-08-24, during implementation, on two further measurements.**
+  **(a) The in-lap comes out of the range too.** Measured across every stint in the database, an
+  in-lap runs a median **+3.68 s** over its own stint median (min −0.88, max +32.15) — the same
+  order as the 1–3 s degradation signal the chart exists to show. On Shanghai Race 2 the in-lap
+  (lap 13, 1:44.165 against a 1:39.004 next-worst) is the single lap setting the whole scale;
+  removing it takes that chart from a 9.7 s span to 4.1 s. Unlike the out-lap, which is structural
+  and certain, the in-lap is **inferred**: a stint ending immediately before the next one begins
+  means the stop happened between them. The contiguity check makes it conservative — where laps are
+  missing around the stop it declines to claim, as in `11708585…`, whose stint 2 ends at lap 18
+  while the next opens at 22 — so it can under-report but never mislabel.
+  **(b) The remaining spread is capped at 8 s, anchored at the fastest lap.** No rule can classify
+  an incident lap, and they wreck the scale exactly as an out-lap does: one race here spans 49.7 s
+  on four laps in the 120–140 s range. Ordinary variance stays well inside 8 s across every session
+  measured, so the cap costs a consistent driver nothing — 23 of 34 chartable sessions sit under it
+  untouched — and rescues a chaotic one. It is anchored at the fast end because the fastest lap is
+  the reference every other lap is read against. The padding is taken from the capped span, not the
+  raw one, or a 40 s spread would burn a quarter of the window on dead air below the fastest lap.
+  The cost, stated: on Melbourne `14435457…` the cap clips the whole two-lap opening stint, whose
+  90.5/91.7 s laps sit ~10 s off a 80.8 s best — and that spread is mostly fuel burn-off, the very
+  thing the caption warns about. Every clipped lap is still plotted at the top edge with a triangle
+  marker and its real time in the tooltip: 33 of 375 timed laps (8.8%), of which 14 are out-laps
+  already off the scale by rule.
+
+  **Replaced 2026-08-25: the axis is a fixed height, and the exclusions no longer scale anything.**
+  Fitting the axis to the data was wrong at *both* ends, and only the wide end had been noticed. Too
+  narrow is just as dishonest: a run whose laps sit within 0.3 s of each other had that 0.3 s
+  stretched over the full plot height, so laps that were effectively a dead heat read as a dramatic
+  fall-off. The axis is now **always exactly 8 s**, anchored so the quickest lap sits 5% above the
+  floor and the remaining 7.6 s runs upward — upward because no lap can appear below the quickest
+  one, so centring the window would spend half the plot on space nothing can occupy.
+
+  Two consequences. **(a) The exclusions stop governing the scale.** With the height fixed, an
+  out-lap cannot stretch the axis however slow it is, so there is nothing to exclude — the anchor
+  counts *every* timed lap. `representative_laps` was deleted; `is_out_lap` and `in_lap_numbers`
+  survive only to *label* the tooltips. **(b) It fixes a bug the exclusion caused.** In practice and
+  qualifying the real out-lap is usually never stored (no Session History time, or it starts too far
+  past the line), so a run's first stored lap is a *flying* lap and is often the quickest of the
+  session. Anchoring above it put it below the axis floor, where it was drawn nowhere at all —
+  Suzuka P1 silently lost its best lap this way, line and marker both. Clipping now clamps at both
+  edges, and the marker is a triangle pointing the way the real value lies. Relatedly, the out-lap
+  *label* now requires the lap to actually be slower than the median of its own run.
+
+  A fixed height also makes two sessions comparable at a glance, which fitting actively prevented.
+
+  **The known cost, accepted: mixed dry/wet sessions.** An intermediate or wet run can be 14 s off
+  the dry pace, so it lands entirely on the clipped top edge — Shanghai P1 (`13974110…`) does
+  exactly that with its lap 10-11 intermediate run. Widening automatically was rejected because it
+  reinstates the original problem: fitting that session would need ~16 s and would compress the dry
+  runs' 1-3 s degradation to under a fifth of the plot. An **opt-in** expansion is the right shape
+  and is banked (ROADMAP → Other surfaces), not built. Meanwhile the laps are drawn, marked clipped,
+  and carry their real times on hover.
+- **The lap-time chart is "observed lap time by stint", and the fuel caveat is stated rather than
+  corrected for** *(decided 2026-08-24)*. A stint-relative overlay conflates tyre degradation with
+  **fuel burn-off**: the car sheds ~1.1-1.3 kg per lap, so a later stint is partly faster because it
+  is lighter, not only because of the compound — and the shared axis puts that difference exactly
+  where a reader will credit it to the tyre. Three consequences: **(a)** the chart is titled
+  *observed lap time by stint*, never "tyre performance" or "degradation"; **(b)** the caveat is
+  captioned in the UI; **(c)** **no fuel correction is applied here**, because a correction needs a
+  track- and car-dependent kg→seconds coefficient, and picking one silently would swap an honest raw
+  number for a confident estimate on a page whose job is "what actually happened".
+- **Fuel-corrected lap time is an Analytics (E3) item, not session detail** *(decided 2026-08-24)*.
+  The data is ready — `fuel_in_tank` is stored per lap, 406 of 406 populated, so this needs no new
+  ingest — but it is a *derived, corrected* metric needing a coefficient, an estimation method and a
+  way to express its uncertainty, and Analytics is where cross-session derived work already belongs.
+  Session detail stays raw observed fact. If it ever reaches this chart it must be an explicit
+  opt-in toggle, never the default, so the raw number is always what you see first.
+- **A lap row in the session detail opens on a *single* click, unlike the laps overview's
+  double-click** *(decided 2026-08-24)*. In the laps overview the row is also a fold target, so the
+  first click is already spoken for; in the session detail the row's only job is to open the lap.
+  Recorded here because the inconsistency is deliberate and will otherwise be reported as a bug.
+- **The fastest-lap blue and personal-best green are shared tokens in `ui/style.py`** *(decided
+  2026-08-24)*. `FASTEST_LAP_BLUE = "#2f81f7"` for the session's fastest lap and
+  `PERSONAL_BEST = "#3fb950"` for my own fastest when it is not the session's, used identically on
+  the session detail, the laps box, the Laps view and the Sessions overview. The green is the
+  `_POS_COLORS` gain-green promoted out of `classification_table.py`, where it was private. Both
+  set `color:` explicitly, which is the one kind of stylesheet A4 leaves alone.
+- **Restore is a single-capture re-ingest with a tombstone rollback, not a cleared tombstone**
+  *(decided 2026-08-24, built 2026-08-25 as E1 branch 3)*. `SessionStore.restore` only clears the
+  tombstone, which is the *smaller* half of the job: the session's rows are gone, so clearing it
+  alone leaves nothing behind but permission for a future ingest to re-create it. `pipeline
+  .restore_session` does the real thing — find a capture holding the uid, clear the tombstone,
+  ingest **that one file**. One file is enough because `ingest_capture` replaces by uid, and it is
+  idempotent for the same reason. Re-deriving one session by decompressing every archive in the
+  database is what the guided re-ingest under Help already is.
+
+  **The ordering is the safety property, and it is why this function exists.** `ingest_capture`
+  reads `deleted_uids()` at the *start*, so the tombstone has to be cleared **before** the ingest —
+  which opens a window where the uid is un-tombstoned with **no session row**. That state is worse
+  than a deleted session: the next *full* re-ingest silently resurrects a session the user believes
+  is gone, and nothing anywhere says so. So everything decidable is decided before the tombstone is
+  touched, and every failure after it rolls back. `SessionStore.delete` cannot perform that
+  rollback — it returns `False` and writes nothing when there is no session row — hence
+  `SessionStore.tombstone`, which merges a tombstone with no row required.
+
+  **There are two half-states, not one.** The plan named the first; the second turned up while
+  building it. *(a) Cleared, no row* — the ordinary failure (a corrupt archive, or a capture that
+  turned out not to hold the uid); the tombstone is simply re-written. *(b) Cleared, row present* —
+  a capture holding several sessions, where ours was saved before a later one raised. Left alone
+  that session would sit in Sessions **and** in the deleted list at once, so the rollback deletes
+  the resurrected row and takes its laps with it, exactly as `delete_session` does. The tombstone is
+  re-written last in both cases with the *original* values, `deleted_at` included — a failed restore
+  is not a new deletion and must not re-date one in the manager.
+
+  **The capture is verified, never assumed.** `capture_sessions` rows go stale (pruned, re-recorded,
+  written by an older ingest), so the sessions the ingest returns are checked for the uid rather
+  than trusting the row that pointed there; a miss rolls back and says so. Passing `capture_store`
+  through to the ingest *corrects* such a row on the way past (`record` replaces by hash with what
+  the file actually holds), so that refusal leaves the session honestly shown as having no capture.
+
+  **A missing archive fails honestly, and "no capture row at all" is a different answer.** An
+  unfindable archive leaves the tombstone alone and names the file, because Help → *Find moved
+  captures…* may bring it back. A uid no `captures` row mentions can *never* be restored, which is
+  why the manager needs **Forget** — clear the tombstone without restoring — or the row is
+  unremovable. **Several findable captures are refused rather than guessed at**: two copies are
+  usually a member's original plus an imported copy, they can differ in completeness (someone
+  stopped recording early), and nothing can tell which is better without decompressing both, so the
+  caller chooses and passes a `content_hash`. `restorable_captures` is shared between that chooser
+  and the restore itself, so the list offered and the list accepted cannot drift apart.
+
+  Both halves are covered by `test/ingest/test_restore_session.py`, and the whole flow was proven
+  against real archives before any page leaned on it: a real restore rebuilt a session with its laps
+  and traces, an injected failure over a real capture rolled back to an identical tombstone, and a
+  genuinely missing archive refused with the tombstone untouched.
+- **The tombstone read model lives in `storage/sessions.py`, not in `domain/`** *(decided
+  2026-08-25)*. `SessionStore.deleted_sessions()` returns `DeletedSession` (uid, deleted_at,
+  track_id, session_type, recorded_at) — the descriptive rows `deleted_uids()` cannot feed. It is
+  defined beside the store rather than in `domain/models.py` because a tombstone is **not a domain
+  concept**: no normalizer emits one, no assembler builds one, no analysis reads one. It exists only
+  because rows persist. The repo's actual rule is *stores return domain dataclasses for domain
+  concepts* — `assignment_for` already returns a bare `tuple[int, int]`, `known_files` a set of
+  pairs — so this follows `pipeline`'s habit of keeping `DeleteOutcome` / `ReingestSummary` beside
+  the functions that return them. `CaptureMeta` stays in `domain/` because it is an aggregate root
+  with its own identity that the whole app reasons about; this is a flag with four descriptive
+  fields. **Known limitation:** the tombstone carries `session_type` but not `weekend_structure`,
+  so a deleted **Sprint Race** reads as "Race" in the manager — it reports type 15 exactly as an
+  ordinary race does, and only the weekend it sat in separates them (invariant #5). Narrower than it
+  first looked: a sprint weekend's *Grand Prix* reports RACE_2 (16), which needs no weekend context,
+  so only type 15 is genuinely ambiguous. Widening the tombstone to fix that is not worth it; the
+  view says so in a tooltip.
+- **The deleted-sessions manager refuses nothing itself** *(decided 2026-08-25, built 2026-08-26 as
+  E1 branch 4)*. The page confirms, and picks the capture when several hold the session — the two
+  things that need a person and therefore the GUI thread. Everything else is decided by
+  `pipeline.restore_session` and worded once in `ui/formatting.restore_message`, arriving through
+  the worker's `done` rather than `failed` because **a refusal is a normal answer here**, not a
+  crash: a missing archive, a capture row that went stale, a session no capture mentions.
+
+  **Why not pre-empt the obvious ones.** The page already knows an archive is missing — it drew
+  "archive not found" in that row. Refusing locally would cost one short-lived worker and buy a
+  second place where that sentence lives, and the two would drift: the page would keep offering a
+  file the restore had started refusing, or refuse one it would have accepted. Both halves read the
+  *same* list, `pipeline.restorable_captures`, for exactly that reason, and the one decision the
+  page does make is passed as a **content hash** — never a path, because the identity is the content
+  and files move between the click and the worker.
+
+  **The chooser's accessor is a property, and that is a scar.** It was a method; a call site dropped
+  the parentheses and returned the bound method, which PySide6 cannot convert for a
+  `Signal(str, str)` — it prints to stderr and passes an **empty string** rather than raising. The
+  pipeline read that as "no choice was made" and refused as ambiguous, so a user picking a file
+  watched the app ignore them with a message that sounded deliberate. A property cannot be left
+  uncalled, and the caller now refuses any hash it did not just offer.
+- **Forget clears a tombstone without restoring, and says so in those words** *(decided 2026-08-20,
+  built 2026-08-26)*. Without it a tombstone can be **unremovable**: a session whose `captures` rows
+  were pruned — or that was ingested before capture metadata existed — can never be restored, and
+  the row would sit in the manager for the life of the database. Forget is `SessionStore.restore`
+  alone: the stored results do not come back, but the uid stops being skipped, so a later import or
+  re-read of that recording stores the session again.
+
+  **The dialog has to overcome the word.** "Forget" reads naturally as *delete it for good*, which
+  is the opposite of what it does, so the confirmation states both halves outright — nothing comes
+  back now, and the session is no longer skipped. It emits no `sessions_changed`: no stored session
+  changed, and the overview's count re-reads when it is shown.
+- **Every non-sprint race type is labelled "Race", never "Race 2"** *(decided 2026-08-26)*. A sprint
+  weekend in this database reports `weekend_structure = [1, 10, 11, 12, 15, 5, 6, 7, 16]` — the
+  Sprint as RACE (15) and the Grand Prix as **RACE_2 (16)** — so `slot_label` printing the prettified
+  enum name put "Race 2" on the Grand Prix in Sessions, Laps, Seasons and the weekend page. The
+  weekend's final race is the Grand Prix and earlier races are Sprints (invariant #5), which
+  `weekend_slots` already resolves **by position**; the ordinal inside the enum name is an artefact
+  of the wire format and not something a user has any use for. Fixing it in `slot_label` rather than
+  per surface is what makes it one line instead of six, and it also makes the number useful where
+  there is no weekend to resolve against at all: a tombstone reading 16 is a Grand Prix on its own.
 
 ## Localization
 

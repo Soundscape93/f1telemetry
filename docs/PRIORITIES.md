@@ -160,9 +160,26 @@ is in *Recently closed*.
   buys the least and risks the most. **It keeps its own P3 row** — closing Cycle 3 does *not* close
   the C block, and a deferred item with no row reads as a forgotten one.
 
-**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item is **A4** — **done
-2026-08-15**, with **A4b** closing the last controls on 2026-08-18 — then the E-block surfaces
-(E1/E2, E3, E5) in whatever order they earn.
+**Cycle 4 — the UI debt Cycle 3 deliberately walked past.** First item was **A4** — **done
+2026-08-15**, with **A4b** closing the last controls on 2026-08-18. Both shipped as **v0.8.1**
+(label `patch`, A4 + A4b alone), released on its own rather than grouped: everything behind it is
+large, so grouping would have held a five-release-old known issue behind a multi-week rework.
+
+**Cycle 4 closed with A4b — corrected 2026-08-24.** It contained A4 and A4b and nothing else,
+and both shipped as v0.8.1. An earlier version of this line placed the whole E-block inside
+Cycle 4; that was wrong, and the E1/E2/E3/E5 rows below no longer say it.
+
+**The E-block is the work after it, and its order is decided — 2026-08-18: E1/E2 → E3 → E5.**
+Not "in whatever order they earn", which is what that line used to say. These three are what make
+this a *full app* rather than one with placeholder sidebar entries, and **E1/E2 is next** —
+picked up in its own session, deliberately not the same one that closed A4.
+
+**A6 and E7 are explicitly held until the E-block is complete — decided 2026-08-18.** Neither is
+dropped and neither is forgotten, which is why this is written down: A6 reads as due (it is
+"new 2026-08-08" and "pairs naturally with A5"), and E7 has a small, tempting remainder. But
+recorder observability and a constant-range verification are **polish on a working app**, while
+Dashboard, Sessions, Analytics and Bug report are still placeholders a user can click into. App
+completeness first; instrument it afterwards.
 
 **C8d is deliberately NOT in Cycle 4 — decided 2026-08-15.** It is the obvious-looking next step
 after C8b and will keep suggesting itself, so the decision is written here as well as in its own P3
@@ -186,6 +203,48 @@ C8d entry in P3 for the full reasoning and for what brings it back.
   stylesheet without an explicit colour reappears, so this cannot silently come back the way it
   accumulated. **A4b** carried the five remaining controls and closed on 2026-08-18 — see its
   row in P2.
+
+**Release shape from here — decided 2026-08-25.** Written down because the grouping is driven by
+the **re-ingest prompt**, not by what feels finished, and that is not obvious from the item rows.
+
+| Release | Contents | Label | Re-ingest |
+|---|---|---|---|
+| **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
+| **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — 3 → 4 |
+| **v0.11.0** | **E1c** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework) | `minor` | no |
+
+**The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
+and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
+means "your stored data is older than the current pipeline" — it does not count features — so
+**anything that lands before v0.9.0 ships rides that same prompt at no extra cost**. Only work
+landing *after* the release costs a second one. So the question is never "does this need a bump",
+it is "how long am I willing to hold the release".
+
+**Why E14 and E17 are in, and E15 is out.** E14 is small: accumulate the distinct `weather` values
+the Session packets report; `weather.MIXED` already exists and nothing selects it. E17 is small and
+has its consumer already built — it replaces the fuel-load proxy that E1 branch 2c shipped, so it
+closes a documented limitation rather than adding surface. **E15 is the long pole**: the assembler
+dispatches on ten packet ids and `EVENT` is not among them, so it means routing the packet, parsing
+the event union, modelling, storing and surfacing it. Including it would let E15 set the release
+date and hold a finished Sessions surface for weeks to save one prompt. **If E14 or E17 turns out
+bigger than it looks once opened, cut it rather than hold the release** — a second prompt is a mild
+cost, a stalled release is not.
+
+**Why `minor`, not `patch`.** PACKAGING's rule is that the label reflects the *group*, so one minor
+feature among several patch fixes makes the release minor. v0.9.0 ships a whole new surface;
+v0.10.0 ships new user-visible capability (overtakes, per-penalty detail), which is a feature and
+not a fix.
+
+**Why the Seasons rework is not `major`.** It retires the round-centric weekend page, which is a
+real breaking change to the UI — but `major` in this repo means **1.0.0**, and a 0.x line carries no
+stability promise, so a breaking change there is conventionally still minor. 1.0.0 is better spent
+on the milestone this project actually names: the point where the app can be handed to a colleague
+without caveats. Revisit it then, not at a view rework.
+
+**E16 is not in this table on purpose.** It needs no bump — `game_mode` is stored as a raw int
+(invariant #9), so it is a `GAME_MODE_NAMES` lookup entry and nothing more — and its code half is
+already done and already in `## Unreleased` (`78: "Driver Career '26"`). Its open remainder, My Team
+'26, is not code: it is waiting for a capture from that mode to exist.
 
 **Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
 surfaces: translating a UI that is still growing means translating it twice.
@@ -219,7 +278,16 @@ re-run under WAL on 2026-08-05 and passes.
 | A4 | Windows light/dark switch leaves text miscoloured | **done 2026-08-15** — Cycle 4; 32 of 37 sites, five controls left as **A4b** | PACKAGING → Phase 1 known issues |
 | A4b | The same freeze on five *controls* | **done 2026-08-18** — Cycle 4; sidebar + 3 buttons fixed, season card measured and deliberately kept | PACKAGING → Phase 1 known issues |
 | C4 | Clean-instance test (Sandbox / second user account) | **done 2026-08-07** — Cycle 3, against v0.7.0 | PACKAGING → Build history, 4th build |
-| E7 | Setup slider ranges | **confirmed 2026-08-02** — see below | DECISIONS → UI |
+| E7 | Setup slider ranges | **confirmed 2026-08-02** — remainder **held until the E-block ships** | DECISIONS → UI |
+| E1 | Sessions surface | **done 2026-08-26** — all five branches merged (0, 1, 2a/2b/2c, 3, 4); overview, detail, charts, shared guarded delete | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E2 | Deleted-sessions manager | **done 2026-08-26** — the manager, Restore (single-capture re-ingest with tombstone rollback) and Forget | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
+| E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
+| E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
+| E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
+| E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
+| E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
+| E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
 | F9 | Ship `NOTICE.md` as a PDF beside the exe, like `USER_GUIDE.pdf` | **done 2026-08-08** — Cycle 3, Release 2 | PACKAGING → The notices PDF (F9) |
@@ -228,6 +296,185 @@ re-run under WAL on 2026-08-05 and passes.
 confirmed correct for **2026** packets. 2025 is expected to be fine too: the only range
 difference between the 2025 and 2026 cars is **tyre pressure**. Remaining (small) work is to
 verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
+
+**E14 — a session that ran both dry and wet.** `ui/components/weather.py` already draws the icon
+(`weather.MIXED`); nothing selects it yet. `SessionResult.weather` is a single value, and the
+assembler's `self._scaffold = normalize_session(packet)` is last-write-wins, so what is stored is
+the condition at the *end* of the session.
+
+**Not from `weatherForecastSamples`** — evaluated 2026-08-24 and rejected, for three reasons that
+would otherwise be rediscovered. The samples are weekend-wide (each carries its own
+`session_type`, and Sprint Race and Grand Prix both report 15, so a sprint weekend cannot be
+filtered cleanly — invariant #5); past offsets roll off as the session runs, so the last packet's
+forecast no longer covers the transition that actually happened; and they are a *forecast*, which
+`forecast_accuracy` may mark Approximate.
+
+**Do this instead:** accumulate the distinct `weather` values the Session packets actually report
+across a session. Ground truth, no session-type filtering, no accuracy caveat, and it sets up a
+real weather timeline later. Dry is `CLEAR` / `LIGHT_CLOUD` / `OVERCAST`, wet is `LIGHT_RAIN` /
+`HEAVY_RAIN` / `STORM`; both present → mixed, otherwise keep the snapshot.
+
+**Done 2026-08-31**, on `feature/mixed-weather`. Two things came out of measuring first and are
+worth not re-deriving. **"Any two distinct values" is not the rule** — the opening 3-5 Session
+packets of a session report a placeholder that the packet then corrects, and it costs exactly one
+false mixed here (Melbourne Q1 read CLEAR for 1.5 s and then rained for eighteen minutes). And
+**the guard cannot be a packet count**: the game fast-forwards the session clock in the garage, so
+a genuine 38-second wet stretch arrives as *four* packets, the same length as the placeholder. The
+window is session-time seconds (`_WEATHER_SETTLE_S = 3.0`) — the placeholder is gone by 2.0 s and
+the shortest real stretch is 26.4 s. Stored as `weather_seen`, the *set* rather than a boolean, so
+the timeline this note anticipated widens the same column; the snapshot is untouched. Numbers in
+TELEMETRY_NOTES → "What the `weather` field reports", reasoning in DECISIONS → Storage.
+
+**E15 — the Event packets are already in every capture, unparsed.** Found 2026-08-24 while
+checking what the E1 session detail view could actually show. `session/assembler.py` dispatches on
+ten packet ids and **`PacketId.EVENT` is not one of them**, so every event the game sends is
+decoded past. The recorder writes *every* datagram unfiltered, so the data is on disk already —
+decoding one real capture gives:
+
+    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10 · SEND/SSTA/RTMT 5 …
+
+`OVTK` carries the overtaking and overtaken vehicle indices; `PENA` carries penalty type,
+infringement, vehicle index, **lap number** and time. `reference.PENALTY_NAMES` and
+`INFRINGEMENT_NAMES` already exist and are unused — the *display* half is written.
+
+**This is recoverable retroactively**: a re-ingest of existing captures fills it in, with no
+re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should **land with E14** and
+share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
+`Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
+
+**The red-flag rules were corrected on manual check, 2026-08-30.** Worth keeping because the scan
+that designed them was not wrong about the data and was still wrong about the game. `driver_status`
+really does read `OUT_LAP` for 94-95 % of the lap a red-flagged race restarts on, and the first rule
+believed it — but the game does not time the drive from the pit lane back to the grid, so that
+status belongs to a lap that was never emitted and the restart is a standing start from the grid
+box. Driving the session is what settled it; `docs/TELEMETRY_NOTES.md` had already written down the
+skipped lap six sections above the rule that contradicted it. The same stoppage also makes the game
+report near-zero tyre wear for one lap, which split a run in two and cost the Shanghai sprint its
+opening lap. Both are fixed and pinned; details in TELEMETRY_NOTES and DECISIONS.
+
+**Lap-context indicators for the Laps box — banked 2026-08-24, done 2026-08-27 as part of E17.**
+Landed with it rather than after it, because the measurement showed the cost was a shared
+classification and two Session-packet fields, not a second piece of work. See the E17 note above.
+The original entry, kept for the reasoning:
+Landed as five chips rather than the three requested — `START` / `OUT-LAP` / `IN-LAP` / `SC` /
+`RED-FLAG` — once the rule became "one chip per reason a lap leaves the run average, and no chip
+that isn't one".
+
+Requested while reviewing the E1 detail view: mark **in-laps / out-laps** and **safety-car laps**
+in the session's lap list, because those laps are slow for reasons that have nothing to do with
+pace and currently read as if the driver simply lost time. Also the input the pace chart's out-lap
+handling infers today from lap-time magnitude (DECISIONS → UI) — with a stored flag it could stop
+inferring.
+
+**Not free, and not Event-packet work.** Pit status and driver status are per-frame fields on
+**Lap Data**, and safety-car state is on the **Session** packet; neither is on `LapRow`, and the
+assembler snapshots neither at the lap boundary. So this is additive lap columns plus a
+`PIPELINE_VERSION` bump — which is exactly why it should land in the **same re-ingest as E14 and
+E15** rather than asking the user a third time.
+
+**E1d — Seasons opens the weekend in Sessions, not in its own round page.** *Decided
+2026-08-24.* Double-clicking a round in a season's calendar should open the **Sessions overview
+filtered to that weekend**, in weekend running order (P1, P2, … Race), with each session's
+classification shown below it, and each session opening the Sessions detail page. The round-centric
+weekend page shrinks and eventually goes.
+
+**Chosen over the cheaper inverse** (keeping the weekend page and having it link into Sessions
+detail), because the flow a user expects is "open the round → see that weekend's sessions", and the
+Sessions surface is where sessions belong.
+
+**It is blocked, and the order is forced.** The weekend page does four jobs and only *one* of them
+— rendering classification tables — is duplicated in Sessions:
+
+1. **E1c first — league display names.** The weekend page resolves them via
+   `display_name_fn(roster)`; Sessions uses the raw `driver_name`. Routing there before E1c would
+   make league weekends read *worse* than they do today, which is the opposite of the point.
+2. **Then the filtered overview itself** — a weekend/round filter plus a mode that shows the
+   classification under each card. Note this gives the Sessions overview two display modes
+   depending on how it was reached; that is a real cost, accepted deliberately.
+3. **Then E1b — session-centric assignment.** The weekend page is the *only* path that writes
+   `season_assignments`. It cannot be removed until assignment has somewhere else to live.
+4. **Only then** can the weekend page be retired.
+
+**One thing has no home yet and must not be dropped silently:** the weekend page's *pending* and
+*skipped* slot rows. `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
+weekend where P3 was skipped shows it as "Skipped" rather than merely absent. A filtered list of
+*stored* sessions cannot express a session that does not exist — the filtered overview needs to
+carry this over explicitly, or the information is lost.
+
+**Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
+E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates
+tyre degradation with fuel burn-off (~1.1-1.3 kg/lap, so later stints run lighter and look faster).
+E1 states the caveat rather than correcting for it — a correction needs a track- and car-dependent
+kg→seconds coefficient, and guessing one silently would replace an honest raw number with an
+estimate.
+
+**No ingest work is needed**: `fuel_in_tank` is already stored per lap, 406 of 406 populated. What
+it needs is the estimation method and a way to show its uncertainty, which is Analytics' remit, not
+session detail's. See DECISIONS → UI and ROADMAP → Analytics.
+
+**E17 — `driver_status` is in Lap Data, and is not E15.** Found 2026-08-25 while fixing the
+session pace/tyre charts. `LapData` already carries `driver_status` (0 = in garage, 1 = flying lap,
+2 = in lap, 3 = out lap, 4 = on track), `pit_status` and `pit_lane_timer_active`, and the assembler
+already decodes that packet — it simply reads past those fields. **Keep this separate from E15**,
+which is Event-packet ingest (`PENA` / `OVTK`): different packet, no Event work, and the two share
+nothing but a re-ingest.
+
+Why it matters: the charts need to know where one *run* ends and the next begins, and in practice
+and qualifying a single set of tyres often does several runs. No tyre signal separates those — two
+fresh sets of the same compound both report `age 0`, the same compound, and rising wear. The
+shipped fix infers the garage visit from `fuel_in_tank` (a lap burns 1.06-1.96 kg and fuel cannot
+be added on track; measured 22 detections in practice/quali against 1 in 322 race transitions), and
+that is a **proxy**. `driver_status` says it outright, and would also make the out-lap flag exact
+instead of inferred from position-in-run.
+
+The garage frames sit in laps that are never emitted (an in-lap has no Session History time, an
+out-lap starts too far past the line), so the useful shape is a flag computed in the assembler —
+"was the car in the garage between the end of the last emitted lap and the start of this one" —
+rather than a raw per-lap status. Needs a new column, a `PIPELINE_VERSION` bump and a re-ingest, so
+bundle it with **E14/E15** and pay for one re-ingest. Fuel then becomes the fallback for rows
+ingested before the bump.
+
+**Done 2026-08-27, on `feature/store-driver-status`, and it absorbed the banked Laps-box
+indicators.** Measuring first was what settled the shape, and it is worth recording what the
+measurement changed about the plan:
+
+1. **The computed boundary flag was right, and safer than expected.** Across all 33 captures — 484
+   emitted laps — a garage visit sits *before* the timed run in **every** case: 69 laps have one,
+   none has garage frames inside or after the run, and no garage is stranded in a buffer that was
+   never emitted. So the flag is exact, not best-effort.
+2. **`driver_status` alone is not enough, and `pit_status` / `pit_lane_timer_active` are
+   load-bearing.** `IN_LAP` marks the *planned* in-lap and stays set while the driver stays out
+   (three laps early in one race, six in another), so the in-lap comes from the pit-lane timer.
+   Conversely the timer never runs on a red-flag restart, so the out-lap needs `driver_status` too.
+   Both are stored.
+3. **Safety Car and Red Flag came in for free** — both are on the **Session** packet the assembler
+   already routes, so no Event work (that stays E15). Hence the banked *lap-context indicators*
+   item landed here rather than waiting: `SCAR` Event packets are actively worse for this, being
+   mostly formation-lap and "resume race" noise.
+4. **It corrected two real errors**, verified end-to-end against every capture: the fuel proxy's one
+   false split (Shanghai sprint lap 4) is gone, and a safety-car run that reported 1:55.967 now
+   reports the 1:36.776 it actually ran. It also *raises* some practice averages, because a flying
+   lap that merely ended a run is no longer mistaken for an in-lap — deliberate, and recorded in
+   DECISIONS → UI.
+
+Shape as landed: `Sample` → `Lap` → `LapRow` → both mappings, seven additive-nullable columns, a new
+Qt-free `ui/sessions/lap_context.py` that classifies each lap once for the Laps box, the stint split
+and the average pace, and **`PIPELINE_VERSION` 3 → 4**.
+
+**E16 — game-mode ids for 2026.** `game_mode 78` is **Driver Career '26**, established from
+observation 2026-08-24: every "Driver Career with the 2026 cars" recording carries it, checked in
+the database against the session detail view. It is **not in the UDP specification** — EA has not
+documented the '26 mode ids — so `GAME_MODE_NAMES` renders it `Unknown game mode (78)` today.
+Add it, labelled as observed rather than specified.
+
+**Still unknown: My Team '26**, because there is no My Team '26 recording yet. Add that id the
+same way once one exists. For contrast, Grand Prix Multiplayer "Championship" (the league, also on
+2026 cars) already reports `Online Custom` correctly — so only the *career* modes shifted.
+
+Shaped exactly like the `ai_difficulty` branch: assembler → `SessionResult` → `SessionRow` → both
+mappings → **`PIPELINE_VERSION` 3→4**. **Before the release**: `## Unreleased` already says
+*Re-ingest needed: yes*, so one re-ingest covers this and `ai_difficulty` together; afterwards it
+costs users a second one.
 
 ## P3 — later / opportunistic
 
@@ -238,6 +485,8 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
+| E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **step 1 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
+| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **step 3 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
@@ -255,10 +504,28 @@ verify the 2025 tyre-pressure bounds and record the source in `_SETUP_SPEC`.
 | E9 | Corner numbers on the track map (**licensing caveat**) | DECISIONS → UI |
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
-| E13 | Move the capture/database actions off Help into their own surface | ROADMAP → Other surfaces |
+| E18 | Fuller "Conditions": track temp, air temp, rain chance | **idea 2026-08-31** — session-vs-laps placement undecided; ROADMAP → Other surfaces |
+| E13 | Move the capture/database actions off Help into their own surface — including **is this recording safe to delete?** | ROADMAP → Other surfaces; the note below |
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
 | G3 | German user guide + its PDF artifact | **after G2**; ROADMAP → Localization |
+
+**E13 gains a question E1 could not answer — "is this recording safe to delete?", raised
+2026-08-26.** Found while testing the deleted-sessions manager: a tombstoned session names the
+capture that holds it, so the natural next thought is *delete the file and reclaim the space* — and
+nothing in the app says whether that file also holds sessions the user still has. One capture
+routinely holds a whole weekend, so the honest answer needs, per capture, every session it contains
+and each one's state (stored / deleted / assigned to a round). **The action wanted:** a *Delete
+capture* that is offered only when every session in the file is deleted, and that refuses with a
+list when it is not.
+
+**It belongs on Captures, not on Sessions**, for the reason the boundary was drawn in the first
+place (E1/E2 plan → decision 5): "which sessions does this *file* hold, and where is it" is
+capture-shaped. Sessions answers *what did I record and what happened in it*. Putting a file-delete
+on the deleted-sessions manager would need the capture's whole session list to be truthful anyway —
+which is E13's table — so it would drag the surface across the boundary rather than borrow from it.
+`CaptureStore.for_session` and `capture_sessions` already hold everything the check needs; nothing
+new has to be stored.
 
 **A6, added 2026-08-08, and what earned it.** Between `listening on 0.0.0.0:20777` and a finished
 capture, the recorder says **nothing** — so "it isn't recording" cannot be told apart from "nothing
@@ -309,7 +576,7 @@ the open half worth building, not a second hint.
 dialog's button at the matching setup asset's `browser_download_url` rather than the release page,
 and **say in the dialog that installing an update needs administrator rights and a Windows restart**.
 The second half stands on its own — the dialog currently says nothing about the reboot, which is the
-most important fact about updating this app. It can ride along with any Cycle 4 release.
+most important fact about updating this app. It can ride along with any release.
 
 **The open question C8b left: should the installer write the firewall rule at all?** Recorded
 2026-08-15 because the trade-off genuinely moved — when C8b was decided the rule was free, and it now
@@ -382,6 +649,19 @@ up opportunistically rather than scheduled.
   installer-created rule itself, not to updating. **Do not schedule "experiment #6", a real
   v0.7.0 → v0.8.0 upgrade test: it is not runnable**, because v0.8.0 is the first release that
   shipped an installer.
+- **The `disk I/O error` after a Forget, 2026-08-26 — unexplained, and not seen since.** During
+  E1 branch 4's manual pass, `Help → Re-read captures` failed for **all 33 captures** at once, every
+  one on the worker's *own* fresh `SessionStore` at its first read (`SELECT … FROM deleted_sessions`),
+  while the GUI's already-open stores kept working; restarting the app cleared it. It has not
+  recurred since the branch-4 fixes, and **none of those fixes touch SQLite**, so the cause is not
+  known — do not record it as fixed. The one mechanism reproduced in isolation is *replacing
+  `f1league.db` while the app runs and deleting its `-wal`/`-shm` sidecars*, which produces exactly
+  this signature (new connections fail, open ones do not); the tester does not believe the file was
+  swapped, and the seasons survived, which a swap-from-backup would not have left. **Plan:** if it
+  returns, capture whether `f1league.db-wal` / `-shm` exist and their mtimes at that moment, and
+  whether anything outside the app had the file open (`lsof`). Suspect list, in order: a store
+  disposed on a worker thread while the GUI's engines are open (`RestoreWorker` refusing early is the
+  newest caller of that pattern), then anything that touches the file from outside the process.
 - **E11 — track map rotation.** Possibly already correct; unconfirmed. **Plan:** compare the
   rendered map against the in-game track map when recording the next sessions — which is the same
   ~2026-08-12 race B1 is waiting on, so both can be settled from one capture. Note that absolute
@@ -401,6 +681,48 @@ up opportunistically rather than scheduled.
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 ## Recently closed
 
+- **E14 — a session that ran both dry and wet.** Closed 2026-08-31 on `feature/mixed-weather`,
+  the last open item for **v0.9.0**. Small as predicted (one accumulator, one additive column, one
+  selector at the two places a session's weather is drawn), but **the shape changed once it was
+  measured against the 33 captures** rather than reasoned about: the plan's "both present → mixed"
+  would have mislabelled one session, and the obvious guard against that — a minimum number of
+  packets — is the one thing that provably cannot work here. See the E14 note above for both, and
+  TELEMETRY_NOTES for the numbers. `PIPELINE_VERSION` stayed at **4**: it has never been released,
+  so this rides the same 2 → 4 prompt E17 already earned.
+
+- **E1 + E2 — the Sessions surface and the deleted-sessions manager.** Closed 2026-08-26, five
+  branches over six days: `ai_difficulty` through the pipeline (0), the delete guard that stopped an
+  assigned session being deleted from the weekend picker (1), the surface itself — overview, detail,
+  pace and tyre-life charts (2a/2b/2c), `pipeline.restore_session` with its tombstone rollback (3),
+  and the manager with Restore, Forget and the capture chooser (4). Planned in
+  **`E1_E2_PLAN.md`**, which stays as the record of *why* each piece is shaped the way it is.
+  Four defects came out of the manual pass and were fixed on branch 4: a chooser whose selection was
+  silently dropped (a bound method PySide6 converted to an empty string), a log call with three
+  placeholders and two arguments, a stint average that rounded to even, and a sprint weekend's Grand
+  Prix reading "Race 2" everywhere a session is named. One item from that pass is **not** closed —
+  see the `disk I/O error` entry under *Needs verification*.
+
+- **A4 + A4b — the live light/dark switch, and the guard that stops it coming back.** A4 done
+  2026-08-15 on `fix/theme-switch-text-colour`, A4b done 2026-08-18; **shipped together as
+  v0.8.1**, the first items of Cycle 4 and the end of a known issue carried in **every release
+  since v0.3.0**.
+  **Re-measuring by AST before touching anything is what made it tractable**, and is the reusable
+  lesson: the real scope was **33 colour-freezing calls, not the 27 the docs recorded**, and the
+  recorded figure had not even been counting the same thing. 32 label sites moved to `QFont`
+  behind named helpers in `ui/style.py`; A4b carried the five remaining **controls** (sidebar plus
+  three buttons), and the season card was **measured and then deliberately left as it was**.
+  **The root cause had been misdiagnosed in the docs until 2026-08-06** and the corrected
+  mechanism is the thing worth not re-deriving: setting *any* stylesheet hands a widget to
+  `QStyleSheetStyle`, which caches a palette **at apply time**, so a label styled only
+  `font-size` carries the old theme's text colour despite never asking for a colour. No
+  palette-derived colour exists anywhere in the codebase.
+  **Two never-applied stylesheets fell out of the work** — a missing `f` prefix in
+  `slider_row.py` and in `car_status_graphic.py`, so the setup panel's min/max labels had never
+  been muted and the car-status background had never been set. Both were passing the *name* of a
+  colour setting instead of its value, which is a bug class worth recognising on sight.
+  **A guard test now fails if a font-bearing stylesheet without an explicit colour reappears**, so
+  this cannot silently re-accumulate the way it did over five releases. `MUTED_TEXT_QSS` stays
+  styled on purpose — its `#8b949e` is deliberately fixed and reads on both grounds.
 - **Kill mid-record → recovers on next launch. Verified 2026-08-09** during the v0.8.0 clean-test
   runs, where it is a checklist item. It had been open since 2026-08-07 only because **Windows
   Sandbox cannot record** (a VM with internet but no route to the home network, so the PS5 never
@@ -787,15 +1109,19 @@ up opportunistically rather than scheduled.
 
 ## Deferred, with reasons
 
-- **E1 Sessions surface + E2 deleted-sessions manager → after Cycle 3.** Not the small view it
-  looks like: it means building the Sessions view, linking parts of it to the Laps view, and then
-  *reworking the existing Seasons view*, which would inherit data from both. That is a
-  cross-surface rework, so it waits until the release process is settled. (E2's store side is
-  already done — `deleted_uids` / `is_deleted` / `restore` — so only its UI is pending, and it
-  most likely lives inside E1.)
-- **E3 Analytics → after Cycle 3.** Large, and it wants a season of accumulated data behind it.
-- **E5 Bug report page → after Cycle 3.** Currently a placeholder in `_SECTIONS`; most of what it
-  would do (open logs, show version) the Help page already does.
+- **E1/E2, E3 and E5 are no longer deferred — un-deferred 2026-08-18; not Cycle 4 work
+  (corrected 2026-08-24).** Their stated
+  reason here was "after Cycle 3", and Cycle 3 is closed, so leaving the project's *next* item
+  filed under *Deferred* was reading as forgotten. They now have P2 rows and an order. What was
+  written here is still true of the work and is worth keeping: **E1/E2 is not the small view it
+  looks like** — it means building the Sessions view, linking parts of it to the Laps view, and
+  then *reworking the existing Seasons view*, which would inherit data from both, so it is a
+  cross-surface rework rather than one page. **E2's store side is already built**
+  (`deleted_uids` / `is_deleted` / `restore`), so on paper only its UI is pending and it most
+  likely lives inside E1 — **verify that against the code before planning around it.** **E3** is
+  large and wants a season of accumulated data behind it. **E5** is a placeholder in `_SECTIONS`
+  and most of what it would do (open logs, show version) the Help page already does, which is why
+  it is last rather than first.
 - **B5 reconstructed-points Option 3 → P3.** Less urgent than it looked: A2 shows the Final
   Classification arrives 5–6× per session, so reconstruction is rare, and v0.4.2 removed its main
   cause. Belongs with league-management (per-league scoring tables) when that happens.

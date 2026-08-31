@@ -327,6 +327,9 @@ GAME_MODE_NAMES: dict[int, str] = {
     29: "Career '25 Online",
     30: "Challenge Career '25",
     75: "Story Mode (APXGP)",
+    # "Driver Career on the 2026 cars" recording reports 78. (not covered in the UDP appendix, confirmed by F1 25 2026 season pack dlc recording)
+    78: "Driver Career '26",
+    # "My Team Career on the 2026 cars" still unknown - no recording yet present
     127: "Benchmark",
 }
 

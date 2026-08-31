@@ -244,6 +244,64 @@ class RelocateWorker(QThread):
                 store.close()
 
 
+class RestoreWorker(QThread):
+    """Re-ingests the one capture that holds a deleted session, off the GUI thread.
+
+    The same shape as :class:`ImportWorker`: its stores are built on THIS thread (SQLite dislikes
+    a connection shared across threads) and disposed in one ``finally``, and the heavy pipeline
+    import lives inside ``run`` so it stays out of the start-up path. A league capture is hundreds
+    of megabytes to decompress and parse, which is why one session coming back cannot be done on
+    the GUI thread.
+
+    **No cancellation and no progress.** ``reingest_all`` polls a stop event *between* captures;
+    this is a single capture, and ``ingest_capture`` has neither a progress callback nor an
+    interruption point - so a restore is one indeterminate wait, and the window shows it as busy
+    rather than as a progress bar it cannot fill honestly.
+
+    The window owns this worker, not the page: the deleted-sessions view confirms and chooses the
+    capture on the GUI thread, then asks upward. ``done`` carries a ``pipeline.RestoreOutcome``
+    that may well be a refusal - a missing archive is a normal answer here, not a failure -
+    while ``failed`` stays for the unexpected.
+    """
+
+    done = Signal(object)                   # pipeline.RestoreOutcome
+    failed = Signal(str)                    # error message
+
+    def __init__(self, db_url: str, session_uid: int, *, content_hash: str | None = None, 
+                 trace_dir: str = "lap_traces", captures_dir: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._db_url = db_url
+        self._session_uid = int(session_uid)
+        self._content_hash = content_hash
+        self._trace_dir = trace_dir
+        self._captures_dir = captures_dir
+
+    def run(self) -> None:
+        from ..pipeline import restore_session
+        from ..storage.captures import CaptureStore
+        from ..storage.laps import LapStore
+        from ..storage.sessions import SessionStore
+
+        store = lap_store = capture_store = None
+        try:
+            store = SessionStore(self._db_url)
+            lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            capture_store = CaptureStore(self._db_url)
+            outcome = restore_session(
+                self._session_uid, store, capture_store,
+                lap_store=lap_store,
+                content_hash=self._content_hash,
+                captures_dir=self._captures_dir,
+            )
+            self.done.emit(outcome)
+        except Exception as exc:            # surface any failure to the UI rather than dying silently
+            self.failed.emit(str(exc))
+        finally:
+            for s in (capture_store, lap_store, store):
+                if s is not None:
+                    s.close()
+
+
 class ImportWorker(QThread):
     """Copies league captures into the local captures folder and ingests them, off the GUI thread.
 

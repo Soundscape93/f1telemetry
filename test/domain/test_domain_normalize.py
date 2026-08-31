@@ -14,8 +14,18 @@ from f1telemetry.src.domain.normalizer import (
     normalize_participants,
     normalize_tyre_context,
     normalize_session,
+    telemetry_sample
 )
-from f1telemetry.src.protocol.enums import Formula, ResultStatus, SessionType, Weather
+from f1telemetry.src.protocol.enums import (
+    DriverStatus,
+    Formula,
+    PitStatus,
+    ResultStatus,
+    SessionType,
+    Weather
+)
+from f1telemetry.src.protocol.v2025 import structs as s25
+from f1telemetry.src.protocol.v2026 import structs as s26
 
 
 def _header(**kwargs) -> SimpleNamespace:
@@ -58,13 +68,14 @@ class NormalizeParticipantsTest(unittest.TestCase):
 
 class NormalizeSessionTest(unittest.TestCase):
     """Test cases for normalizing session data."""
-    def _packet(self):
+    def _packet(self, packet_format=2026, ai_difficulty=95):
         """Build a fake session packet for testing."""
         return SimpleNamespace(
-            header=_header(session_uid=12345, packet_format=2026, player_car_index=3),
+            header=_header(session_uid=12345, packet_format=packet_format, player_car_index=3),
             season_link_identifier=100, weekend_link_identifier=200, session_link_identifier=300,
             track_id=7, session_type=int(SessionType.RACE), formula=int(Formula.F1_MODERN),
             weather=int(Weather.CLEAR), game_mode=28, total_laps=5, track_length=5891,
+            ai_difficulty=ai_difficulty,
             # fixed-length 12 array in the wire struct; only the first num_sessions are real
             num_sessions_in_weekend=9,
             weekend_structure=[1, 10, 11, 12, 15, 5, 6, 7, 15, 0, 0, 0],
@@ -100,6 +111,89 @@ class NormalizeSessionTest(unittest.TestCase):
         s = normalize_session(self._packet())
         self.assertEqual(s.track_length_m, 5891)
         self.assertEqual((s.sector2_start_m, s.sector3_start_m), (1234.5, 3456.0))
+
+    def test_ai_difficulty_carried_from_both_formats(self):
+        """AI difficulty reaches the scaffold, and reads the same in 2025 and 2026 streams."""
+        for packet_format in (2025, 2026):
+            with self.subTest(packet_format=packet_format):
+                s = normalize_session(self._packet(packet_format=packet_format, ai_difficulty=95))
+                self.assertEqual(s.ai_difficulty, 95)
+
+    def test_ai_difficulty_zero_survives(self):
+        """A no-AI session reports 0; it is carried as 0, which readers treat as 'not captured'."""
+        self.assertEqual(normalize_session(self._packet(ai_difficulty=0)).ai_difficulty, 0)
+
+    def test_ai_difficulty_named_identically_in_both_wire_structs(self):
+        """What makes the format-independence real: neither struct renames the field.
+
+        normalize_session reads ``packet.ai_difficulty`` with no format branch, so a rename on
+        either side would fail at ingest, not here - unless this test catches it first.
+        """
+        for structs in (s25, s26):
+            with self.subTest(structs=structs.__name__):
+                names = {name for name, *_ in structs.PacketSessionData._fields_}
+                self.assertIn("ai_difficulty", names)
+
+
+class LapStateSampleTest(unittest.TestCase):
+    """The Lap Data fields the assembler reads a lap's context out of.
+
+    Lap-state scalars, not trace channels: they ride on the ``Sample`` the way ``fuel`` does, and
+    the assembler reduces them to one value per lap at the boundary. ``build_trace`` never sees them
+    (core invariant #6 - a trace is indexed by distance and its channels are fixed).
+    """
+
+    def _lap_data(self, driver_status=1, pit_status=0, pit_lane_timer_active=0):
+        return SimpleNamespace(lap_distance=250.0, driver_status=driver_status,
+                               pit_status=pit_status,
+                               pit_lane_timer_active=pit_lane_timer_active)
+
+    def _car_telemetry(self):
+        return SimpleNamespace(speed=210, throttle=1.0, brake=0.0, steer=0.0, gear=7,
+                               engine_rpm=11000, drs=1)
+
+    def test_lap_state_reaches_the_sample(self):
+        sample = telemetry_sample(
+            self._lap_data(driver_status=int(DriverStatus.OUT_LAP),
+                           pit_status=int(PitStatus.IN_PIT_AREA), pit_lane_timer_active=1),
+            self._car_telemetry())
+        self.assertEqual(sample.driver_status, int(DriverStatus.OUT_LAP))
+        self.assertEqual(sample.pit_status, int(PitStatus.IN_PIT_AREA))
+        self.assertEqual(sample.pit_lane_timer_active, 1)
+
+    def test_values_are_raw_ints_not_enum_members(self):
+        """Core invariant #9: the wire int is what travels; ``safe_enum`` happens on read."""
+        sample = telemetry_sample(self._lap_data(driver_status=99), self._car_telemetry())
+        self.assertEqual(sample.driver_status, 99)
+        self.assertNotIsInstance(sample.driver_status, DriverStatus)
+
+    def test_a_garage_frame_reads_as_zero_not_as_missing(self):
+        """IN_GARAGE is 0, so the field cannot use 0 as its "not captured" value - the Sample
+        default is -1 for exactly that reason, and a real garage frame must not look like it."""
+        sample = telemetry_sample(self._lap_data(driver_status=int(DriverStatus.IN_GARAGE)),
+                                  self._car_telemetry())
+        self.assertEqual(sample.driver_status, 0)
+        self.assertEqual(Sample._field_defaults["driver_status"], -1)
+
+    def test_lap_state_named_identically_in_both_wire_structs(self):
+        """What makes the format-independence real: neither struct renames these.
+
+        ``telemetry_sample`` reads them with no format branch, exactly as ``ai_difficulty`` is read,
+        so a rename on either side would fail at ingest rather than here - unless this catches it.
+        """
+        for structs in (s25, s26):
+            for field in ("driver_status", "pit_status", "pit_lane_timer_active"):
+                with self.subTest(structs=structs.__name__, field=field):
+                    names = {name for name, *_ in structs.LapData._fields_}
+                    self.assertIn(field, names)
+
+    def test_race_control_named_identically_in_both_wire_structs(self):
+        """The other half of a lap's context comes off the Session packet, and is read the same way."""
+        for structs in (s25, s26):
+            for field in ("safety_car_status", "num_red_flag_periods"):
+                with self.subTest(structs=structs.__name__, field=field):
+                    names = {name for name, *_ in structs.PacketSessionData._fields_}
+                    self.assertIn(field, names)
 
 
 class BuildTraceTest(unittest.TestCase):

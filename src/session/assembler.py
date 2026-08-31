@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections import Counter
 from collections.abc import Iterable, Iterator
 
 from ..domain.models import (
@@ -49,11 +50,25 @@ from ..domain.normalizer import (
     normalize_car_damage,
     telemetry_sample,
 )
-from ..protocol.enums import PacketId
+from ..protocol.enums import (
+    DriverStatus,
+    PacketId,
+    PitStatus,
+    SafetyCarStatus,
+    Weather,
+    safe_enum,
+)
 
 # A cleanly caputred lap begins near the start line. A lap whose sample is well past
 # it was joined mid-way (started recording) or is an out-lap, so no clean trace is kept.
-_MAX_LAP_START_DISTANCE_M = 200  # meters
+#
+# The bound has to clear a standing start: the grid sits some way past the timing line, and how far
+# is set by pole rather than by the back of the grid — the grid queues backwards from P1 towards the
+# line, so lower slots sit nearer it, and where pole is already close they fall behind the line and
+# start their lap 1 from a few metres. The deepest slot on the calendar is P1 at COTA, about 323 m;
+# measured in these captures, Jeddah is 246.5 m and Shanghai 175.7 m. 200 dropped those opening laps
+# silently. 350 clears COTA while still meaning "at the start" - about a tenth of a Monaco lap.
+_MAX_LAP_START_DISTANCE_M = 350  # meters
 
 _LAP_VALID_BIT = 0x08  # bit 3 of lap_valid_bit_flags = whole lap valid
 
@@ -63,6 +78,26 @@ _LAP_VALID_BIT = 0x08  # bit 3 of lap_valid_bit_flags = whole lap valid
 # (negative, or a whole formation/out lap) in front of the real 0..L pass. A backward jump larger
 # than this marks such a boundary within one buffer (the s/f line reset).
 _LAP_RESET_DROP_M = 300  # meters
+
+# --- lap state (E17) -------------------------------------------------------------------------
+# Measured across every capture in this database before these rules were written; the evidence is
+# in TELEMETRY_NOTES -> "What driver_status actually reports".
+#
+_SAFETY_CAR_NONE = int(SafetyCarStatus.NONE)
+_SAFETY_CAR_DEPLOYED = (int(SafetyCarStatus.FULL), int(SafetyCarStatus.VIRTUAL))
+
+# --- weather (E14) ---------------------------------------------------------------------------
+# The opening Session packets of a session report a condition the packet then corrects. Measured
+# across all 33 captures: 8 of 73 sessions carry such a run, every one of them settled by
+# session_time 2.0 s, and in 3 of the 8 the forecast array is still empty - the game is still
+# setting the session up. Skipping that window is what stops a Melbourne Q1 that read CLEAR for
+# 1.5 s and then rained for eighteen minutes from being called mixed.
+#
+# In SECONDS, not packets. The game fast-forwards the session clock while the player sits in the
+# garage, so a *genuine* 38-second wet stretch can be four packets - the same length as the
+# artifact, which makes a packet count useless as a dwell. The shortest real stretch measured is
+# 26.4 s, so 3.0 clears both edges by an order of magnitude. See TELEMETRY_NOTES -> weather.
+_WEATHER_SETTLE_S = 3.0  # seconds
 
 
 def _sector_ms(minutes_part: int, ms_part: int) -> int:
@@ -100,15 +135,24 @@ def _split_runs(samples: list[Sample]) -> list[list[Sample]]:
     return [clipped for run in runs if (clipped := _drop_leading_negatives(run))]
 
 
-def _longest_run(runs: list[list[Sample]]) -> list[Sample]:
-    """The run covering the most distance; ties -> the later run (timed lap follows an out-lap)."""
-    best: list[Sample] = []
-    best_span = -1.0
-    for run in runs:
+def _longest_run_index(runs: list[list[Sample]]) -> int:
+    """Index of the run covering the most distance; ties -> the later run or -1 when there are none.
+    
+    An *index* returned rather than the run itself because the caller needs to know what came before it in
+    the buffer, and two runs of a lap can compare equal - ``list.index`` would find the wrong one.
+    """
+    best, best_span = -1, -1.0
+    for index, run in enumerate(runs):
         span = run[-1].distance - run[0].distance
         if span >= best_span:
-            best, best_span = run, span
+            best, best_span = index, span
     return best
+
+
+def _longest_run(runs: list[list[Sample]]) -> list[Sample]:
+    """The run covering the most distande; ties -> the later run (timed lap follows an out-lap)."""
+    index = _longest_run_index(runs)
+    return runs[index] if index >= 0 else []
 
 
 def _estimate_lap_ms(run: list[Sample]) -> float:
@@ -127,8 +171,8 @@ def _estimate_lap_ms(run: list[Sample]) -> float:
     return total_s * 1000.0
 
 
-def _select_timed_run(runs: list[list[Sample]], target_ms: int | None) -> list[Sample]:
-    """Pick the run that is the lap Session History timed at ``target_ms``.
+def _select_timed_run_index(runs: list[list[Sample]], target_ms: int | None) -> int:
+    """Index of the run that is the lap Session History timed at ``target_ms``, or -1 for none.
 
     With a known lap time and more than one full run (qualifying's in/out/flying laps share one
     current_lap_num), choose the run whose estimated duration is closest to it - the flying lap,
@@ -136,10 +180,15 @@ def _select_timed_run(runs: list[list[Sample]], target_ms: int | None) -> list[S
     (the full 0..L pass) - the right choice for a normal race lap and its trailing slow-down.
     """
     if not runs:
-        return []
+        return -1
     if target_ms and len(runs) > 1:
-        return min(runs, key=lambda r: abs(_estimate_lap_ms(r) - target_ms))
-    return _longest_run(runs)
+        return min(range(len(runs)), key=lambda i: abs(_estimate_lap_ms(runs[i]) - target_ms))
+    return _longest_run_index(runs)
+
+def _select_timed_run(runs: list[list[Sample]], target_ms: int | None) -> list[Sample]:
+    """The run that is the lap Session History timed at ``target_ms`` (see _select_timed_run_index)."""
+    index = _select_timed_run_index(runs, target_ms)
+    return runs[index] if index >= 0 else []
 
 
 def _lap_start_fuel(samples: list[Sample]) -> float | None:
@@ -155,6 +204,74 @@ def _lap_start_fuel(samples: list[Sample]) -> float | None:
         if not math.isnan(sample.fuel):
             return sample.fuel
     return None
+
+
+def _modal_driver_status(samples: list[Sample]) -> int:
+    """The status the car held for most of the timed lap.
+    
+    Modal rather than first or last: a lap can begin with a stale frame ffrom the lap before it, and
+    a race in-lap flips to IN-LAP for its final second. What the lap *was* is what it mostly read.
+    """
+    return Counter(sample.driver_status for sample in samples).most_common(1)[0][0]
+
+
+def _peak_pit_status(samples: list[Sample]) -> int:
+    """The furthest into the pits the car got on this lap: none -> pitting -> in the pit area.
+
+    IN_PIT_AREA (2) is the useful one - it means the stationary stop itself happened on this lap,
+    which is not always the lap the driver entered the pit lane on. Where the pit box sits before
+    the timing line (Melbourne, Sakhir) the stop lands on the *in*-lap and that lap carries the
+    +14 to +37 s; where it sits after (Suzuka, Shanghai) it lands on the out-lap.
+    """
+    return max((sample.pit_status for sample in samples), default=int(PitStatus.NONE))
+
+
+def _is_out_lap(samples: list[Sample]) -> bool:
+    """Whether this lap began in the pit lane: the lane timer was running as it started.
+
+    One signal, and it is exact. Measured over all 470 emitted laps in this database, the timer
+    flags 15 laps and every one of them also carries a pit stop - there is no real pit-lane exit
+    it misses.
+
+    ``driver_status == OUT_LAP`` is deliberately *not* consulted, though it looks like it should
+    be. It flags those same 15 laps and two more: Shanghai sprint lap 4 and Shanghai race lap 13,
+    each 94-95% OUT_LAP with the timer never active. Those two are red-flag restarts, and the game
+    means something different by them - it does not time the lap that drives out of the pit lane to
+    the grid (TELEMETRY_NOTES -> "A red flag skips a lap number"), so the status is left over from a
+    lap that was never emitted, and the lap it lands on is a standing start from the grid box, not a
+    lap begun in the pit lane. Calling it an out-lap put the wrong chip on it and drew it as a stint
+    opener. ``lap_context`` reads the restart off the stored ``red_flagged`` flag instead; the raw
+    status is still on the lap for anyone asking.
+    """
+    return bool(samples[0].pit_lane_timer_active)
+
+
+def _is_in_lap(samples: list[Sample]) -> bool:
+    """Whether this lap ended by entering the pit lane - read from the lane timer, never the status.
+
+    ``driver_status == IN_LAP`` looks like the right field and is not: the game sets it when the
+    *planned* in-lap comes up and leaves it set while the driver stays out. Melbourne race laps 19,
+    20 and 21 all read IN_LAP and the stop is on 21; one Suzuka race reads IN_LAP for its last six
+    laps and never pits again. The pit-lane timer running as the car crosses the line is the fact.
+    """
+    return bool(samples[-1].pit_lane_timer_active)
+
+
+def _preceded_by_garage(before: list[Sample]) -> bool:
+    """Whether the car sat in the garage between the previous emitted lap and this one.
+
+    ``before`` is every frame of this lap number's buffer ahead of the run that turned out to be
+    the timed lap. That is where a garage visit always is: ``current_lap_num`` only advances when
+    the line is crossed at the end of a *timed* lap, so an in-lap, a garage stop and the out-lap
+    that follows all share the lap number of the flying lap they lead into. Measured across every
+    capture here - 484 emitted laps, 69 with a garage before them, **none** with one inside or
+    after the timed run, and no garage stranded in a buffer that was never emitted.
+
+    This is what the ``fuel_in_tank`` proxy was standing in for (DECISIONS -> UI). A race never
+    reports it: the game says IN_PIT_AREA for a pit stop and keeps IN_GARAGE for the garage proper,
+    so this is an *additional* run boundary beside wear/age/compound, never a replacement.
+    """
+    return any(sample.driver_status == DriverStatus.IN_GARAGE for sample in before)
 
 
 def _trim_to_timed_lap(samples: list[Sample]) -> list[Sample]:
@@ -191,6 +308,15 @@ class _SessionBuilder:
         self._tyre_context: dict[int, LapTyreContext] = {}  # lap_number -> tyre state at the line
         self._damage: dict[int, CarDamage] = {}  # lap_number -> non-tyre damage at the line
 
+        # race control, from the Session packet rather than the frame join (see _note_race_control):
+        self._safety_car: dict[int, int] = {}       # lap_number -> SafetyCarStatus seen that lap
+        self._red_flag_laps: set[int] = set()       # lap_numbers a red-flag period began on
+        self._red_flag_periods: int | None = None   # last num_red_flag_periods, to see it rise
+
+        # every distinct condition the Session packets reported, in first-seen order, raw ints
+        # (see _note_weather). The scaffold's `weather` stays the end-of-session snapshot.
+        self._weather_seen: list[int] = []
+
         # lap_number -> candidate runs from that lap's buffer; the timed run is chosen at build
         # time (see _build_laps), once the Session History lap time is known.
         self._lap_runs: dict[int, list[list[Sample]]] = {}
@@ -213,6 +339,8 @@ class _SessionBuilder:
         pid = packet.header.packet_id
         if pid == PacketId.SESSION:
             self._scaffold = normalize_session(packet)
+            self._note_race_control(packet)
+            self._note_weather(packet)
         elif pid == PacketId.PARTICIPANTS:
             # union aross frames: a late (post-race) frame can drop cars, so merge rather
             # than overwrite, keeping the most complete identity seen for each car index.
@@ -307,6 +435,59 @@ class _SessionBuilder:
         if runs:
             self._lap_runs[lap_number] = runs
 
+
+    def _note_race_control(self, packet) -> None:
+        """Attribute the Session packet's safety-car and red-flag state to the lap in progress.
+
+        Neither rides on Lap Data, so neither reaches the frame join - they are session-wide facts
+        on their own packet, and the lap they belong to is simply the one the join is filling.
+        That attribution is exact for a race, which drives one lap-distance pass per lap number;
+        practice and qualifying never see either state at all (measured across every capture here,
+        where the only three safety cars and two red flags are all in races).
+
+        **Safety car**: the state the lap is remembered by is the first non-NONE one it saw, except
+        that a real deployment always wins - so a race lap 1 records the formation lap, and a lap
+        the car spends going green under a returning safety car still records FULL rather than the
+        NONE that followed it.
+
+        **Red flag**: a *rise* in ``num_red_flag_periods``. Only rises, because the counter is not
+        monotonic - the Shanghai sprint's went 0 -> 1 on lap 2 and back to 0 on lap 10 - so reading
+        the value itself would flag every lap of the restart and then stop. Thin evidence: this
+        database holds two red flags, and both land on the right lap.
+        """
+        lap_number = self._cur_lap
+        if lap_number is None:
+            return                  # pre-session frames: no lap to attribute anything to
+        status = packet.safety_car_status
+        stored = self._safety_car.get(lap_number)
+        if (stored is None 
+            or (stored == _SAFETY_CAR_NONE and status != _SAFETY_CAR_NONE)
+            or status in _SAFETY_CAR_DEPLOYED):
+            self._safety_car[lap_number] = status
+        periods = packet.num_red_flag_periods
+        if self._red_flag_periods is not None and periods > self._red_flag_periods:
+            self._red_flag_laps.add(lap_number)
+        self._red_flag_periods = periods
+
+    def _note_weather(self, packet) -> None:
+        """Accumulate the distinct conditions this session reported, in first-seen order.
+        
+        The Session packet carries one condition and the scaffold keeps the last, so a session
+        that started dry and finished wet stores as wet with nothing saying it changed. This is
+        the other half of that fact - the set is actually ran through it, which
+        ``SessionResult.is_mixed_weather`` reads. Ground truth, unlike ``weatherForecastSamples``
+        (weekend.wide, rolls past samples off, and only a forecast - see PRIORITIES -> E14).
+
+        The opening ``_WEATHER_SETTLE_S`` seconds are skipped; the constant carries the measured
+        reason and why the window is session time rather than a packet count. The filter belongs
+        here and not on read: it is temporal, and the times are gone once this is a set.
+        """
+        if packet.header.session_time < _WEATHER_SETTLE_S:
+            return
+        weather = int(packet.weather)
+        if weather not in self._weather_seen:
+            self._weather_seen.append(weather)
+
     def _record_setup(self, setup) -> None:
         """Append a setup snapshot when the setup changes, deduping consecutive identical ones.
         
@@ -349,9 +530,14 @@ class _SessionBuilder:
             # now that the lap time is known, pick the run it belongs to (qualifying can leave an
             # in-lap, out-lap and flying lap under one lap number) and build only that trace. A run
             # still starting well past the line (joined mid-lap) or none at all is skipped.
-            samples = _select_timed_run(self._lap_runs[lap_number], total)
+            runs = self._lap_runs[lap_number]
+            index = _select_timed_run_index(runs, total)
+            samples = runs[index] if index >= 0 else []
             if not samples or samples[0].distance > _MAX_LAP_START_DISTANCE_M:
                 continue
+            # Everything in this lap number's buffer ahead of the timed run: the in-lap the game
+            # never timed, the garage stop and the out-lap, all of which share this lap's number.
+            before = [sample for run in runs[:index] for sample in run]
             laps.append(
                 Lap(
                     lap_number=lap_number,
@@ -363,11 +549,18 @@ class _SessionBuilder:
                     trace=build_trace(samples),
                     tyre_context=self._tyre_context.get(lap_number),
                     damage=self._damage.get(lap_number),
-                    fuel_in_tank=_lap_start_fuel(samples)
+                    fuel_in_tank=_lap_start_fuel(samples),
+                    driver_status=_modal_driver_status(samples),
+                    pit_status=_peak_pit_status(samples),
+                    preceded_by_garage=_preceded_by_garage(before),
+                    is_out_lap=_is_out_lap(samples),
+                    is_in_lap=_is_in_lap(samples),
+                    safety_car=self._safety_car.get(lap_number, _SAFETY_CAR_NONE),
+                    red_flagged=lap_number in self._red_flag_laps
                 )
             )
         return tuple(laps)
-    
+
     def build(self) -> SessionResult | None:
         """Finalize the session. Returns None if no Session packet was ever seen."""
         if self._scaffold is None:
@@ -398,7 +591,8 @@ class _SessionBuilder:
             participants=roster,
             laps=self._build_laps(),
             classification=classification,
-            setup_history=tuple(self._setup_history)
+            setup_history=tuple(self._setup_history),
+            weather_seen=tuple(safe_enum(Weather, w) for w in self._weather_seen)
         )
 
 class SessionAssembler:

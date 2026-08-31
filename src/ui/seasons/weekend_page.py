@@ -6,7 +6,6 @@ of assignable captures filtered to the round's track. Roster-aware for LEAGUE se
 
 from __future__ import annotations
 
-from datetime import datetime
 from functools import partial
 
 from PySide6.QtCore import Qt, Signal
@@ -32,24 +31,13 @@ from ..components import (
     build_classification_table,
     cell,
     clear_layout,
+    confirm_and_delete,
     display_name_fn,
     tidy_table,
 )
-from ..formatting import slot_label
+from ..formatting import recorded_label, slot_label
 from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
-
-
-def _recorded_label(recorded_at: datetime | None) -> str:
-    """Local-time 'YYYY-MM-DD HH:MM' for a session's recorded_at, or an em dash if unset.
-
-    ``recorded_at`` is stored as UTC; a tz-aware value is converted to local time, while a
-    naive value (older rows) is shown as-is.
-    """
-    if recorded_at is None:
-        return "—"
-    if recorded_at.tzinfo is not None:
-        recorded_at = recorded_at.astimezone()
-    return recorded_at.strftime("%Y-%m-%d %H:%M")
+from .labels import season_title
 
 
 class WeekendPage(QWidget):
@@ -64,12 +52,13 @@ class WeekendPage(QWidget):
     overview_requested = Signal()
     sessions_changed = Signal()      # Stored sessions data was deleted - other surfaces must re-read
 
-    def __init__(self, season_store, session_store, season_rosters, parent=None) -> None:
+    def __init__(self, season_store, session_store, season_rosters, lap_store=None, parent=None) -> None:
         """Initialize the weekend page."""
         super().__init__(parent)
         self._seasons = season_store
         self._sessions = session_store
         self._season_rosters = season_rosters
+        self._laps = lap_store              # deleting a session takes its laps + traces with it
         self._season_id: int | None = None
         self._round_number: int | None = None
         self._track_id: int | None = None
@@ -273,25 +262,56 @@ class WeekendPage(QWidget):
             self._collapsed_session_uids.add(session_uid)
 
     def _reload_capture_picker(self) -> None:
-        """Fill the picker with captures assignable to this round."""
+        """Fill the picker with captures assignable to this round.
+
+        Sessions already in *this* round are left out - they are listed above. Sessions assigned
+        to another round, or another season, deliberately stay: assigning one **moves** it here,
+        which is the repair for a misfiled session, and hiding them would make that session
+        unfindable. They are marked instead - and the marker doubles as the warning that Delete
+        will refuse them (``pipeline.delete_session``).
+        """
         show_all = self._show_all_tracks.isChecked()
         all_sessions = self._sessions.list_sessions()
         candidates = [
             s for s in all_sessions
-            if (show_all or s.track_id == self._track_id)
-            and s.session_uid not in self._assigned_uids
+            if (show_all or s.track_id == self._track_id) and s.session_uid not in self._assigned_uids
         ]
+        # One query for the set. The per-row placement and the season names are looked up only when at least one visible row actually needs them.
+        elsewhere = self._seasons.assigned_uids() - self._assigned_uids
+        marked = [s for s in candidates if s.session_uid in elsewhere]
+        seasons_by_id = ({s.season_id: s for s in self._seasons.list_seasons()} if marked else {})
+
         self._capture_table.setRowCount(len(candidates))
         for i, session in enumerate(candidates):
             drivers = len(session.classification.entries) if session.classification else 0
             slot = slot_for_session(session, all_sessions)
-            first = cell(slot_label(slot.session_type, slot.is_sprint_race))
+            label = slot_label(slot.session_type, slot.is_sprint_race)
+            placement = (self._seasons.assignment_for(session.session_uid)
+                         if session.session_uid in elsewhere else None)
+            if placement is not None:
+                label = f"{label} — assigned to R{placement[1]}"
+            first = cell(label)
+            if placement is not None:
+                first.setToolTip(self._assigned_tooltip(seasons_by_id, *placement))
             first.setData(Qt.ItemDataRole.UserRole, str(session.session_uid))
             self._capture_table.setItem(i, 0, first)
             self._capture_table.setItem(i, 1, cell(track_name(session.track_id)))
             self._capture_table.setItem(i, 2, cell(str(drivers)))
-            self._capture_table.setItem(i, 3, cell(_recorded_label(session.recorded_at)))
+            self._capture_table.setItem(i, 3, cell(recorded_label(session.recorded_at)))
             self._capture_table.setItem(i, 4, cell(str(session.session_uid)))
+
+    @staticmethod
+    def _assigned_tooltip(seasons_by_id, season_id: int, round_number: int) -> str:
+        """Spell out a marker: which season that round belongs to, and what Delete will do.
+
+        The marker itself is only "R*n*", which stops being unambiguous the moment a second
+        season exists - the tooltip is where the season gets named.
+        """
+        season = seasons_by_id.get(season_id)
+        where = (f"round {round_number} of {season_title(season)}" if season is not None
+                 else f"round {round_number} of another season")
+        return (f"Already assigned to {where}.\n"
+                "Assigning it here moves it; deleting it is refused until it is unassigned.")
 
     def _assign_selected(self) -> None:
         """Assign the selected capture to the current round, then re-query the weekend."""
@@ -320,18 +340,15 @@ class WeekendPage(QWidget):
             self._delete_capture(uid)
 
     def _delete_capture(self, session_uid: int) -> None:
-        """Confirm, then delete an unassigned capture's stored results (the recording is kept)."""
-        confirm = QMessageBox.question(
-            self,
-            "Delete session",
-            "Delete this session's stored results from the database?\n\n"
-            "The original recording in captures/ is kept, but this session will be skipped if "
-            "you re-ingest that capture (it's remembered as deleted).",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
+        """Confirm, then delete a session's stored results (the recording is kept).
+
+        Both halves are shared - the dialogs in ``components.session_actions``, the write in
+        ``pipeline.delete_session`` - so this page and the Sessions surface cannot drift apart
+        on the wording or on the assigned-session guard. A refusal or a cancel changes nothing,
+        so neither needs a re-query.
+        """
+        if not confirm_and_delete(self, session_uid, self._sessions, self._seasons,
+                                  lap_store=self._laps):
             return
-        self._sessions.delete(int(session_uid))
         self.sessions_changed.emit()  # laps surface caches a layout built from these laps
         self.reload()
