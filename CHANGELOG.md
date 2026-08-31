@@ -18,6 +18,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.9.0 — 2026-08-31
+
 ### Added
 - **The Sessions page is real.** It was a placeholder; it now lists every session you've recorded,
   newest first, as foldable cards you can filter by track and/or session. A card summarises the session
@@ -78,7 +81,6 @@ mixed-conditions icon once the guided re-ingest has re-read their captures.
   classification show a reconstructed result instead.
 - Dashboard, Analytics and Bug report pages are placeholders.
 - The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
-
 
 ## v0.8.1 — 2026-08-18
 
