@@ -33,6 +33,17 @@ _ICON_PX = 18
 _DROPS = {Weather.LIGHT_RAIN: 2, Weather.HEAVY_RAIN: 4, Weather.STORM: 2, MIXED: 2}
 
 
+def session_weather(session):
+    """What to draw for a session: ``MIXED`` when it ran both dry and wet, else its snapshot.
+    
+    The sentinel stays inside this module. ``SessionResult.weather`` is a ``Weather`` and the
+    stored column an int, so ``MIXED`` - which is neither - is resolved here, at the one seam
+    that draws it, from the set of conditions the session recorded. A session ingested before
+    that set existed has none and reads as its snapshot, exactly as it did before.
+    """
+    return MIXED if session.is_mixed_weather else session.weather
+
+
 class WeatherIcon(QWidget):
     """A small uncoloured line-art icon for one weather condition.
 

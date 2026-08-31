@@ -283,7 +283,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E2 | Deleted-sessions manager | **done 2026-08-26** — the manager, Restore (single-capture re-ingest with tombstone rollback) and Forget | **`E1_E2_PLAN.md`**; ROADMAP → Other surfaces |
 | E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
-| E14 | Mixed dry/wet weather on a session | open — **decided 2026-08-24**; land it **before the v0.9.0 release** so it shares one re-ingest (the release shape below renamed it from v0.8.2 on 2026-08-25) | the note below |
+| E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
@@ -313,6 +313,17 @@ forecast no longer covers the transition that actually happened; and they are a 
 across a session. Ground truth, no session-type filtering, no accuracy caveat, and it sets up a
 real weather timeline later. Dry is `CLEAR` / `LIGHT_CLOUD` / `OVERCAST`, wet is `LIGHT_RAIN` /
 `HEAVY_RAIN` / `STORM`; both present → mixed, otherwise keep the snapshot.
+
+**Done 2026-08-31**, on `feature/mixed-weather`. Two things came out of measuring first and are
+worth not re-deriving. **"Any two distinct values" is not the rule** — the opening 3-5 Session
+packets of a session report a placeholder that the packet then corrects, and it costs exactly one
+false mixed here (Melbourne Q1 read CLEAR for 1.5 s and then rained for eighteen minutes). And
+**the guard cannot be a packet count**: the game fast-forwards the session clock in the garage, so
+a genuine 38-second wet stretch arrives as *four* packets, the same length as the placeholder. The
+window is session-time seconds (`_WEATHER_SETTLE_S = 3.0`) — the placeholder is gone by 2.0 s and
+the shortest real stretch is 26.4 s. Stored as `weather_seen`, the *set* rather than a boolean, so
+the timeline this note anticipated widens the same column; the snapshot is untouched. Numbers in
+TELEMETRY_NOTES → "What the `weather` field reports", reasoning in DECISIONS → Storage.
 
 **E15 — the Event packets are already in every capture, unparsed.** Found 2026-08-24 while
 checking what the E1 session detail view could actually show. `session/assembler.py` dispatches on
@@ -493,6 +504,7 @@ costs users a second one.
 | E9 | Corner numbers on the track map (**licensing caveat**) | DECISIONS → UI |
 | E10 | Sector labels as map hover/tooltips | DECISIONS → UI |
 | E12 | Team colour swatches (only if team identity needs to be scannable) | DECISIONS → UI |
+| E18 | Fuller "Conditions": track temp, air temp, rain chance | **idea 2026-08-31** — session-vs-laps placement undecided; ROADMAP → Other surfaces |
 | E13 | Move the capture/database actions off Help into their own surface — including **is this recording safe to delete?** | ROADMAP → Other surfaces; the note below |
 | G1 | i18n infrastructure + a language setting | **Cycle 5 (likely)**; DECISIONS → Localization |
 | G2 | German translation of the UI strings | **Cycle 5 (likely)**; ROADMAP → Localization |
@@ -668,6 +680,15 @@ up opportunistically rather than scheduled.
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
 ## Recently closed
+
+- **E14 — a session that ran both dry and wet.** Closed 2026-08-31 on `feature/mixed-weather`,
+  the last open item for **v0.9.0**. Small as predicted (one accumulator, one additive column, one
+  selector at the two places a session's weather is drawn), but **the shape changed once it was
+  measured against the 33 captures** rather than reasoned about: the plan's "both present → mixed"
+  would have mislabelled one session, and the obvious guard against that — a minimum number of
+  packets — is the one thing that provably cannot work here. See the E14 note above for both, and
+  TELEMETRY_NOTES for the numbers. `PIPELINE_VERSION` stayed at **4**: it has never been released,
+  so this rides the same 2 → 4 prompt E17 already earned.
 
 - **E1 + E2 — the Sessions surface and the deleted-sessions manager.** Closed 2026-08-26, five
   branches over six days: `ai_difficulty` through the pipeline (0), the delete guard that stopped an

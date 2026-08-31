@@ -24,7 +24,7 @@ from .tables import (
 )
 from .trace_plot import TracePlot
 from .track_map import TrackMap
-from .weather import WeatherIcon
+from .weather import WeatherIcon, session_weather
 
 __all__ = [
     "CarStatusGraphic",
@@ -45,4 +45,5 @@ __all__ = [
     "TracePlot",
     "TrackMap",
     "WeatherIcon",
+    "session_weather"
 ]

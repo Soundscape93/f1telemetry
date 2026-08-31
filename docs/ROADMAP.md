@@ -69,6 +69,31 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   — see DECISIONS → UI ("Bundled imagery is open-licensed only").
 
 ## Other surfaces (currently placeholders)
+- **E18 — a fuller "Conditions" read-out: track temperature, air temperature and rain chance.**
+  *Idea recorded 2026-08-31, placement undecided.* E14 made a session's conditions honest about
+  changing between dry and wet, but "conditions" is currently only the weather icon. The Session
+  packet also carries `track_temperature` and `air_temperature` (both °C, `int8`), and each
+  `weatherForecastSample` carries a `rain_percentage` (0-100) alongside its own weather and
+  `time_offset`. None of the three is stored or shown today.
+
+  **The open question is where it belongs, and it is genuinely open**: on the *session* view,
+  beside the weather icon, as the conditions the session ran in; or on the *laps* view, per lap, as
+  the conditions that lap was driven in. They are different features, not two places for one
+  feature — a session-level read-out is a summary and needs the same "it changed" problem E14 just
+  solved for weather (temperatures drift all session, so a single number is the same lie the
+  end-of-session weather snapshot was), while a per-lap read-out is a real channel and is the one
+  that would explain a lap time.
+
+  **The rain percentage is the awkward one.** It is a *forecast* field, so it inherits the caveats
+  that got `weatherForecastSamples` rejected as E14's source (PRIORITIES → E14): the samples are
+  weekend-wide, past offsets roll off as the session runs, and `forecast_accuracy` may mark the
+  whole set Approximate. Sample 0 is the current one, so "rain chance right now" is probably
+  readable — but that needs measuring against the captures before it is promised, exactly as the
+  weather field was.
+
+  Not scheduled. Worth doing after the Sessions surface settles (E1d), so it lands in whichever
+  view survives the rework rather than being built twice.
+
 - **E13 — a captures / maintenance surface.** The Help page has accumulated five actions that are
   not Help content: *Import captures…*, *Re-read captures*, *Find moved captures…*, *Clean up
   missing captures* and *Back up database…*. They landed there because Help was the only real page

@@ -48,6 +48,30 @@ what would trigger revisiting it.
   implementation stays dumb:* record-on-change + dedupe consecutive identical setups; if the game
   emits transitional values during a garage visit we may get an extra snapshot or two — acceptable,
   and debouncing can be added later without touching the model or schema.
+- **A session that ran both dry and wet stores the *set* of conditions it saw, not a `mixed`
+  flag** (E14, PIPELINE_VERSION 4). `SessionResult.weather` is the condition at the *end* of the
+  session — the assembler's scaffold is last-write-wins — so a race that started dry and finished
+  wet read as wet with nothing saying it changed. The fix adds `weather_seen`, the distinct
+  conditions the Session packets reported in first-seen order, as a JSON column beside the
+  snapshot (same additive pattern as `weekend_structure`; `ensure_schema` ALTERs it in). **The
+  snapshot is untouched** — mixed is an *additional* fact, and a session that ran in one condition
+  must still say which. `ui/components/weather.MIXED` is then selected on read.
+  - *Why the set and not a boolean `weather_mixed`.* Same one additive column, but the boolean is a
+    conclusion: once stored, "which conditions did it run in" can never be answered without another
+    re-ingest, and that is exactly what a weather timeline would need. Storing the raw fact and
+    reading it is what invariant #9 already does for `game_mode`, `driver_status` and `safety_car`.
+    A timeline later widens this column rather than adding a second one.
+  - *Why it also resolves the type mismatch.* `MIXED` is a string sentinel and deliberately not a
+    `Weather` member, while the domain field is a `Weather` and the column an `int`. Deriving it at
+    the one UI seam (`weather.session_weather`) means nothing ever tries to put a non-`Weather`
+    value into either — the alternative shapes all end in widening the enum or the column.
+  - *Why the settling filter runs at ingest, not on read.* The first 3-5 Session packets of a
+    session report a placeholder condition (TELEMETRY_NOTES → "What the `weather` field reports"),
+    and discarding it needs the packet times — which are gone once this is a set. Same reasoning as
+    `_modal_driver_status`, `_peak_pit_status` and the safety-car rule: the assembler reduces raw
+    frames to a stored judgement, and the judgement is documented where it is made.
+  - *An empty set means "not captured", never "one condition"* — a row ingested before the column
+    existed, or a capture holding only a session's opening seconds. Both read as not mixed.
 - **Repository-per-aggregate.** One store file per aggregate root, named after it
   (`sessions.py`, `seasons.py`, future `laps.py`), each owning its table cluster; `schema.py` is
   the shared table layer. No mega-repository, no per-table files, and no abstract base until a

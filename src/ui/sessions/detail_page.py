@@ -47,6 +47,7 @@ from ..components import (
     clear_layout,
     confirm_and_delete,
     fit_table_height,
+    session_weather,
     tidy_table,
 )
 from ..components.tyres import tyre_pixmap
@@ -239,7 +240,7 @@ class DetailPage(QWidget):
         return build_pair_grid([
             (("Position", position), ("Points", player_points_label(session, slot.is_sprint_race))),
             (("Fastest lap", best), ("Laps completed", laps_completed_label(session, stored_laps=len(laps)))),
-            (("Difficulty", self._difficulty_label(session)), ("Conditions", WeatherIcon(session.weather, size_px=24))),
+            (("Difficulty", self._difficulty_label(session)), ("Conditions", WeatherIcon(session_weather(session), size_px=24))),
             (("Team & mode", session_context_label(session, label)), ("Recorded", recorded_label(session.recorded_at))),
         ])
 

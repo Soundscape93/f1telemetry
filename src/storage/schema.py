@@ -47,6 +47,11 @@ class SessionRow(Base):
     # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
     # (both report session_type 15). Additive column - [] for rows saved before it existed.
     weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # every distinct condition the session reported, raw enum ints in the first-seen order (E14).
+    # weather above stays the end-of-session snapshot and this is an additional fact. Additive
+    # column - [] for rows saved before it existed, which reads as "not captured", not "one
+    # condition", so a stale row never claims a session was mixed or wasn't.
+    weather_seen: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     # static track geometry (metres) from the Session packet; None for pre-feature rows.
     track_length_m: Mapped[int | None] = mapped_column(nullable=True)
     sector2_start_m: Mapped[float | None] = mapped_column(nullable=True)

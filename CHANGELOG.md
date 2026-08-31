@@ -19,94 +19,65 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 ### Added
-- **Sessions now record the AI difficulty they were run at.** The game has always sent it; the app
-  read past it. It is stored from now on, and appears wherever a session is summarised. Sessions
-  already in your database show it only after a re-ingest, and a session with no AI in it has no
-  difficulty to show.
-- **The Sessions page is real.** It was a placeholder; it now lists every session you've
-  recorded, newest first, as foldable cards you can filter by track or session. Folding one open
-  shows a single line summarising it — session, winner, fastest lap, weather and the AI
-  difficulty it ran at — and double-clicking the title opens the full classification along with
-  the capture it came from. Every session has a winner, including practice and qualifying, where
-  it's whoever ended up P1. Sessions can be deleted from here too, with the same guard the
-  weekend picker uses.
-- **The session detail page now shows how the session actually went.** Alongside the final
-  classification it lists your finishing position, points, the session's fastest lap, laps
-  completed, the AI difficulty, the conditions, the team and mode you were driving, and every lap
-  you drove with its tyre and its gap to your own best. Clicking a lap opens its telemetry.
-  Points appear only for races and sprints — the game reports a meaningless carried-over figure
-  for practice and qualifying. Penalties are shown when the game recorded them, though the type
-  and lap of each one aren't stored yet. Sessions recorded in Driver Career on the 2026 cars are
-  now named instead of showing an unknown mode id.
-- **Circuit outline** in the details box, and the session type in the
-  classification box title.
-- **The session detail page now charts pace and tyre life per run.** Under your laps, two
-  full-width graphs share one stint-relative axis — tyre life above, observed lap time below — so
-  every run restarts at lap 1 and two compounds can be read against each other directly. Runs are
-  worked out from the car itself: fresh tyres show up as the wear resetting, the compound changing
-  or the age counter going back to zero, and a trip back to the garage shows up in the fuel load —
-  so two runs on the *same* set of tyres, which practice and qualifying are full of, are no longer
-  drawn as one continuous line. Each point's tooltip carries the real lap number and the wear on
-  all four wheels. Lap times are what you actually drove and are not corrected for fuel: a later
-  run is partly quicker simply because the car is lighter. The pace scale is always 8 seconds,
-  starting just under your quickest lap, so a run whose laps are within a few tenths reads as the
-  dead heat instead of being stretched to fill the graph — and anything outside that window
-  is still drawn, clipped to the nearer edge, with its true time on hover.
-- **Your laps now say what happened on them, and the run averages act on it.** The session detail's
-  Laps box marks a lap that started from the grid (`START`), left the pits (`OUT-LAP`), came into
-  them (`IN-LAP`), ran behind a safety car (`SC`) or was caught by a red flag (`RED-FLAG`), and
-  hovering the lap says what it means. There is one mark for each reason a lap is left out of its
-  run's average pace, and no others — so an average you doubt can always be traced to the laps
-  behind it. They come from what the game reported at the time rather than being guessed at from lap
-  times, so they are right in places the guess was wrong: a practice lap that merely happened to be
-  the last one of a run is no longer treated as the lap into the pits, and a run that spent four
-  laps behind the safety car no longer reports that as its pace (one race here read 1:55.967 and
-  actually ran 1:36.776). A red-flagged race is read properly too: the slow lap the flag fell on is
-  marked and left out, the restart is recognised as the standing start from the grid box that it is,
-  and the run either side of the stoppage stays one run instead of being split in two and losing its
-  opening laps. The same reading decides where one run ends and the next begins, so the charts, the
-  averages and the marks beside your laps can no longer disagree. Sessions already in your database need a re-ingest before any of it appears; until then
-  they fall back to the old estimates and chart exactly as they do today.
-- **Each run on the pace chart now shows its average lap time.** In the legend, beside the compound
-  and the lap range. It's the pace of the *run*, not of the pit stop: the lap into the pits, the lap
-  out of them, and a race's standing start are left out of the average, since they'd otherwise add
-  seconds to a number meant to show tenths.
-- **Sessions you deleted can be brought back.** `Sessions → Deleted sessions` lists everything
-  you've deleted — what the session was, where and when it was recorded, when you deleted it, and
-  which recording holds it. **Restore** reads that one recording again and puts the session back
-  with its laps and their saved traces; if two recordings hold it, you're asked which, because they
-  can differ and the app won't guess. If the file can't be found it says so and points you at
-  *Help → Find moved captures* instead of pretending. **Forget** is the other way out: it stops the
-  session being remembered as deleted without bringing it back, so a recording you import or re-read
-  later can store it again — the only way to clear a session whose recording the app no longer knows
-  about. A restore never half-happens: if reading the file fails, everything goes back exactly as it
-  was, deletion date included. One caveat it tells you about itself — a deleted **Sprint Race**
-  shows as "Race", because what's remembered about a deleted session can't tell the two apart.
+- **The Sessions page is real.** It was a placeholder; it now lists every session you've recorded,
+  newest first, as foldable cards you can filter by track and/or session. A card summarises the session
+  — winner, fastest lap, weather, AI difficulty — and double-clicking opens it. Practice and
+  qualifying have a winner too: whoever ended up P1.
+- **The session detail page shows how the session actually went.** Alongside the classification:
+  your position, points, the session's fastest lap, laps completed, AI difficulty, conditions, the
+  team and mode you drove, the circuit outline, and every lap with its tyre and its gap to your
+  best — click a lap for its telemetry. Points show only for races and sprints; the figure the game
+  reports for practice and qualifying is meaningless. Penalties appear when the game recorded them,
+  though not yet their type or lap.
+- **Two charts per session: pace and tyre life per run.** They share one stint-relative axis, so
+  every run restarts at lap 1 and two compounds compare directly. Runs are worked out from the car
+  itself, so two runs on the *same* set of tyres are no longer drawn as one line. Lap times are what
+  you drove, uncorrected for fuel, and the pace scale is a fixed 8 seconds — a run within a few
+  tenths reads as the dead heat it was, and anything outside is clipped, with its true time on hover.
+- **Each run's legend carries its average lap time**, with the in-lap, the out-lap and a standing
+  start left out — they would add seconds to a number meant to show tenths.
+- **Your laps now say what happened on them, and the run averages act on it.** The Laps box marks a
+  lap that started from the grid, left the pits, came into them, ran behind a safety car or was
+  caught by a red flag — one mark for every reason a lap is left out of its run's average. They come
+  from what the game reported at the time rather than from guessing at lap times, which fixes real
+  errors: one race here read 1:55.967 and had actually run 1:36.776.
+- **A session that ran both dry and wet now says so.** Its conditions used to be whatever the
+  weather was when the session ended, so a race that started dry and finished in the rain read as
+  wet. A mixed session now shows the mixed icon; one that ran in a single condition still says which.
+- **Sessions you deleted can be brought back.** `Sessions → Deleted sessions` lists what you deleted
+  and which recording holds it. **Restore** reads that recording again and puts the session back
+  with its laps and traces; a restore that fails rolls back completely. **Forget** clears a session
+  from the deleted list without restoring it — the only way out for one whose recording the app no
+  longer knows about. A deleted **Sprint Race** shows as "Race": what is remembered about a deleted
+  session cannot tell the two apart.
+- **Sessions record the AI difficulty they were run at.** The game always sent it; the app read
+  past it. A session with no AI in it has no difficulty to show.
+- **Driver Career on the 2026 cars is named** instead of showing an unknown mode id.
 
 ### Fixed
-- **A sprint weekend's Grand Prix is now called Race, not Race 2, everywhere a session is named.**
-  The game reports the sprint and the Grand Prix as two different session types, and the app was
-  showing the second one's raw name. The Sprint Race was already named correctly.
-- **Deleting a session can no longer remove one that is assigned to a season round.** From a
-  round's capture picker it was possible to right-click a session belonging to a *different*
-  round — same track, or with *Show captures from all tracks* ticked — and delete it, which
-  silently dropped that result from the standings. Sessions already placed in a round are now
-  marked in the picker, and deleting one is refused with a message naming the season and round
-  to unassign it from first.
-- **Deleting a session now removes its laps and their saved traces too.** They were left behind
-  on every delete: invisible in the app, but still in the database and still taking up disk
-  space under `lap_traces/`.
+- **A sprint weekend's Grand Prix is called Race, not Race 2**, everywhere a session is named.
+- **Deleting a session can no longer remove one assigned to a season round**, which silently dropped
+  that result from the standings. Assigned sessions are marked in the capture picker, and deleting
+  one is refused with the season and round named.
+- **Deleting a session now takes its laps and their saved traces with it.** They were left behind on
+  every delete: invisible in the app, but still using disk under `lap_traces/`.
 - **A race's opening lap is no longer dropped when the grid sits far past the timing line.** On some
-  circuits the standing-start slot is a few hundred metres beyond the start/finish line — COTA's
-  pole is the furthest, and Jeddah was enough to trigger it — and lap 1 was being discarded as
-  though the recording had been started mid-lap. The race just had no opening lap, with nothing said
-  about it. Affected races get their lap 1 back on the re-ingest this release already asks for.
+  circuits the standing-start slot is a few hundred metres beyond it and lap 1 was discarded as though
+  the recording had started mid-lap.
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 2 → 4. The new columns are added silently on
-startup, so nothing breaks and nothing is lost, but existing sessions have no AI difficulty and no
-lap context stored until the guided re-ingest re-reads their captures — until then their laps carry
-no In/Out/Safety car/Red flag marks, and their run splitting and averages use the previous
-estimates. Everything else about them is unaffected.
+startup, so nothing breaks and nothing is lost, but sessions already in your database only pick up
+the AI difficulty, the lap marks, the corrected run averages, the recovered opening laps and the
+mixed-conditions icon once the guided re-ingest has re-read their captures.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 
 ## v0.8.1 — 2026-08-18

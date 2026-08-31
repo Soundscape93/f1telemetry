@@ -85,6 +85,7 @@ class SessionAssemblerErSCarryForwardTest(unittest.TestCase):
                     session_uid=1,
                     packet_format=2026,
                     player_car_index=0,
+                    session_time=0.0,
                 ),
                 season_link_identifier=10,
                 weekend_link_identifier=20,
