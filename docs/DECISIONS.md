@@ -325,10 +325,14 @@ what would trigger revisiting it.
     without qualification: *neither car in the pit lane, neither in the garage*. It drops 58% of raw
     events and every pass of a parked car, and needs only the Lap Data frame the assembler already
     holds. Everything past it stays derived and revisable.
-  - **Store field-wide, display player-only.** Player-involved events are ~1,005 across all 33
-    captures against ~6,130 field-wide — both trivial beside 440 lap rows. Widening later would cost
-    a **re-ingest prompt** to recover data already on disk, and that prompt is the one cost this
-    project treats as expensive (it is what the whole v0.9.0 grouping decision turned on).
+  - **Store field-wide, whatever a given surface displays.** Player-involved events are ~1,005
+    across all 33 captures against ~6,130 field-wide — both trivial beside 440 lap rows. Widening
+    later would cost a **re-ingest prompt** to recover data already on disk, and that prompt is the
+    one cost this project treats as expensive (it is what the whole v0.9.0 grouping decision turned
+    on). *(Clarified 2026-09-01, E15 branch 2.* This bullet read "display player-only", which was an
+    argument about **overtakes** phrased over both codes. Penalties display **field-wide** — see the
+    Race control box under UI — and passes display player-only; storing field-wide is what makes
+    both possible.*)*
 - **`session_uid == 0` is init noise for every packet except `EVENT`** *(E15, 2026-09-01)*. Core
   invariant #3 is correct for the ten packet ids the assembler routed before E15 and **false for the
   eleventh**: 37% of all penalties arrive on a zeroed header, as the game's end-of-session replay of
@@ -824,13 +828,90 @@ what would trigger revisiting it.
   middle of one story. It is **scrollable with the same height cap as the Laps box beside it**, so a
   race with many penalties or passes cannot keep growing the page — the same reason the
   classification table takes `scrollable=True`.
+  - **The penalties half is field-wide and names every driver; the passes half is the player's**
+    *(settled 2026-09-01, E15 branch 2)*. What a league reader opens a session for is what happened
+    to the whole field, and a screenshot of the page should carry it. The join is
+    `classification.entries` by `vehicle_index` — the only one available, since `SessionStore` does
+    not persist `participants` — and it resolves **129 of 129** rows, the seven reconstructed
+    classifications included. A row that cannot be resolved still renders, as `Car 14`: dropping a
+    penalty because its driver is unknown is the silent loss this feature exists to undo.
+  - **Non-AI-only was measured and rejected** *(same date)*. It is perfectly *reliable* — `is_ai`
+    landed at `PIPELINE_VERSION` 2 and events at 5, so any session holding penalty rows carries the
+    real packet value and the `looks_like_ai` name fallback is never needed — and it is still wrong.
+    It drops 54 of 129 rows; it is **identical to player-only in 35 of 42 penalised sessions**,
+    because 34 of them have one human in the field, so it quietly rebuilds the box this branch is
+    replacing; and it **empties four boxes that held 8, 6, 3 and 1 penalties**, which is the honesty
+    rule below breaking outright. Size is not the argument it was assumed to be either: the largest
+    box in the database is eleven rows and the median is one, against a 500 px cap that scrolls. AI
+    cars are therefore named like any other and nothing marks them — the classification table beside
+    the box does not distinguish them either, and only this box doing so would make the two read as
+    different kinds of thing.
+  - **It is a table, and its columns are `LAP | DRIVER | OUTCOME | REASON`** *(2026-09-01, E15
+    branch 2)*. Laid-out labels read as a sparse list; four aligned columns under a header read
+    like the Laps table beside it, and inherit the alignment and the flag-in-the-driver-cell the
+    classification table already uses. **LAP and DRIVER lead**, matching that table's POS/DRIVER
+    order and, more to the point, because OUTCOME is the single word "Warning" on 70 of 129 rows —
+    leading with it would put a wall of one repeated word where the varying columns belong.
+    "OUTCOME" over "Penalty" because 19 of the rows are retirements, which are not penalties; over
+    "Type" and "Event" because both are meta rather than about the session, and "Event"
+    additionally collides with the Event-packet vocabulary this feature is built on.
+  - **A collision names the other car, and the data decides which rows those are.**
+    `other_vehicle_index` is all-or-nothing per infringement: present on 44 of 44 Small Collisions,
+    1 of 1 Big Collision and 3 of 3 Blocking rows and absent on all 81 rows of every other kind,
+    resolving to a classification entry 48 of 48 times and never naming the car itself. So the
+    reason reads "… with <driver>" whenever the packet carries a second car, with no infringement
+    test in between. "with" is exactly right for the 45 collisions and merely serviceable for the
+    3 blocking rows, where the other car is the one *being* blocked — a second connector for three
+    rows would cost more than it earns.
+  - **One font weight, two columns, two meanings.** A **bold driver** is a car the game called
+    human, so a league's people separate from the AI filling the grid — and it survives a lobby
+    whose members hide their online names, where every one of them reads `Player` and the weight is
+    the only thing left that says so. **Bold penalty text** is the sporting subset
+    (`SessionPenalty.is_sporting`), which is what explains a box listing eleven penalties beside a
+    classification badge reading ×1. Weight rather than colour, so nothing here can freeze a palette
+    (core invariant #11).
+  - **Two textual rules keep the game from contradicting itself**, both stated in
+    `ui/sessions/race_control.py` rather than hidden. An invalidation loses its trailing "without
+    reason" — the game's HUD wording for "the driver was shown no reason", which beside the reason
+    the row prints is a denial of the rest of its own line. And an infringement that repeats the
+    penalty's own words loses the repeat, so `Retired` + `Retired mechanical failure` is one
+    statement rather than two (a prefix rule, not a table of pairs). Every tooltip carries both
+    names exactly as the game sent them, so nothing tidied is lost — core invariant #9's spirit:
+    keep the raw value, interpret on read.
+  - **`places_gained` 0 and None are different facts and never share a rendering.** 0, in 75 of the
+    129 rows, means "gained no places"; None, in 47, means the field does not apply. Neither earns a
+    clause on the row — a box of warnings would otherwise say "0 places" eleven times — and the
+    tooltip is where both are spelled out, beside the added time, which is set on only 4 rows
+    (3, 3, 3 and 5 s).
   - This retires the box's two-state design *(decided 2026-08-24, closed by E15)*, which existed
     only because the detail was unstored: a penalised session used to show the aggregate plus a muted
     `Per-penalty detail (type and lap) isn't stored yet.` so it could not report itself clean. The
     detail is stored now, so the note goes and `reference.penalty_name()` / `infringement_name()` —
     written and unused since the reference tables landed — finally have their caller. The honesty
-    rule that produced the two states stays: a session with no rows says so, and one with rows never
-    falls through to the empty state.
+    rule that produced the two states stays, and now needs **three**. Rows are listed. No rows *but*
+    a classification recording a penalty says the detail has not been read from the capture yet —
+    transient, where the old note was permanent, since the re-ingest clears it. Only when neither
+    has anything does the box speak, and then about the **store**: "No penalties are stored for this
+    session", because a session ingested before `PIPELINE_VERSION` 5 holds no rows and cannot be
+    told apart from a genuinely clean one. On a database still stamped 4 that is 7 of 56 sessions in
+    the second state and 49 in the third.
+- **A grid penalty rides the classification's GAP cell in practice and qualifying** *(2026-09-01,
+  E15 branch 2)*. The result screen counts penalties but records no *time* for a grid drop, so
+  `format_penalty_badge` renders one as a bare `⚑ ×2` that never says what it cost — and the
+  non-race half of the table never showed it at all. The places come off the stored `PENA` rows
+  instead (`race_control.grid_penalty_places`), **summed**, because the game issues them one at a
+  time: in `972807263…` two cars each took two 5-place penalties and start ten places back, which
+  `num_penalties` records only as "2". The count is dropped and the places kept — one 10-place
+  penalty and two 5-place ones put the car in the same slot.
+  - **GAP, not BEST.** A grid penalty is served in the *race* and changes nothing about this
+    session's result, so alternating it into BEST would read as if the lap time itself had been
+    penalised. GAP is a derived number and the least load-bearing column, and the mechanism is the
+    one the race table already uses for its TIME cell — `_wire_penalty_alternation` now serves both.
+  - **Passed in, not read here.** `build_classification_table` takes an optional `grid_penalties`
+    map rather than an `EventStore`: the weekend page holds no event store and simply shows no
+    badges, and a session ingested before `PIPELINE_VERSION` 5 has no rows to build one from. The
+    session detail page reads the penalties **once** per render and hands the same rows to both the
+    classification and the Race control box, so the two cannot disagree.
 - **Tyre life is the worst wheel, not the mean of four** *(decided 2026-08-24, E1 branch 2c)*. The
   line plots `100 − max(wear)` across the four corners. The worst corner is what forces the stop,
   so it is the strategy-relevant number; a mean smooths away exactly the signal being looked for.

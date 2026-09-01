@@ -24,6 +24,7 @@ from ..formatting import (
     compound_for_lap,
     estimate_points,
     format_grid,
+    format_grid_penalty,
     format_lap_gap,
     format_lap_time,
     format_penalty_badge,
@@ -38,7 +39,7 @@ from ...protocol.enums import ResultStatus
 from ...protocol.reference import team_display_name
 from ..style import FASTEST_LAP, MUTED_TEXT, POSITION_GAIN, POSITION_LOSS
 from .flags import flag_icon
-from .tables import cell, fit_columns, fit_table_height, tidy_table
+from .tables import cell, fit_columns, fit_table_height, hold_column_width, tidy_table
 from .tyres import tyre_pixmap
 
 # Position-change colours (Pos triangle), from the shared palette in ``ui/style`` so the
@@ -48,6 +49,11 @@ _POS_COLORS = {"gain": POSITION_GAIN, "loss": POSITION_LOSS}
 
 # How often the Time cell flips between the race time and the penalty badge.
 _ALTERNATE_MS = 2000
+
+
+# The one column that alternates, per layout: a race's TIME, and a practice/qualifying GAP.
+_TIME_COLUMN = 6
+_GAP_COLUMN = 5
 
 
 def display_name_fn(roster: LeagueRoster | None):
@@ -95,9 +101,12 @@ def _points_cell(entry, reconstructed: bool, is_sprint_race: bool) -> QTableWidg
 
 
 def _wire_penalty_alternation(
-    table: QTableWidget, penalty_cells: list[tuple[QTableWidgetItem, str, str]]
-) -> None:
-    """Flip each penalised finisher's TIME cell between its race time and its penalty badge.
+    table: QTableWidget, penalty_cells: list[tuple[QTableWidgetItem, str, str]]) -> None:
+    """Flip a penalised car's result cell between what it says and its penalty badge.
+
+    Two callers, one mechanism: a race finisher's TIME cell alternates with the seconds a penalty
+    added to it, and a practice/qualifying car's GAP cell alternates with the grid places it was
+    penalised. Both are facts that have no column of their own and would cost one.
 
     The timer is parented to the table, so it's disposed with it; the closure it drives keeps
     the cell list alive for as long as the connection lives.
@@ -118,13 +127,20 @@ def _wire_penalty_alternation(
 
 def build_classification_table(
     session, name_of=lambda entry: entry.driver_name, is_sprint_race: bool = False, 
-    scrollable: bool = False) -> QTableWidget:
+    scrollable: bool = False, grid_penalties=None) -> QTableWidget:
     """Return a classification table for one session (no surrounding chrome).
 
     ``name_of`` resolves each entry's shown name; it defaults to the entry's own driver name.
     ``is_sprint_race`` (from the weekend context) picks the Sprint points table when estimating
     points for a reconstructed race - the two share ``SessionType.RACE`` and can't be told apart
     from the session alone.
+
+    ``grid_penalties`` maps ``vehicle_index`` to the grid places that car was penalised, from
+    ``sessions.race_control.grid_penalty_places`` over the session's stored ``PENA`` rows. It is
+    optional because it needs an ``EventStore`` the caller may not hold - the weekend page does not,
+    and simply shows no grid badges - and because a session ingested before ``PIPELINE_VERSION`` 5
+    has no rows to build it from. Only practice and qualifying read it: every grid penalty in this
+    database is issued there, and a race's TIME cell already alternates with its own badge.
 
     ``scrollable`` leaves the table's height to its container instead of freezing it to fit every row.
     The default (False) is the sized-to-context behaviour every existing caller relies on;
@@ -142,6 +158,7 @@ def build_classification_table(
     tidy_table(table)
     table.setIconSize(QSize(28, 21))    # nationality flag in the DRIVER cell (4:3)
 
+    grid_places = grid_penalties or {}
     entries = session.classification.entries if session.classification else []
     winner = next((e for e in entries if e.position == 1), entries[0] if entries else None)
     table.setRowCount(len(entries))
@@ -179,15 +196,30 @@ def build_classification_table(
             pixmap = tyre_pixmap(compound) if compound is not None else None
             if pixmap is not None:
                 table.setCellWidget(i, 3, _tyre_widget(pixmap))
-                best_item = cell(format_lap_time(entry.best_lap_time_ms))
-                if fastest_ms and entry.best_lap_time_ms == fastest_ms:
-                    best_item.setForeground(QColor(FASTEST_LAP))
-                table.setItem(i, 4, best_item)
-            table.setItem(i, 5, cell(format_lap_gap(entry, winner)))
+            # Outside the tyre branch on purpose: 84 of this database's 949 practice/qualifying
+            # rows have no compound for their best lap, and nesting the time inside the icon left
+            # every one of them with an empty BEST cell.
+            best_item = cell(format_lap_time(entry.best_lap_time_ms))
+            if fastest_ms and entry.best_lap_time_ms == fastest_ms:
+                best_item.setForeground(QColor(FASTEST_LAP))
+            table.setItem(i, 4, best_item)
+            gap_str = format_lap_gap(entry, winner)
+            gap_item = cell(gap_str)
+            table.setItem(i, 5, gap_item)
+            # A grid penalty is served in the *race*, so it changes nothing about this session's
+            # result - which is why it rides the GAP cell rather than BEST, where alternating it
+            # would read as if the lap time itself had been penalised.
+            grid_badge = format_grid_penalty(grid_places.get(entry.vehicle_index, 0))
+            if grid_badge:
+                penalty_cells.append((gap_item, gap_str, grid_badge))
 
     _wire_penalty_alternation(table, penalty_cells)
     # DRIVER and TEAM take the spare width; POS/GRID/STOPS/BEST/TIME/PTS stay as narrow as their contents.
     fit_columns(table, stretch={1, 2})
+    # ...except the one column that alternates, which is sized for both of its texts and pinned.
+    # Left to resize itself it would grow and shrink every two seconds and shove DRIVER and TEAM
+    # about with it; those two have width to spare and are where the difference comes from.
+    hold_column_width(table, _TIME_COLUMN if race_session else _GAP_COLUMN, penalty_cells)
     if not scrollable:
         fit_table_height(table)
     return table

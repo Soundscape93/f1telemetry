@@ -20,6 +20,7 @@ from .tables import (
     clear_layout,
     fit_columns,
     fit_table_height,
+    hold_column_width,
     tidy_table
 )
 from .trace_plot import TracePlot
@@ -41,6 +42,7 @@ __all__ = [
     "clear_layout",
     "fit_columns",
     "fit_table_height",
+    "hold_column_width",
     "tidy_table",
     "TracePlot",
     "TrackMap",

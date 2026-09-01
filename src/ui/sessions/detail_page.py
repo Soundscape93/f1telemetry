@@ -1,15 +1,15 @@
 """The session detail page - what one session was, how it finished, and how it was driven.
 
 Five boxes over the shared classification builder: a 4x2 details grid and the final
-classification side by side, the player's laps and any penalties below them, and (branch 2c) the
-stacked pace / tyre-life charts under that.
+classification side by side, the player's laps and the session's race control below them, and
+(branch 2c) the stacked pace / tyre-life charts under that.
 
-Three things here are data-honesty rules rather than layout, and each is enforced in the Qt-free
-``formatting`` helpers so they stay testable: points are shown only for races because the stored
-value is a stale championship figure on every other session type; laps completed comes from the
-classification rather than the stored lap rows, which can be short; and the penalties box has a
-separate state for "penalties happened but we don't store their detail" so it never claims a
-penalised session was clean.
+Three things here are data-honesty rules rather than layout, and each is enforced in a Qt-free
+module so they stay testable: points are shown only for races because the stored value is a stale
+championship figure on every other session type; laps completed comes from the classification
+rather than the stored lap rows, which can be short; and the Race control box never reports a
+session clean off an empty read - an empty ``session_events`` read means "not captured", never
+"nothing happened", so it has a third state that says which (``sessions.race_control``).
 
 The classification table is ``components.build_classification_table``, the same builder the
 weekend page uses - this page must never grow a second one. A lap row emits upward rather than
@@ -46,14 +46,15 @@ from ..components import (
     cell,
     clear_layout,
     confirm_and_delete,
+    fit_columns,
     fit_table_height,
     session_weather,
     tidy_table,
 )
+from ..components.flags import flag_icon
 from ..components.tyres import tyre_pixmap
 from ..formatting import (
     format_lap_time,
-    format_penalty_badge,
     is_race,
     lap_gap_label,
     laps_completed_label,
@@ -74,11 +75,13 @@ from ..style import (
     apply_heading
 )
 from .lap_context import analyse_session
+from .race_control import grid_penalty_places, summarise_penalties
 from .stint_charts import StintCharts
 
-_MID_ROW_MAX_H = 500            # the Laps / Penalties row is capped; those two boxes scroll inside it
+_MID_ROW_MAX_H = 500            # the Laps / Race control row is capped; those two boxes scroll inside it
 _LAPS_TABLE_MAX_H = 440         # _MID_ROW_MAX_H less the box's heading and margins
-_ICON_SIZE = QSize(22, 22)          # the Laps box's compound icon, same as the laps overview
+_FLAG_SIZE = QSize(28, 21)      # the classification table's nationality flag, 4:3
+_ICON_SIZE = QSize(22, 22)      # the Laps box's compound icon, same as the laps overview
 _TRACK_MAP_MIN_H = 160          # enough for the outline to read at a glance, not enough to dominate
 _NO_STINTS = ("No tyre stint ran long enough to chart — a stint needs at least two laps on one set "
               "of tyres.")
@@ -179,13 +182,16 @@ class DetailPage(QWidget):
         # lap by construction (ui/sessions/lap_context.py). ``is_race`` covers the Sprint Race too,
         # which shares its session_type with the Grand Prix (core invariant #5).
         analysis = analyse_session(laps, standing_start=is_race(slot.session_type))
-        self._body.addWidget(self._top_row(session, slot, label, laps))
-        self._body.addWidget(self._middle_row(session, laps, analysis))
+        # Read once for the page: the classification0s grid badges and the Race control box are
+        # two readings of the same rows, and two queries could not disagree bt would still be two.
+        penalties = self._stored_penalties(session)
+        self._body.addWidget(self._top_row(session, slot, label, laps, penalties))
+        self._body.addWidget(self._middle_row(session, laps, analysis, penalties))
         self._body.addWidget(self._charts_row(analysis))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
-    def _top_row(self, session, slot, label: str, laps) -> QWidget:
+    def _top_row(self, session, slot, label: str, laps, penalties=()) -> QWidget:
         """Session details beside the final classification.
 
         Neither box is height-capped. The classification is sized to show every driver and the
@@ -195,16 +201,19 @@ class DetailPage(QWidget):
         details = _box("Session details", 
                        self._details_box(session, slot, label, laps))
         classification = _box(f"Final classification · {label}",
-                                build_classification_table(session, is_sprint_race=slot.is_sprint_race), fill=True)
+                                build_classification_table(session, is_sprint_race=slot.is_sprint_race, 
+                                                           grid_penalties=grid_penalty_places(penalties)), fill=True)
         return _row(details, classification)
 
-    def _middle_row(self, session, laps, analysis) -> QWidget:
-        """The player's laps beside the session's penalties, capped.
-        
-        The Laps table scrolls itself, (header pinned), the penalties panel is plain widgets so it
-        gets a scroll area for when E15 is done."""
+    def _middle_row(self, session, laps, analysis, penalties=()) -> QWidget:
+        """The player's laps beside the session's race control, capped.
+
+        The Laps table scrolls itself (header pinned); the Race control panel is plain widgets, so
+        it takes a scroll area. A race can issue any number of penalties and the box must not be
+        able to grow the page (DECISIONS -> UI) - the worst session in this database is eleven
+        rows, and the cap is what keeps that a property of the box rather than of the data."""
         return _row(_box("Laps", self._laps_table(session, laps, analysis)),
-                    _box("Penalties", self._penalties_panel(session), scroll=True),
+                    _box("Race control", self._race_control_panel(session, penalties), scroll=True),
                     max_height=_MID_ROW_MAX_H)
 
     def _charts_row(self, analysis) -> QWidget:
@@ -369,27 +378,44 @@ class DetailPage(QWidget):
         table.cellClicked.connect(partial(self._open_lap, table))
         return table
 
-    def _penalties_panel(self, session) -> QWidget:
-        """What we can honestly say about penalties, which is less than the box implies.
+    def _race_control_panel(self, session, penalties=()) -> QWidget:
+        """What race control did to this session: its penalties, and (branch 3) the player's passes.
 
-        Only the aggregate is stored (``num_penalties`` / ``penalties_time_s`` on the player's
-        entry); the type and the lap live in ``PENA`` Event packets the assembler never reads
-        (PRIORITIES -> E15). So a penalised session must not fall through to the empty state and
-        report itself as clean - it gets the aggregate plus a note about what is missing.
+        One box rather than two, because both are per-lap event lists telling one story and a frame
+        through the middle of it would say otherwise (DECISIONS -> UI). The sub-heading is what
+        branch 3 hangs the passes off; it is here now so that branch adds a section rather than
+        rearranging this one.
         """
-        player = self._player(session)
-        badge = format_penalty_badge(player.num_penalties, player.penalties_time_s) \
-            if player is not None else None
-        if badge is None:
-            return _muted_label("No penalties were recorded for this session.")
-
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(QLabel(badge))
-        box.addWidget(_muted_label("Per-penalty detail (type and lap) isn't stored yet."))
+        box.addWidget(self._penalties_section(session, penalties))
         box.addStretch(1)
         return panel
+
+    def _penalties_section(self, session, penalties=()) -> QWidget:
+        """The session's penalties - every car's, named, in the order they were issued.
+
+        Field-wide rather than the player's: what a league reader opens this page for is what
+        happened to the whole field, and ``EventStore`` stores it that way. Every text decision -
+        the wording, the three states, the driver join - is ``race_control.summarise_penalties``,
+        so this only lays out what it returns.
+        """
+        entries = session.classification.entries if session.classification else ()
+        summary = summarise_penalties(self._stored_penalties(session), entries)
+
+        host = QWidget()
+        box = QVBoxLayout(host)
+        box.setContentsMargins(0, 0, 0, 0)
+        heading = QLabel(summary.heading)
+        apply_bold(heading)
+        box.addWidget(heading)
+        for line in summary.aggregates:
+            box.addWidget(QLabel(line))
+        box.addWidget(_muted_label(summary.note))
+        if summary.rows:
+            box.addWidget(_penalty_table(summary.rows))
+        return host
 
     # --- data ------------------------------------------------------------------------------------
     def _stored_laps(self, session) -> list:
@@ -398,6 +424,18 @@ class DetailPage(QWidget):
             return ()
         return self._laps.list(str(session.session_uid))
 
+    def _stored_penalties(self, session) -> tuple:
+        """The session's stored penalties - every car's, in the store's lap-then-frame order.
+
+        Read from ``EventStore`` and not from the session: ``SessionStore.load`` maps named fields
+        and has never populated ``SessionResult.penalties``. An empty read is not a clean session
+        (see ``race_control``), which is why the empty tuple goes on to be interpreted rather than
+        tested for here.
+        """
+        if self._events is None:
+            return ()
+        return self._events.load_penalties(str(session.session_uid))
+    
     @staticmethod
     def _player(session):
         entries = session.classification.entries if session.classification else ()
@@ -516,6 +554,61 @@ def _row(left: QWidget, right: QWidget, max_height: int | None = None) -> QWidge
     if max_height is not None:
         host.setMaximumHeight(max_height)
     return host
+
+
+def _penalty_table(rows) -> QTableWidget:
+    """One row per penalty, read like the Laps table beside it: a header, then lap / driver / what.
+
+    A table rather than laid-out labels, because it is one: four aligned columns with a header is
+    what makes a list of eleven scannable, and it inherits the alignment, the row striping and the
+    flag-in-the-driver-cell that the classification table already reads by. LAP and DRIVER first,
+    the way that table orders POS and DRIVER - and because OUTCOME is the word "Warning" on 70 of
+    the 129 rows in this database, so leading with it would put a wall of the same word where the
+    varying columns should be.
+
+    Two independent uses of one font weight, in two columns that cannot be confused: a bold driver
+    is a human rather than an AI car, and a bold outcome is a penalty the classification counts.
+    Weight and not colour, so nothing here can freeze a palette (core invariant #11). The tooltip
+    goes on every cell, because a reader pointing at a lap number is asking about that row.
+
+    Height is left to fit every row and the box's scroll area takes the overflow - the box is
+    already capped, and branch 3's passes section will scroll with this rather than beside it.
+    """
+    columns = ["LAP", "DRIVER", "OUTCOME", "REASON"]
+    table = QTableWidget(len(rows), len(columns))
+    table.setHorizontalHeaderLabels(columns)
+    tidy_table(table)
+    table.setIconSize(_FLAG_SIZE)       # nationality flag in the DRIVER cell (4:3)
+
+    for index, row in enumerate(rows):
+        lap = cell(str(row.lap_number))
+        lap.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        driver = cell(row.driver)
+        if row.nationality_id is not None:
+            flag = flag_icon(row.nationality_id)
+            if flag is not None:
+                driver.setIcon(flag)
+        if row.is_human:
+            _bold_cell(driver)
+        outcome = cell(row.outcome)
+        if row.is_sporting:
+            _bold_cell(outcome)
+        for column, item in enumerate((lap, driver, outcome, cell(row.reason))):
+            item.setToolTip(row.tooltip)
+            table.setItem(index, column, item)
+    # REASON alone takes the spare width. Stretching DRIVER beside it split the slack evenly and
+    # left the longest column short - "Small Collision with Andra-Kimi Antonelli" is twice a
+    # driver name - while DRIVER sized to its contents is exactly as wide as the longest name.
+    fit_columns(table, stretch={3})
+    fit_table_height(table)
+    return table
+
+
+def _bold_cell(item) -> None:
+    """Bold one table cell. ``setFont``, never a stylesheet - see ``ui/style`` and invariant #11."""
+    font = item.font()
+    font.setBold(True)
+    item.setFont(font)
 
 
 def _muted_label(text: str) -> QLabel:

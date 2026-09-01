@@ -464,7 +464,27 @@ The classification's `num_penalties` counts *sporting* penalties only — restri
   up with the stored lap rows with no adjustment.
 - **255 is the not-applicable sentinel** — on `time` (124/127), `places_gained` (47) and
   `other_vehicle_idx` (79).
-- **`PENA` is field-wide too** — 44.9% are the player's.
+- **`PENA` is field-wide too** — 44.9% are the player's. Joined to the classification by
+  `vehicle_index`, all **129** stored rows resolve to a named driver (the 7 reconstructed
+  classifications included): **54 on an AI car, 75 on a human**, 59 of those the player's. Measured
+  2026-09-01 for the Race control box, which shows the field rather than the player: a non-AI filter
+  is **identical to player-only in 35 of the 42 penalised sessions** — 34 have a single human in the
+  field — and **empties four boxes** that hold 8, 6, 3 and 1 penalties. Box sizes are small either
+  way: 11 rows at the worst, a median of 1, and 28 of 42 boxes name a single driver.
+- **`other_vehicle_index` is all-or-nothing per infringement, and clean where it is set.** It
+  appears on 44 of 44 Small Collisions, 1 of 1 Big Collision and 3 of 3 Blocking rows and on **none**
+  of the 81 rows of any other kind; all 48 resolve to a classification entry and none names the car
+  the penalty belongs to. So the Race control box names the second car straight off the field, with
+  no infringement test — the 255 sentinel already decides it.
+- **Grid penalties are issued one at a time, and only in qualifying here.** All 7 fall in Q1/Q2,
+  none in a race, and two cars in `972807263…` each took **two** 5-place penalties for a 10-place
+  drop that `num_penalties` records only as "2". Places live on the event rows and are summed for
+  display; the classification's aggregate cannot reproduce them.
+- **Race numbers do not identify a car, and a name need not either.** Four league sessions here run
+  two cars wearing #11 (an AI Perez and a human Fabibyte), so the number cannot disambiguate; and in
+  four more, every human in the lobby reads `Player` because their online names are private. `is_ai`
+  is unaffected by both — it comes off the Participants packet — which is why the Race control box
+  marks humans by weight rather than trusting the name.
 - **`DTSV` / `SGSV` never fire** in any of the 33 captures, so there is no issued-then-served
   double count to defend against.
 

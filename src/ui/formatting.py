@@ -244,6 +244,22 @@ def format_penalty_badge(num_penalties: int, penalties_time_s: int) -> str | Non
     return " ".join(parts)
 
 
+def format_grid_penalty(places: int) -> str | None:
+    """A grid-penalty indicator like ``⚑ 10-place grid``, or None when the car carries none.
+
+    Separate from ``format_penalty_badge`` rather than folded into it, because the two answer
+    different questions from different sources. That badge reads the classification's own
+    aggregate - a count and the seconds added to a race time - and a **grid** penalty adds no
+    seconds, so it renders there as a bare ``⚑ ×2`` that never says what it cost. The places come
+    from the stored ``PENA`` rows instead (``race_control.grid_penalty_places``), and the count of
+    penalties is dropped on purpose: two 5-place penalties and one 10-place penalty put the car in
+    exactly the same grid slot, so the places are the fact and the row count is not.
+    """
+    if places <= 0:
+        return None
+    return f"{_PENALTY_FLAG} {places}-place grid"
+
+
 def race_winner_summary(session, name_of=lambda entry: entry.driver_name) -> str | None:
     """Return the race winner as ``Driver / Team`` for a race session, or None if unavailable.
 

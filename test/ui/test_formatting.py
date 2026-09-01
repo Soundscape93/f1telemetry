@@ -16,6 +16,7 @@ from f1telemetry.src.ui.formatting import (
     estimate_points,
     format_gap,
     format_grid,
+    format_grid_penalty,
     format_lap_gap,
     format_lap_time,
     format_penalty_badge,
@@ -196,6 +197,19 @@ class PenaltyBadgeTest(unittest.TestCase):
     def test_count_only(self):
         # a warning-style penalty with no added time still shows the flag and count
         self.assertEqual(format_penalty_badge(2, 0), "⚑ ×2")
+
+
+class GridPenaltyBadgeTest(unittest.TestCase):
+    def test_no_places_is_none(self):
+        self.assertIsNone(format_grid_penalty(0))
+
+    def test_places_read_as_a_grid_drop(self):
+        # 972807263... (league Q1): two 5-place penalties on one car read as the ten places it
+        # actually starts back, which the classification's own count never says.
+        self.assertEqual(format_grid_penalty(10), "⚑ 10-place grid")
+
+    def test_a_single_penalty_reads_the_same_way(self):
+        self.assertEqual(format_grid_penalty(5), "⚑ 5-place grid")
 
 
 class CompoundForLapTest(unittest.TestCase):
