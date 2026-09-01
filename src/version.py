@@ -21,4 +21,7 @@ __version__ = "0.9.0"
 # 4: laps carry their context - ``driver_status`` / ``pit_status`` from Lap Data, the computed
 #    garage, out-lap and in-lap flags, and the Session packet's safety-car and red-flag state;
 #    rows ingested before this read None and fall back to the fuel/stint-shape inference
-PIPELINE_VERSION = 4
+# 5: sessions carry their Event packets - the whole field's penalties (type, infringement, lap and
+#    time) and the on-track passes between two racing cars; sessions ingested before this hold none
+#    at all, so empty reads as "not captured" and never as "nothing happened"
+PIPELINE_VERSION = 5

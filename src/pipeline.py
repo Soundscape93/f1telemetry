@@ -80,7 +80,7 @@ def _as_utc(recv_time: float | None) -> datetime | None:
     return None if recv_time is None else datetime.fromtimestamp(recv_time, timezone.utc)
 
 
-def ingest_capture(capture_path: str, store: SessionStore, lap_store=None,
+def ingest_capture(capture_path: str, store: SessionStore, lap_store=None, event_store=None,
                    capture_store = None, recorded_by: str | None = None) -> list[SessionResult]:
     """Parse a .f1cap file, assemble its session, persists each, and return what was stored.
     
@@ -98,6 +98,10 @@ def ingest_capture(capture_path: str, store: SessionStore, lap_store=None,
     Sessions the user has deleted from the store are tombstoned (see ``SessionStore.delete``);
     those uids are skipped here so re-ingesting a capture doesn't resurrect a deliberately
     removed attempt. The returned list therefore covers only the sessions actually stored.
+
+    ``event_store`` is optional the same way ``lap_store`` is and takes the session's Event-packet
+    events - the field's penalties and the passes between two racing cars. Without one they are
+    assembled and then dropped, which is what every build before PIPELINE_VERSION 5 did.
 
     ``capture_store`` is optional (like ``lap_store``): when given, the capture's metadata is
     recorded so it's queryable without decompressing it again. That row describes the *file* -
@@ -135,6 +139,10 @@ def ingest_capture(capture_path: str, store: SessionStore, lap_store=None,
         store.save(session)
         if lap_store is not None:
             lap_store.save_laps(session.session_uid, session.laps)
+        if event_store is not None:
+            # Unconditional, even for a session that produced none: save_events replaces by uid, and
+            # the replace is what stops a re-ingest leaving a previous pass's surplus rows behind.
+            event_store.save_events(session.session_uid, session.penalties, session.overtakes)
         saved.append(session)
 
     if capture_store is not None:
@@ -142,7 +150,7 @@ def ingest_capture(capture_path: str, store: SessionStore, lap_store=None,
     return saved
 
 
-def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None,
+def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None, event_store=None,
                      capture_store = None, recorded_by: str | None = None) -> list[SessionResult]:
     """Archive a raw capture, ingest it, and delete the raw only once ingest succeeds.
      
@@ -184,8 +192,8 @@ def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None,
             ingest_path = capture_path
     
     sessions = ingest_capture(
-        ingest_path, store, lap_store=lap_store, capture_store=capture_store,
-        recorded_by=recorded_by
+        ingest_path, store, lap_store=lap_store, event_store=event_store,
+        capture_store=capture_store, recorded_by=recorded_by
     )
 
     # Ingest read the archive the EOF without error, so the raw's bytes are safe in it.
@@ -498,7 +506,7 @@ class ReingestSummary:
 
 
 def reingest_all(capture_store: CaptureStore, session_store: SessionStore, *,
-                 lap_store=None,
+                 lap_store=None, event_store=None,
                  captures_dir: str | os.PathLike | None = None,
                  on_progress: Callable[[int, int, str], None] | None = None,
                  cancelled: Callable[[], bool] | None = None,
@@ -550,7 +558,7 @@ def reingest_all(capture_store: CaptureStore, session_store: SessionStore, *,
             missing.append(meta.file_name)
             continue
         try:
-            sessions = ingest(path, session_store, lap_store=lap_store,
+            sessions = ingest(path, session_store, lap_store=lap_store, event_store=event_store,
                               capture_store=capture_store, recorded_by=meta.recorded_by)
         except Exception as exc:                    # one bad archive must not abort the whole pass
             log.exception("Re-ingest failed for %s", path)
@@ -709,7 +717,7 @@ def _copy_capture(candidate: ImportCandidate, captures_dir: str) -> str:
 
 def import_captures(candidates: Iterable[ImportCandidate], capture_store: CaptureStore, 
                     session_store: SessionStore, *, captures_dir: str | os.PathLike,
-                    lap_store=None, recorded_by: str | None = None,
+                    lap_store=None, event_store=None, recorded_by: str | None = None,
                     on_progress: Callable[[int, int, str], None] | None = None,
                     cancelled: Callable[[], bool] | None = None,
                     hash_file: Callable[[str], str] = hash_capture,
@@ -806,7 +814,7 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
 
 
         try:
-            sessions = ingest(destination, session_store, lap_store=lap_store,
+            sessions = ingest(destination, session_store, lap_store=lap_store, event_store=event_store,
                               capture_store=capture_store, recorded_by=recorded_by)
         except Exception as exc:                    # one bad archive must not abort the whole folder
             log.exception("Import: could not ingest %s", destination)
@@ -840,6 +848,7 @@ class DeleteOutcome:
     season_id: int | None = None
     round_number: int | None = None
     laps_removed: int = 0
+    events_removed: int = 0             # penalties + passes, counted together as one aggregate
 
     @property
     def refused_assigned(self) -> bool:
@@ -853,8 +862,8 @@ class DeleteOutcome:
 
 
 def delete_session(session_uid: int, session_store: SessionStore, season_store, * ,
-                   lap_store=None) -> DeleteOutcome:
-    """Delete a stored session and its laps, refusing while it is assigned to a season round.
+                   lap_store=None, event_store=None) -> DeleteOutcome:
+    """Delete a stored session and its laps and its events, refusing while it is assigned to a round.
 
     The single write point for deleting a session, and the enforcer of the invariant
     ``SessionStore.delete``'s docstring used to merely assert. It lives here rather than on the
@@ -874,6 +883,10 @@ def delete_session(session_uid: int, session_store: SessionStore, season_store, 
     invisible, because the laps overview iterates *stored* sessions, but still on disk.
     ``lap_store`` is optional only so a caller that has none (tests, a future headless path) can
     still delete; pass it wherever one exists.
+
+    **Events go the same way, for the same reason and with the same caveat.** ``EventStore`` is keyed
+    on the uid and not FK'd either, so nothing collects its rows if this does not - and unlike the
+    laps they leave no trace on disk to notice later. Pass ``event_store`` wherever one exists.
     """
     uid = int(session_uid)
     placement = season_store.assignment_for(uid)
@@ -889,8 +902,11 @@ def delete_session(session_uid: int, session_store: SessionStore, season_store, 
         return DeleteOutcome(deleted=False, session_uid=uid)
 
     laps_removed = lap_store.delete(str(uid)) if lap_store is not None else 0
-    log.info("Deleted session %s (%d lap row(s), traces removed)", uid, laps_removed)
-    return DeleteOutcome(deleted=True, session_uid=uid, laps_removed=laps_removed)
+    events_removed = event_store.delete(str(uid)) if event_store is not None else 0
+    log.info("Deleted session %s (%d lap row(s), traces removed, %d event row(s))",
+             uid, laps_removed, events_removed)
+    return DeleteOutcome(deleted=True, session_uid=uid, laps_removed=laps_removed, 
+                         events_removed=events_removed)
 
 
 # --- restoring a deleted session --------------------------------------------------------------
@@ -966,7 +982,8 @@ def restorable_captures(session_uid: int, capture_store: CaptureStore,
     return found
 
 
-def _re_tombstone(session_store: SessionStore, tomb: DeletedSession, lap_store=None) -> None:
+def _re_tombstone(session_store: SessionStore, tomb: DeletedSession, 
+                  lap_store=None, event_store=None) -> None:
     """Put a failed restore's tombstone back exactly as it was - the rollback this design exists for.
 
     Two half-states are possible once the tombstone has been cleared, and both are covered here:
@@ -975,22 +992,25 @@ def _re_tombstone(session_store: SessionStore, tomb: DeletedSession, lap_store=N
       out not to hold the uid). ``delete()`` writes nothing when there is no row, so the tombstone
       has to be re-written directly.
     * **cleared, row present** - a capture holding several sessions where ours was saved before a
-      later one raised. ``delete()`` removes the resurrected row, and its laps go with it exactly
-      as they do in :func:`delete_session`; nothing else calls ``LapStore.delete``.
+      later one raised. ``delete()`` removes the resurrected row, and its laps and events go with it
+      exactly as they do in :func:`delete_session`; nothing else calls either store's ``delete``.
 
     ``tombstone()`` runs last in both cases, with the original values, so the end state is
     identical to before the attempt - including ``deleted_at``, which must not jump to "just now"
     because a restore failed.
     """
-    if session_store.delete(tomb.session_uid) and lap_store is not None:
-        lap_store.delete(str(tomb.session_uid))
+    if session_store.delete(tomb.session_uid):
+        if lap_store is not None:
+            lap_store.delete(str(tomb.session_uid))
+        if event_store is not None:
+            event_store.delete(str(tomb.session_uid))
     session_store.tombstone(tomb.session_uid, track_id=tomb.track_id, 
                             session_type=tomb.session_type, recorded_at=tomb.recorded_at,
                             deleted_at=tomb.deleted_at)
 
 
 def restore_session(session_uid: int, session_store: SessionStore, capture_store: CaptureStore, *, 
-                    lap_store=None, content_hash: str | None = None, 
+                    lap_store=None, event_store=None, content_hash: str | None = None, 
                     captures_dir: str | os.PathLike | None = None,
                     ingest: Callable[..., list[SessionResult]] = ingest_capture) -> RestoreOutcome:
     """Bring a deleted session back by re-ingesting one capture that holds it, or refuse honestly.
@@ -1051,17 +1071,17 @@ def restore_session(session_uid: int, session_store: SessionStore, capture_store
     meta, path = found[0]
     session_store.restore(uid)        # from here on, every exit either succeeds or rolls back
     try:
-        sessions = ingest(path, session_store, lap_store=lap_store,
+        sessions = ingest(path, session_store, lap_store=lap_store, event_store=event_store,
                           capture_store=capture_store, recorded_by=meta.recorded_by)
     except Exception as exc:            # a failed restore must not leave the uid un-tombstoned
         log.exception("Restore failed for session %s from %s", uid, path)
-        _re_tombstone(session_store, tomb, lap_store)
+        _re_tombstone(session_store, tomb, lap_store, event_store)
         return RestoreOutcome(restored=False, session_uid=uid, capture_name=meta.file_name,
                               reason=RestoreProblem.INGEST_FAILED, error=str(exc))
 
     if uid not in {int(session.session_uid) for session in sessions}:
         log.info("Restore: %s does not hold session %s after all", meta.file_name, uid)
-        _re_tombstone(session_store, tomb, lap_store)
+        _re_tombstone(session_store, tomb, lap_store, event_store)
         return RestoreOutcome(restored=False, session_uid=uid, capture_name=meta.file_name,
                               reason=RestoreProblem.NOT_IN_CAPTURE)
 

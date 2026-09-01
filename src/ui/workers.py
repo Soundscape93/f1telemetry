@@ -83,25 +83,27 @@ class IngestWorker(QThread):
         """
         from ..pipeline import archive_and_ingest
         from ..storage.captures import CaptureStore
+        from ..storage.events import EventStore
         from ..storage.laps import LapStore
         from ..storage.sessions import SessionStore
 
         # Each store owns its own engine on THIS thread; a single finally disposes all three,
         # wether ingest succeeded, failed, or a later store failed to construct (None = never built).
-        store = lap_store = capture_store = None
+        store = lap_store = capture_store = event_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
             sessions, archive_path, archive_error = archive_and_ingest(
-                self._capture_path, store,
-                lap_store=lap_store, capture_store=capture_store
+                self._capture_path, store, lap_store=lap_store,
+                event_store=event_store, capture_store=capture_store
             )
             self.done.emit([self._describe(s) for s in sessions], archive_path, archive_error)
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (capture_store, lap_store, store):
+            for s in (capture_store, lap_store, event_store, store):
                 if s is not None:
                     s.close()
 
@@ -166,20 +168,23 @@ class ReingestWorker(QThread):
     def run(self) -> None:
         from ..pipeline import reingest_all
         from ..storage.captures import CaptureStore
+        from ..storage.events import EventStore
         from ..storage.laps import LapStore
         from ..storage.meta import MetaStore
         from ..storage.sessions import SessionStore
         from ..version import PIPELINE_VERSION
 
-        store = lap_store = capture_store = meta_store = None
+        store = lap_store = event_store = capture_store = meta_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
             meta_store = MetaStore(self._db_url)
             summary = reingest_all(
                 capture_store, store,
                 lap_store=lap_store,
+                event_store=event_store,
                 captures_dir=self._captures_dir,
                 on_progress=self.progress.emit,
                 cancelled=self.stop_event.is_set,
@@ -193,7 +198,7 @@ class ReingestWorker(QThread):
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (meta_store, capture_store, lap_store, store):
+            for s in (meta_store, capture_store, event_store, lap_store, store):
                 if s is not None:
                     s.close()
 
@@ -279,17 +284,20 @@ class RestoreWorker(QThread):
     def run(self) -> None:
         from ..pipeline import restore_session
         from ..storage.captures import CaptureStore
+        from ..storage.events import EventStore
         from ..storage.laps import LapStore
         from ..storage.sessions import SessionStore
 
-        store = lap_store = capture_store = None
+        store = lap_store = event_store = capture_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
             outcome = restore_session(
                 self._session_uid, store, capture_store,
                 lap_store=lap_store,
+                event_store=event_store,
                 content_hash=self._content_hash,
                 captures_dir=self._captures_dir,
             )
@@ -297,7 +305,7 @@ class RestoreWorker(QThread):
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (capture_store, lap_store, store):
+            for s in (capture_store, lap_store, event_store, store):
                 if s is not None:
                     s.close()
 
@@ -333,18 +341,21 @@ class ImportWorker(QThread):
     def run(self) -> None:
         from ..pipeline import import_captures
         from ..storage.captures import CaptureStore
+        from ..storage.events import EventStore
         from ..storage.laps import LapStore
         from ..storage.sessions import SessionStore
 
-        store = lap_store = capture_store = None
+        store = lap_store = event_store = capture_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+            event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
             summary = import_captures(
                 self._candidates, capture_store, store,
                 captures_dir=self._captures_dir,
                 lap_store=lap_store,
+                event_store=event_store,
                 recorded_by=self._recorded_by,
                 on_progress=self.progress.emit,
                 cancelled=self.stop_event.is_set,
@@ -353,6 +364,6 @@ class ImportWorker(QThread):
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (capture_store, lap_store, store):
+            for s in (capture_store, lap_store, event_store, store):
                 if s is not None:
                     s.close()

@@ -87,6 +87,7 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
       storage/   engine.py (create_db_engine — the ONE place the DB is opened: WAL +
                  synchronous=NORMAL + busy_timeout), backup.py (VACUUM INTO),
                  schema.py, sessions.py, seasons.py, laps.py, captures.py,
+                 events.py (session_events — the kept PENA/OVTK Event packets),
                  meta.py (key/value app state — the PIPELINE_VERSION stamp)
       analysis/  standings.py
       ui/        app.py, main_window.py, help_page.py, season_roster.py, workers.py, formatting.py,

@@ -54,9 +54,12 @@ class _Recorder:
         self.by_path = by_path
         self.boom = boom
         self.calls: list[tuple[str, str | None]] = []
+        self.stores: list[tuple[object, object]] = []   # what each call was handed to write into
 
-    def __call__(self, path, store, lap_store=None, capture_store=None, recorded_by=None):
+    def __call__(self, path, store, lap_store=None, event_store=None, capture_store=None,
+                 recorded_by=None):
         self.calls.append((path, recorded_by))
+        self.stores.append((lap_store, event_store))
         if os.path.basename(path) in self.boom:
             raise RuntimeError("corrupt archive")
         return self.by_path.get(os.path.basename(path), [])
@@ -219,6 +222,20 @@ class ReingestAllTest(unittest.TestCase):
         reingest_all(self.captures, self.sessions, captures_dir=self.temp, ingest=ingest)
 
         self.assertEqual([by for _, by in ingest.calls], ["kevin"])
+
+    def test_the_event_store_reaches_every_ingest(self):
+        """A re-ingest is how an existing database picks up PIPELINE_VERSION 5's events, so the
+        store has to be handed down - a pass that forwarded only the laps would rebuild every
+        session and still leave the penalties and passes unwritten."""
+        self.sessions.save(_session(111))
+        self._capture("monza.f1cap.zst", ("111",))
+        ingest = _Recorder({"monza.f1cap.zst": [_session(111)]})
+        events = object()
+
+        reingest_all(self.captures, self.sessions, captures_dir=self.temp,
+                     event_store=events, ingest=ingest)
+
+        self.assertEqual([store for _, store in ingest.stores], [events])
 
     def test_progress_is_reported_per_capture(self):
         self._capture("monza.f1cap.zst", ("111",))

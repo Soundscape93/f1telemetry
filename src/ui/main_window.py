@@ -46,6 +46,7 @@ from .workers import (
 )
 from ..storage.seasons import SeasonStore
 from ..storage.sessions import SessionStore
+from ..storage.events import EventStore
 from ..storage.laps import LapStore
 from ..storage.captures import CaptureStore
 from .seasons import SeasonsView
@@ -119,6 +120,10 @@ class MainWindow(QMainWindow):
         # The UI reads lap/traces on the GUI thread from its own LapStore (same DB file and
         # trace_dir the IngestWorker writes to). Consumed by the LapsView; disposed on close.
         self._lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
+        # Nothing reads events yet (E15 branch 2 + 3). This exists so a delete made from
+        # the UI tales them with it: EventStore is keyed on the uid and not FK'd, so the rwos would
+        # otherwise outlive their session invisibly - the bug v0.9.0 fixed for laps and traces.
+        self._event_store = EventStore(self._db_url)
         # The sessions detail page resolves "which capture did this come from?" on the GUI
         # thread; the workers keep building their own short-lived stores on their own threads.
         self._capture_store = CaptureStore(self._db_url)
@@ -199,13 +204,14 @@ class MainWindow(QMainWindow):
     
     def _build_pages(self) -> None:
         """Build the sidebar and the stacked content area with pages for each section."""
-        self._seasons_view = SeasonsView(self._season_store, self._session_store, lap_store=self._lap_store)
+        self._seasons_view = SeasonsView(self._season_store, self._session_store,
+                                          lap_store=self._lap_store, event_store=self._event_store,)
         self._stack.addWidget(_PlaceholderPage(
             "Dashboard", "The recent sessions, laps, and analytics will be shown here."))
         self._stack.addWidget(self._seasons_view)
         self._sessions_view = SessionsView(self._session_store, self._season_store,
                                            capture_store=self._capture_store,
-                                           lap_store=self._lap_store)
+                                           lap_store=self._lap_store, event_store=self._event_store)
         self._stack.addWidget(self._sessions_view)
         self._laps_view = LapsView(self._session_store, self._lap_store)
         # Deleting a session's stored results changes which laps exist, so the laps surface's
@@ -902,6 +908,7 @@ class MainWindow(QMainWindow):
         self._session_store.close()
         self._season_store.close()
         self._lap_store.close()
+        self._event_store.close()
         self._capture_store.close()
         super().closeEvent(event)
 

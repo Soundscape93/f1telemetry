@@ -374,9 +374,15 @@ The three new cells are `Overtakes +/−` (player only, races only), `Track & ai
 `Rain %`, which is a forecast *probability* beside an observed condition) and `Time of day`
 (nothing already stored fits — every candidate was measured and rejected).
 
-**Branch plan — four branches, E1-shaped.** Branch 0 routes `EVENT`, fixes the uid-0 rule and adds
-the domain models. Branch 1 is storage plus the `PIPELINE_VERSION` **4 → 5** bump. Branch 2 fills the
-penalties half of the Race control box. Branch 3 carries the overtakes half, the 4×3 grid, and the
+**Branch plan — four branches, E1-shaped. Branches 0 and 1 are done.** Branch 0 routes `EVENT`,
+fixes the uid-0 rule and adds the domain models (PR #47). Branch 1 is storage plus the
+`PIPELINE_VERSION` **4 → 5** bump — the `session_events` table, `EventStore` (replace-by-uid /
+delete-by-uid, `LapStore`'s contract exactly), the pipeline and UI-delete wiring, verified against
+all 33 captures: **129 penalty rows, 6,130 passes (85/session, 562 in the worst), and the
+sporting-penalty subset reproduces `num_penalties` for 9 of 9 penalised cars**. The 73 sessions this
+note quotes are 73 session *instances*; one uid is held by two captures, so 72 distinct sessions are
+stored — both numbers are right and the difference predates E15. It ships storage that is written
+and not read, which is the branch seam. Branch 2 fills the penalties half of the Race control box. Branch 3 carries the overtakes half, the 4×3 grid, and the
 three new Session columns the two new cells need — those land with their only consumer, the way
 E17's lap-context columns landed with the Laps box that reads them, and they need no second bump
 because branch 1 has already stamped 5. Branch 0 stands alone deliberately: the uid-0 rule

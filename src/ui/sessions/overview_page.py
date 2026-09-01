@@ -67,11 +67,13 @@ class OverviewPage(QWidget):
     sessions_changed = Signal()  # a delete removed stored data - other surfaces re-read
     deleted_requested = Signal()  # open the deleted-sessions manager (the container hops)
 
-    def __init__(self, session_store, season_store, lap_store=None, parent=None):
+    def __init__(self, session_store, season_store, lap_store=None,
+                 event_store=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
         self._seasons = season_store
         self._lap_store = lap_store
+        self._event_store = event_store         # deleting a session takes its penalties + passes too
         self._expanded: set[str] = set()  # uids whose card is open (survives a re-filter)
         self._query =  ""
 
@@ -263,7 +265,7 @@ class OverviewPage(QWidget):
         message (which names the season and round) has already been shown by the shared helper.
         """
         if not confirm_and_delete(self, session_uid, self._sessions, self._seasons,
-                                  lap_store=self._lap_store):
+                                  lap_store=self._lap_store, event_store=self._event_store):
             return
         self.sessions_changed.emit()
         self.reload()

@@ -18,6 +18,28 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+### Added
+- **Your recordings' penalties and on-track passes are now read and kept.** Every capture you have
+  ever made already contains them. Re-reading your captures recovers them retroactively, with nothing
+  to re-record. What is kept is the whole field's penalties, each with what it was for, which lap it
+  happened on and any time added, and every pass where both cars were genuinely racing: the game also
+  announces a "pass" for driving by a car sitting in the pit lane or parked in its garage, and those
+  are left out. **Nothing shows them yet** — the session pages that read them come later in this same
+  release, and this is the half that makes them survive the ingest.
+
+**Re-ingest needed: yes** — `PIPELINE_VERSION` moves 4 → 5. The new storage is created silently on
+startup, so nothing breaks and nothing is lost, but sessions already in your database will show no
+penalties or passes until the guided re-ingest has re-read their captures.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 
 ## v0.9.0 — 2026-08-31
 

@@ -27,7 +27,8 @@ class SeasonsView(QWidget):
     # owns the only delete action that removes stored sessions.
     sessions_changed = Signal()
 
-    def __init__(self, season_store, session_store, lap_store=None, parent=None) -> None:
+    def __init__(self, season_store, session_store, lap_store=None,
+                 event_store=None, parent=None) -> None:
         """Initialize the seasons view and wire page navigation signals."""
         super().__init__(parent)
         self._season_rosters = SeasonRosterFiles()
@@ -35,7 +36,8 @@ class SeasonsView(QWidget):
         self._overview = OverviewPage(season_store)
         self._create = CreatePage(season_store)
         self._detail = DetailPage(season_store, session_store, self._season_rosters)
-        self._weekend = WeekendPage(season_store, session_store, self._season_rosters, lap_store=lap_store)
+        self._weekend = WeekendPage(season_store, session_store, self._season_rosters,
+                                     lap_store=lap_store, event_store=event_store)
         self._edit_calendar = EditCalendarPage(season_store)
 
         self._overview.create_requested.connect(self._show_create)
