@@ -545,6 +545,14 @@ observations, not forecast — and none of them reached the domain layer before 
   whole payload is zeroed for the first 3-4 Session packets of a session; the fields do not settle
   independently. Observed: `[0, 0, 0, 0, 24, 24]` for track temp, `[0, 0, 0, 0, 960, 960]` for
   time of day, in the same packets.
+- **The zeroed payload is the smaller half of what the window clears** *(measured 2026-09-01, E15
+  branch 3, replaying all 33 captures)*. **58 of 72 sessions have an opening Session packet that
+  disagrees with the settled reading** — 4 the zeroed payload above, and **54 carrying the
+  *previous* session's values**. `20260704_181644` Q2 opens on Q1's clock (16:00) before reporting
+  its own (16:23), so without the window two sessions of one weekend would report the same start
+  time; elsewhere the first packet reads 42 °C against a settled 32 °C. **Taking the first Session
+  packet would misread the track temperature by up to 18 °C.** After the window: `time_of_day` valid
+  in **72 of 72**, track temp 20-41 °C and air 15-29 °C with **zero zeroes in either**.
 - **Unlike E14's weather this is a packet-count artifact, not a temporal one** — three of the four
   sessions clear it while `session_time` is still `0.0`. The `_WEATHER_SETTLE_S = 3.0` guard still
   works (a settled value in **73/73** sessions), so it is reused rather than a second constant

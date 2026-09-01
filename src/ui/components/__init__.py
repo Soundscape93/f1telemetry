@@ -15,7 +15,7 @@ from .setup_panel import build_setup_table
 from .slider_row import SetupSliderRow, SliderMarkerBar
 from .tables import (
     build_kv_table,
-    build_pair_grid,
+    build_readout_grid,
     cell, 
     clear_layout,
     fit_columns,
@@ -37,7 +37,7 @@ __all__ = [
     "SetupSliderRow",
     "SliderMarkerBar",
     "build_kv_table",
-    "build_pair_grid",
+    "build_readout_grid",
     "cell",
     "clear_layout",
     "fit_columns",

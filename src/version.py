@@ -23,5 +23,9 @@ __version__ = "0.9.0"
 #    rows ingested before this read None and fall back to the fuel/stint-shape inference
 # 5: sessions carry their Event packets - the whole field's penalties (type, infringement, lap and
 #    time) and the on-track passes between two racing cars; sessions ingested before this hold none
-#    at all, so empty reads as "not captured" and never as "nothing happened"
+#    at all, so empty reads as "not captured" and never as "nothing happened". Also the conditions
+#    at session start - track and air temperature and the in-game clock - read from the first
+#    Session packet past the settle window; rows ingested before this read None for all three.
+#    Both landed under one number: 5 was never released, so a released user pays one prompt for
+#    the pair (see PACKAGING -> "When to bump")
 PIPELINE_VERSION = 5

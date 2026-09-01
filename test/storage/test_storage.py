@@ -153,6 +153,33 @@ class RoundTripTest(StorageTestBase):
         again = self.store.load(0x1234)
         self.assertEqual((again.sector2_start_m, again.sector3_start_m), (None, None))
 
+    def test_session_conditions_round_trip(self):
+        """Track temp, air temp and the in-game clock survive save/load; absent stays None.
+
+        The absent case is the one that matters: these columns are additive and a database
+        ingested by an earlier build carries NULL for all three, which the details grid must
+        render as "Not captured" rather than as a confident number (DECISIONS -> UI).
+        """
+        settled = SessionResult(**{**vars(make_session()), "track_temperature": 31,
+                                   "air_temperature": 21, "time_of_day": 900})
+        self.store.save(settled)
+        loaded = self.store.load(0x8000_0000_0000_0000)
+        self.assertEqual((loaded.track_temperature, loaded.air_temperature, loaded.time_of_day),
+                         (31, 21, 900))
+
+        self.store.save(make_session(uid=0x1234))   # default: nothing captured
+        again = self.store.load(0x1234)
+        self.assertEqual((again.track_temperature, again.air_temperature, again.time_of_day),
+                         (None, None, None))
+
+    def test_midnight_survives_as_a_value_and_not_as_an_absence(self):
+        """0 is a real time_of_day, so no ``or`` may collapse it into "not captured" on the way
+        back - unlike ai_difficulty, where 0 genuinely is the absent case."""
+        midnight = SessionResult(**{**vars(make_session()), "track_temperature": 18,
+                                    "air_temperature": 12, "time_of_day": 0})
+        self.store.save(midnight)
+        self.assertEqual(self.store.load(0x8000_0000_0000_0000).time_of_day, 0)
+
     def test_is_ai_round_trips(self):
         """AI-vs-human must survive storage: league standings key on it (PIPELINE_VERSION 2)."""
         self.store.save(make_session())

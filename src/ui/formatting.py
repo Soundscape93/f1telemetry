@@ -15,6 +15,7 @@ so they line up with the classification order.
 
 from __future__ import annotations
 
+from ..domain.models import count_overtakes
 from ..pipeline import RestoreProblem
 from ..protocol.enums import RACE_SESSION_TYPES, ResultStatus, SessionType, Weather
 from ..protocol.reference import game_mode_name, team_display_name, track_name
@@ -25,6 +26,25 @@ _TRIANGLE_UP = "▲"     # ▲
 _TRIANGLE_DOWN = "▼"   # ▼
 _EM_DASH = "—"         # —
 _PENALTY_FLAG = "⚑"    # ⚑
+_MINUS_SIGN = "−"      # U+2212, not a hyphen; it sets beside "+" at the same weight and width
+
+# The details grid's three E15 cells all return None for "the value was never captured", and the
+# page renders that muted rather than as an em dash. The two absences are different facts and must
+# not share a rendering: an em dash is "does not apply to this session type" (Points, Started,
+# Overtakes outside a race), while this is "we do not have it" - a session ingested before the
+# value existed. See DECISIONS -> UI.
+NOT_CAPTURED = "Not captured"
+NOT_CAPTURED_TOOLTIP = ("Hasn't been read from this session's capture yet — "
+                        "Help → Re-read captures fills it in.")
+
+# Stated on the cell because the number invites the question. The count is what the game announced
+# between two cars that were both racing; it is not a referee's count of overtakes, and no filter
+# that would make it one survives measurement (TELEMETRY_NOTES -> Event packets).
+_OVERTAKES_TOOLTIP = ("{made} passes made, {suffered} suffered. Counted from the passes the game "
+                      "announced between two cars that were both racing — driving past a car in "
+                      "the pit lane or the garage is not counted.")
+_TEMPERATURE_TOOLTIP = "Track {track} °C, air {air} °C, at the start of the session."
+_TIME_OF_DAY_TOOLTIP = "The in-game local clock at the start of the session."
 
 _RACE_TYPES = RACE_SESSION_TYPES
 
@@ -407,9 +427,10 @@ def player_points_label(session, is_sprint_race: bool = False) -> str | None:
 def laps_completed_label(session, stored_laps: int = 0) -> str:
     """The details grid's laps cell: ``29 / 29`` in a race, a bare count elsewhere.
 
-    A stand-in for on-track overtakes, which are not stored - the game sends them as ``OVTK``
-    Event packets and the assembler never reads Event packets at all (PRIORITIES -> E15). This
-    cell becomes real overtakes once that lands.
+    **This cell keeps its place.** It was once described as a placeholder that would "become real
+    overtakes when E15 lands"; that was wrong and E15 did not do it - overtakes took a new third
+    column instead (DECISIONS -> UI, corrected 2026-09-01). None of the two facts below survives
+    being repurposed.
 
     Two data facts shape it. The count comes from the classification's ``num_laps`` rather than
     from the stored lap rows, because a recording that started late stores fewer laps than were
@@ -422,6 +443,93 @@ def laps_completed_label(session, stored_laps: int = 0) -> str:
     if is_race(session.session_type) and session.total_laps > 0:
         return f"{completed} / {session.total_laps}"
     return str(completed)
+
+
+def overtakes_label(session, overtakes) -> str | None:
+    """The details grid's overtakes cell: ``+13 / −29`` in a race, an em dash elsewhere.
+
+    ``overtakes`` are the session's stored ``SessionOvertake`` rows, **field-wide**, as
+    ``EventStore.load_overtakes`` returns them - not ``session.overtakes``, which ``SessionStore``
+    has never populated. The count is a ``len()`` over them via ``count_overtakes``, the single
+    derivation the domain model also uses; no aggregate is stored, because none survives
+    measurement (DECISIONS -> Storage).
+
+    **Races only**, an em dash otherwise, same gate as ``player_points_label``: 16.7% of filtered
+    passes in practice and qualifying have the two cars on different laps, which is traffic rather
+    than racing, and the 892 practice and 994 qualifying "passes" in these captures are almost all
+    out-lap traffic.
+
+    **The field-wide rows are what tell ``+0 / −0`` apart from "not captured", and that is the one
+    place they are load-bearing rather than merely stored.** Six of the 20 races here have no player
+    passes at all and every one is a start from pole and a win, so ``+0 / −0`` is the true answer
+    and must be shown. There is no stored aggregate to fall back on the way the penalties box falls
+    back to ``num_penalties``, so the discriminator is whether the session holds *any* pass rows.
+
+    That reads correctly on both sides. A race that ran holds 52 to 562 of them, so a real ``+0 /
+    -0`` always has rows to prove it; a session ingested before ``PIPELINE_VERSION`` 5 holds none.
+    The only three races here with no rows are **reconstructed fragments** - no stored laps, no
+    Final Classification packet, a recording that caught two or three laps - where "not captured"
+    is not a fallback but the literal truth. Returns None for that case.
+    """
+    if not is_race(session.session_type):
+        return _EM_DASH
+    if not overtakes:
+        return None             # no rows at all: not read from the capture, not "no passes".
+    made, suffered = count_overtakes(overtakes, session.player_vehicle_index)
+    return f"+{made} / {_MINUS_SIGN}{suffered}"
+
+
+def overtakes_tooltip(session, overtakes) -> str:
+    """What the overtakes cell counts, spelled out. Empty when the cell has no number to explain."""
+    if not is_race(session.session_type) or not overtakes:
+        return ""
+    made, suffered = count_overtakes(overtakes, session.player_vehicle_index)
+    return _OVERTAKES_TOOLTIP.format(made=made, suffered=suffered)
+
+
+def track_air_temp_label(session) -> str | None:
+    """The details grid's temperature cell: ``31 °C / 21 °C``, track first, as the label reads.
+
+    None when the value was never captured. The two temperatures are captured together and are
+    therefore reported together: the game zeroes the whole Session payload for the opening packets
+    rather than settling the fields independently, so a row with one and not the other cannot
+    occur and is not modelled.
+
+    Always Celsius. The Session packet's ``temperature_units_lead_player`` is a *display
+    preference* in the game's own HUD - the wire value is Celsius whatever it says - so honouring
+    it would mean converting a value the packet never sent in Fahrenheit.
+    """
+    if session.track_temperature is None or session.air_temperature is None:
+        return None
+    return f"{session.track_temperature} °C / {session.air_temperature} °C"
+
+
+def track_air_temp_tooltip(session) -> str:
+    """Which temperature is which, since the cell shows two numbers in the label's order."""
+    if session.track_temperature is None or session.air_temperature is None:
+        return ""
+    return _TEMPERATURE_TOOLTIP.format(track=session.track_temperature, air=session.air_temperature)
+
+
+def time_of_day_label(session) -> str | None:
+    """The details grid's clock cell: ``15:00``, the in-game time the session started.
+
+    ``time_of_day`` is minutes since midnight and a real clock - valid 0..1439 in 72 of the 72
+    sessions in these captures. It pairs with ``Recorded`` beside it as in-game time beside
+    real-world time. ``header.session_time`` is *not* a clock: it is elapsed session seconds, and
+    is what the settle window measures.
+
+    **0 is a legitimate value** (midnight), which is why the absence test is ``is None`` and never
+    a falsiness test - the one place in these three cells where the distinction can actually bite.
+    """
+    if session.time_of_day is None:
+        return None
+    return f"{session.time_of_day // 60:02d}:{session.time_of_day % 60:02d}"
+
+
+def time_of_day_tooltip(session) -> str:
+    """Which clock this is - the in-game local time, not the wall clock ``Recorded`` shows."""
+    return "" if session.time_of_day is None else _TIME_OF_DAY_TOOLTIP
 
 
 def session_context_label(session, session_label: str) -> str:

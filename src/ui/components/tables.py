@@ -7,6 +7,8 @@ laps, ...) styles and sizes it the same way.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -132,12 +134,17 @@ def build_kv_table(rows: list[tuple[str, str | None]]) -> QTableWidget:
     return table
 
 
-def build_pair_grid(rows: list[tuple[tuple[str, object], tuple[str, object]]]) -> QWidget:
-    """Two labelled read-outs per row, centred, with a thin rule under each row.
+def build_readout_grid(rows: Sequence[tuple[str, object]]) -> QWidget:
+    """Labelled read-outs laid out in a grid, centred, with a thin rule under each row.
 
-    Each row is ``((left_label, left_value), (right_label, right_value))``; a value is either a
-    string or a ready-made widget (so a caller can pass a coloured label or an icon). Every cell
-    renders its label bold above its value, both centred.
+    Each row is a sequence of ``(label, value)`` cells; a value is either a string or a ready-made
+    widget (so a caller can pass a coloured label, an icon, or a label carrying a tooltip). Every
+    cell renders its label bold above its value, both centred. Rows may be short: the grid is as
+    wide as its widest row and a short row simply leaves the trailing columns empty.
+
+    Was ``build_pair_grid`` and fixed at two columns until E15 took the session details grid to
+    4x3 - a third column across the existing four rows rather than a fifth row, which would have
+    stretched the details / classification band (DECISIONS -> UI).
 
     Built from plain widgets in a ``QGridLayout`` rather than a ``QTableWidget`` on purpose. The
     row rules would otherwise need ``QTableWidget::item { border-bottom: ... }``, and setting
@@ -151,16 +158,18 @@ def build_pair_grid(rows: list[tuple[tuple[str, object], tuple[str, object]]]) -
     grid.setContentsMargins(4, 2, 4, 2)
     grid.setHorizontalSpacing(12)
     grid.setVerticalSpacing(2)
-    grid.setColumnStretch(0, 1)
-    grid.setColumnStretch(1, 1)
 
-    for index, (left, right) in enumerate(rows):
-        grid.addWidget(_labelled_cell(*left), index * 2, 0)
-        grid.addWidget(_labelled_cell(*right), index * 2, 1)
+    columns = max((len(row) for row in rows), default=0)
+    for column in range(columns):
+        grid.setColumnStretch(column, 1)        # equal widths
+
+    for index, row in enumerate(rows):
+        for column, (label, value) in enumerate(row):
+            grid.addWidget(_labelled_cell(label, value), index * 2, column)
         rule = QFrame()
         rule.setFrameShape(QFrame.Shape.HLine)
         rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, index * 2 + 1, 0, 1, 2)
+        grid.addWidget(rule, index * 2 + 1, 0, 1, columns)
     return host
 
 

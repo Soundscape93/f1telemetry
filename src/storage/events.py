@@ -12,8 +12,13 @@ for the measurements the shape was settled against.
 The two readers are separate on purpose. The penalties box and the overtakes readout are different
 surfaces with different appetites - a session holds a handful of penalties and up to 562 passes - so
 neither pays for the other. There is deliberately **no count method**: the ``+N / -M`` a view shows
-must be a ``len()`` over the rows that view already holds, or the header and the list beside it can
-disagree.
+must be a ``len()`` over the rows that view already holds, so a re-ingest that produces different
+rows produces a different count with nothing stale left behind it.
+
+``load_overtakes`` returns the whole field's passes even though only the player's are counted, and
+that is load-bearing: whether a session holds *any* pass rows is the only thing that tells a real
+``+0 / -0`` apart from a session ingested before ``PIPELINE_VERSION`` 5, since there is no stored
+aggregate to fall back on the way the penalties have ``num_penalties``.
 """
 from __future__ import annotations
 
