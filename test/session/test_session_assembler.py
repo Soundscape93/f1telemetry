@@ -48,11 +48,15 @@ def _car_lap(lap_num, distance, driver_status=DriverStatus.ON_TRACK,
 
 
 def session_pkt(uid, stype=SessionType.RACE, laps=5, safety_car=SafetyCarStatus.NONE,
-                red_flag_periods=0, weather=Weather.CLEAR, session_time=10.0):
+                red_flag_periods=0, weather=Weather.CLEAR, session_time=10.0,
+                track_temp=31, air_temp=21, time_of_day=900):
     """Build a fake session packet for testing.
 
     ``session_time`` defaults past ``_WEATHER_SETTLE_S`` so the default packet reads as a
-    settled session; the weather tests pass times inside the window on purpose.
+    settled session; the weather and conditions tests pass times inside the window on purpose.
+
+    ``track_temp`` / ``air_temp`` / ``time_of_day`` default to a plausible settled reading (31 C,
+    21 C, 15:00) so every stream that isn't about them reads as an ordinary session.
     """
     return SimpleNamespace(
         header=_hdr(PacketId.SESSION, uid, session_time=session_time),
@@ -61,6 +65,7 @@ def session_pkt(uid, stype=SessionType.RACE, laps=5, safety_car=SafetyCarStatus.
         weather=int(weather), game_mode=28, total_laps=laps, ai_difficulty=95,
         num_sessions_in_weekend=0, weekend_structure=[0] * 12,
         safety_car_status=int(safety_car), num_red_flag_periods=red_flag_periods,
+        track_temperature=track_temp, air_temperature=air_temp, time_of_day=time_of_day,
         track_length=5000.0, sector_2_lap_distance_start=1500.0, sector_3_lap_distance_start=3000.0,)
 
 
@@ -754,6 +759,96 @@ class SessionWeatherTest(unittest.TestCase):
         self.assertEqual(race.weather_seen, ())
         self.assertEqual(race.weather, Weather.CLEAR)       # the snapshot is still there
         self.assertFalse(race.is_mixed_weather)
+
+
+class SessionConditionsTest(unittest.TestCase):
+    """Track temp, air temp and the in-game clock, from the first settled Session packet (E15).
+
+    The scenarios are the measured ones. Across all 33 captures, 58 of 72 sessions have an opening
+    Session packet that disagrees with the settled reading: 4 carry a wholly zeroed payload and 54
+    carry the *previous* session's values - see TELEMETRY_NOTES -> "Track / air temperature and
+    time of day".
+    """
+
+    def _stream(self, *session_packets):
+        """A one-lap race whose Session packets are whatever the test hands in."""
+        return [*session_packets, participants_pkt(1),
+                *frames(1, 1, [0, 2500, 5000]),
+                sh_pkt(1, [_lap_entry(90000, 15)])]
+
+    def test_a_settled_packet_is_read(self):
+        (race,) = list(assemble(self._stream(session_pkt(1))))
+        self.assertEqual((race.track_temperature, race.air_temperature, race.time_of_day),
+                         (31, 21, 900))
+
+    def test_the_zeroed_opening_payload_is_skipped(self):
+        """4 of 72 sessions: the whole Session payload is zeroed for the opening 3-4 packets.
+
+        All three fields go blank together, in exactly the same packets - which is why one guard
+        covers all three and they are captured as one reading.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=0.0, track_temp=0, air_temp=0, time_of_day=0),
+            session_pkt(1, session_time=1.5, track_temp=0, air_temp=0, time_of_day=0),
+            session_pkt(1, session_time=3.0, track_temp=24, air_temp=19, time_of_day=960))))
+        self.assertEqual((race.track_temperature, race.air_temperature, race.time_of_day),
+                         (24, 19, 960))
+
+    def test_a_stale_opening_value_is_skipped_too(self):
+        """54 of 72 sessions, and the case the zeroed-payload note does not cover.
+
+        20260704_181644 Q2 opens on Q1's clock (16:00) before reporting its own (16:23). Taking the
+        first packet would give two sessions of one weekend the same start time, and elsewhere in
+        these captures would misread the track temperature by up to 18 C.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=0.0, track_temp=42, air_temp=29, time_of_day=960),
+            session_pkt(1, session_time=3.0, track_temp=24, air_temp=18, time_of_day=983))))
+        self.assertEqual((race.track_temperature, race.air_temperature, race.time_of_day),
+                         (24, 18, 983))
+
+    def test_the_first_settled_packet_wins_not_the_last(self):
+        """A snapshot of the session's start, so a later packet never overwrites it.
+
+        Track temperature drifts within a session (median spread 1 C, but 42 C in one that opened
+        on the placeholder), and the clock advances in 68 of 73 sessions.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=3.0, track_temp=31, air_temp=21, time_of_day=900),
+            session_pkt(1, session_time=1800.0, track_temp=35, air_temp=23, time_of_day=930))))
+        self.assertEqual((race.track_temperature, race.air_temperature, race.time_of_day),
+                         (31, 21, 900))
+
+    def test_a_recording_that_joined_mid_session_reads_its_earliest_packet(self):
+        """11 of 72 sessions have no Session packet before the window - the recording joined late.
+
+        Nothing special is needed: their first packet is already past it, so "at session start"
+        becomes "the earliest reading captured", the same qualification ``weather_seen`` carries.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=457.4, track_temp=28, air_temp=20, time_of_day=697))))
+        self.assertEqual((race.track_temperature, race.air_temperature, race.time_of_day),
+                         (28, 20, 697))
+
+    def test_a_capture_holding_only_the_opening_seconds_records_nothing(self):
+        """None, never 0 - and all three together, so no caller can read one of them as a value."""
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=0.0, track_temp=0, air_temp=0, time_of_day=0),
+            session_pkt(1, session_time=1.5, track_temp=0, air_temp=0, time_of_day=0))))
+        self.assertIsNone(race.track_temperature)
+        self.assertIsNone(race.air_temperature)
+        self.assertIsNone(race.time_of_day)
+
+    def test_midnight_is_kept_as_a_real_reading(self):
+        """0 is a legitimate time_of_day and never a legitimate track temperature.
+
+        The two zero together in the artifact, so a settled packet reporting midnight beside a real
+        temperature is a real midnight and must survive.
+        """
+        (race,) = list(assemble(self._stream(
+            session_pkt(1, session_time=3.0, track_temp=18, air_temp=12, time_of_day=0))))
+        self.assertEqual(race.time_of_day, 0)
+        self.assertEqual(race.track_temperature, 18)
 
 
 class MotionChannelsTest(unittest.TestCase):

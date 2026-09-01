@@ -42,24 +42,38 @@ class SessionRow(Base):
     total_laps: Mapped[int]           # total laps in the session
     game_mode: Mapped[int]            # raw mode id -> reference.game_mode_name; buckets sessions into mode-based windows
     player_vehicle_index: Mapped[int]  # index of the player's vehicle in the participants list
+
     # AI difficulty rating (0..110) from the Session packet; 0 means "not captured" - either stored before PIPELINE_VERSION 3 or a session with no AI.
     ai_difficulty: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
     # ordered session-type ints for the whole weekend; distinguishes Sprint Race from Race
     # (both report session_type 15). Additive column - [] for rows saved before it existed.
     weekend_structure: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+
     # every distinct condition the session reported, raw enum ints in the first-seen order (E14).
     # weather above stays the end-of-session snapshot and this is an additional fact. Additive
     # column - [] for rows saved before it existed, which reads as "not captured", not "one
     # condition", so a stale row never claims a session was mixed or wasn't.
     weather_seen: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+
     # static track geometry (metres) from the Session packet; None for pre-feature rows.
     track_length_m: Mapped[int | None] = mapped_column(nullable=True)
     sector2_start_m: Mapped[float | None] = mapped_column(nullable=True)
     sector3_start_m: Mapped[float | None] = mapped_column(nullable=True)
+
+    # Conditions as the session started, from the first settled Session packet (E15): temperatures
+    # in °C, the in-game clock in minutes since midnight. Additive and *nullable* - NULL is the value
+    # wanted ffor a row saved before these existed, so unlike ai_difficulty these carry no server_default: 
+    # 0 is a real time_of_day (midnight) and would be a lie about it.
+    track_temperature: Mapped[int | None] = mapped_column(nullable=True)
+    air_temperature: Mapped[int | None] = mapped_column(nullable=True)
+    time_of_day: Mapped[int | None] = mapped_column(nullable=True)
+
     # ordered garage-setup snapshots for the player; JSON list of {from_lap, setup{...}}.
     # Additive column - [] for rows saved before setup history existed.
     setup_history: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     recorded_at: Mapped[datetime | None] = mapped_column(nullable=True)  # timestamp of when the session was recorded
+
     # True when the classification was synthesized from telemetry (no Final Classification packet).
     # Additive column - 0 for rows saved before it existed (ensure_schema ALTERs it in on startup).
     is_reconstructed: Mapped[bool] = mapped_column(default=False, server_default=text("0"))

@@ -318,9 +318,14 @@ what would trigger revisiting it.
   - **Store the events; never store an overtake count.** The measured reason is that no aggregate
     survives scrutiny — raw `OVTK` is 4.5× the `LAP_POSITIONS` ground truth, the both-cars-racing
     filter 2.6×, and no reversal-cancel window is per-race accurate (0.61×-1.91× at the window that
-    matches in total). The count the UI shows is a `len()` over rows the same view has already
-    loaded, so the header and the list beside it **cannot disagree**; a stored aggregate's failure
-    mode is a header reading `+7` above six rows.
+    matches in total). The count the UI shows is a `len()` over rows the view has already loaded,
+    never a stored aggregate — one derivation, so a re-ingest producing different rows produces a
+    different count with nothing stale left behind it. **The original phrasing of this safeguard
+    leaned on a list beside the count, and branch 3 dropped the list** *(2026-09-01)*: `+N / −M` in
+    the details grid is now the only overtake surface, so a reader cannot check it against rows on
+    screen. The derivation is unchanged and a stored aggregate's failure mode — a header reading
+    `+7` above six rows — is still impossible, but a *mis-attributed* pass is now caught by
+    `test_formatting.py` against real rows rather than by eye. That is the cost, taken knowingly.
   - **Exactly one filter is applied at ingest**, because it is the only rule the data supports
     without qualification: *neither car in the pit lane, neither in the garage*. It drops 58% of raw
     events and every pass of a parked car, and needs only the Lap Data frame the assembler already
@@ -797,8 +802,16 @@ what would trigger revisiting it.
   | `Team & mode` | `Recorded` | `Time of day` |
 
   - **`Overtakes` is the player's own passes only** — `+N / −M`, made and suffered. The field-wide
-    number is 250 a race and 2.6× the ground truth (Storage, above); the player's is a handful per
-    race and every one is an event the driver can remember. **Races only**, em dash otherwise: the
+    number is 250 a race and 2.6× the ground truth (Storage, above); the player's is a handful in
+    almost every race — median 3 rows across the 17 races here that hold any, 5 or fewer in 12 of
+    them, and 0 in six, every one of those a start from pole and a win. The one race that is not a
+    handful is why the passes are a count and not a list (see the Race control box below).
+    **`+0 / −0` is told apart from "not captured" by the field-wide rows**, and that is where
+    storing field-wide stops being merely cheap and becomes load-bearing: a race that ran holds 52
+    to 562 of them, so a real zero always has rows to prove it, while a session ingested before
+    `PIPELINE_VERSION` 5 has none. The only three races here with no rows are reconstructed
+    fragments — no stored laps, no Final Classification packet — where "not captured" is the
+    literal truth rather than a fallback. **Races only**, em dash otherwise: the
     892 practice and 994 qualifying "passes" in the captures are almost all out-lap traffic. Same
     gate as `player_points_label`.
   - **`Started` is races only too.** `grid_position` is `0` for every non-race row in the database,
@@ -823,9 +836,18 @@ what would trigger revisiting it.
     payload is zeroed for the opening 3-4 packets of a session. The existing constant is reused
     rather than a second one invented for the same artifact — see TELEMETRY_NOTES.
 - **The Penalties box becomes the Race control box** *(decided 2026-09-01, E15)*. It holds the
-  session's penalties *and* the player's passes together: both are "what race control and the field
-  did to this session", both are per-lap event lists, and two boxes would put a frame through the
-  middle of one story. It is **scrollable with the same height cap as the Laps box beside it**, so a
+  session's penalties, field-wide. Passes were weighed for the same box and **left out**
+  *(decided 2026-09-01, E15 branch 3)*: a pass is not a race-control action, so the box's own title
+  argues against it; the details grid's `Overtakes +/−` is on the same screen and a count line here
+  would be the only number on the page stated twice; and the box's three-state honesty rule is
+  about the penalty store, which a second capture state under one heading would blur. **The
+  measurement decided it, and not the way the objection was first phrased** — a list would have
+  *under*filled the box in 16 of the 17 races here that hold passes (median 3 rows, 5 or fewer in 12
+  of them), so length was never the problem. The seventeenth is: 42 rows, of which sixteen are one
+  incident inside 5.7 seconds (the whole field streaming past a car that had gone off), and **40% of
+  all 95 player race rows are the same pair swapping back within 30 s** with 54% sitting in a burst
+  of four or more inside ten seconds. A count absorbs that; a list of rows reads as a fault. It is
+  **scrollable with the same height cap as the Laps box beside it**, so a
   race with many penalties or passes cannot keep growing the page — the same reason the
   classification table takes `scrollable=True`.
   - **The penalties half is field-wide and names every driver; the passes half is the player's**

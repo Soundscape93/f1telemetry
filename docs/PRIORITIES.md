@@ -366,7 +366,8 @@ it lists, so the header and the list cannot disagree. Exactly one filter at inge
 the pit lane, neither in the garage*.
 
 **UI, approved 2026-09-01.** The Penalties box becomes a scrollable, height-capped **Race control**
-box holding penalties and the player's passes together. The details grid becomes **4×3 rather than
+box holding the field's penalties. It was to hold the player's passes too; **branch 3 left them
+out** — see the branch plan below. The details grid becomes **4×3 rather than
 4×2 plus a fifth row** — a fifth row would stretch the details/classification band further, worst in
 Q3 where the classification is already short. `Laps completed` **keeps its cell**; the 2026-08-24
 note calling it a placeholder that "becomes real overtakes" was wrong and is corrected in DECISIONS.
@@ -387,10 +388,20 @@ box and is the first reader: field-wide, every row named from the classification
 (129 of 129 resolve), the Qt-free rules in `ui/sessions/race_control.py`, and
 `reference.penalty_name()` / `infringement_name()` finally called. The non-AI filter considered
 during it was measured and rejected — it is player-only in 35 of 42 penalised sessions and empties
-four non-empty boxes; DECISIONS → UI carries the numbers. Branch 3 carries the overtakes half, the 4×3 grid, and the
-three new Session columns the two new cells need — those land with their only consumer, the way
-E17's lap-context columns landed with the Laps box that reads them, and they need no second bump
-because branch 1 has already stamped 5. Branch 0 stands alone deliberately: the uid-0 rule
+four non-empty boxes; DECISIONS → UI carries the numbers. **Branch 3** carries the 4×3 grid, the three new Session columns the two conditions cells need —
+those land with their only consumer, the way E17's lap-context columns landed with the Laps box that
+reads them, and they need no second bump because branch 1 has already stamped 5 — and the overtakes,
+**as a details-grid count with no list in the box**. That last part revises the UI note above and was
+decided on the measurement, not on taste: a per-pass list would have *under*filled the Race control
+box in 16 of the 17 races that hold passes (median 3 player rows, 5 or fewer in 12 of them, and 0 in
+six, every one of those a start from pole and a win), so "it would overload the box" was not what the
+data said. The seventeenth race is: 42 rows, sixteen of them the whole field streaming past a car
+that had gone off inside 5.7 seconds, and 40% of all 95 player race rows the same pair swapping back
+within 30 s. A count absorbs that; a list of rows reads as a fault. The field-wide rows stay stored
+and are now load-bearing rather than merely kept — whether a session holds *any* is the only thing
+that tells a real `+0 / −0` apart from a session ingested before `PIPELINE_VERSION` 5, and the only
+three races here with none are reconstructed fragments, where "not captured" is the literal truth. Full reasoning and the
+rewritten sentences in DECISIONS → Storage and → UI. Branch 0 stands alone deliberately: the uid-0 rule
 contradicts a documented core invariant and deserves its own review context.
 
 **`PIPELINE_VERSION` is a real second prompt this time — 4 → 5.** That is exactly the cost the

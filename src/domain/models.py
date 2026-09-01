@@ -18,6 +18,7 @@ Conventions:
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
@@ -307,6 +308,21 @@ class SessionOvertake:
     frame: int = 0                          # 0 for a row recovered from the end-of-session replay
 
 
+def count_overtakes(overtakes: Sequence[SessionOvertake], vehicle_index: int) -> tuple[int, int]:
+    """``(passes made, passes suffered)`` for one car, counted over the rows handed in.
+
+    Module level rather than only a method, because the count has two callers reading the same
+    fact from two places: ``SessionResult.overtakes_for`` on a hydrated session, and the details
+    grid on the loose rows ``EventStore.load_overtakes`` returns (``SessionStore`` does not
+    populate ``SessionResult.overtakes``). DECISIONS -> Storage allows exactly one derivation of
+    this number and no stored aggregate, so the two callers share this one rather than each
+    writing the pair of sums.
+    """
+    made = sum(1 for o in overtakes if o.overtaking_vehicle_index == vehicle_index)
+    suffered = sum(1 for o in overtakes if o.overtaken_vehicle_index == vehicle_index)
+    return made, suffered
+
+
 @dataclass(frozen=True)
 class Participant:
     """One car/driver in the session, keyed by the session-scoped vehicle index."""
@@ -439,6 +455,22 @@ class SessionResult:
         sector2_start_m: float | None = None
         sector3_start_m: float | None = None
 
+        # Conditions as the session started (PIPELINE_VERSION 5): the track and air temperature in
+        # degrees Celsius and the in-game clock in minutes since midnight. All three are read from
+        # the *first* Session packet past the assembler's settle window, together, because the game
+        # sends them together: the opening packets of a session carry either a wholly zeroed payload
+        # or the previous session's values, and taking the first packet would misread the track
+        # temperature by up to 18 C and give a Q2 the Q1 clock. Measured across all 33 captures:
+        # 58 of 72 sessions have an opening packet that differs from the settled reading.
+        #
+        # None means "not captured" - a row ingested before these existed, or a capture holding
+        # only the opening seconds - and never 0, which is a real time_of_day (midnight) though
+        # never a real track temperature. See TELEMETRY_NOTES -> "Track / air temperature and time
+        # of day".
+        track_temperature: int | None = None          # degrees Celsius; the wire value is always Celsius
+        air_temperature: int | None = None            # degrees Celsius
+        time_of_day: int | None = None                # minutes since midnight, 0..1439
+
         # content
         participants: tuple[Participant, ...] = ()
         laps: tuple[Lap, ...] = ()      # the player's completed laps (with traces)
@@ -476,27 +508,26 @@ class SessionResult:
         def overtakes_for(self, vehicle_index: int) -> tuple[int, int]:
             """``(passes made, passes suffered)`` for one car.
 
-            Derived, never stored - the same rule ``is_mixed_weather`` follows, and here it is load
-            bearing rather than tidy: the details grid's ``+N / -M`` and the Race control box's list
-            are on screen together, so the count has to be a reading of the very rows the list
-            shows. Stored separately they could disagree, and the failure mode is a header claiming
-            seven passes above six of them.
+            Derived, never stored - the same rule ``is_mixed_weather`` follows. No aggregate
+            derived from OVTK survives measurement (see ``SessionOvertake``), so the events are the
+            stored fact and every number is a reading of them; ``count_overtakes`` is the single
+            derivation this and the details grid share.
             """
-            made = sum(1 for o in self.overtakes if o.overtaking_vehicle_index == vehicle_index)
-            suffered = sum(1 for o in self.overtakes if o.overtaken_vehicle_index == vehicle_index)
-            return made, suffered
+            return count_overtakes(self.overtakes, vehicle_index)
 
         @property
         def player_overtakes(self) -> tuple[int, int]:
             """The player's own ``(made, suffered)`` - what the details grid shows.
 
             Player-only on purpose: the field-wide figure is ~250 a race and 2.6x the ground truth,
-            while the player's is a handful and every one is a pass the driver can remember.
+            while the player's is a handful in almost every race - median 3 rows across the 17
+            races here that hold any, 5 or fewer in 12 of them, and 0 in six, every one of those a
+            start from pole and a win.
             """
-            return self.overtakes_for(self.player_vehicle_index)
+            return count_overtakes(self.overtakes, self.player_vehicle_index)
 
         def setup_for_lap(self, lap_number: int) -> Setup | None:
-            """he setup active on a given lap; the latest snapshot taking effect on or before it.
+            """The setup active on a given lap; the latest snapshot taking effect on or before it.
 
             Returns None if no setup was captured, or if every snapshot starts after this lap.
             Several snapshots can share a from_lap (e.g. tuning in the garage before the first

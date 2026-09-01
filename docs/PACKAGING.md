@@ -1134,11 +1134,21 @@ share a single prompt.
 | 2 | `is_ai` on classification entries, so league standings stop merging an AI and a human on the same race number (invariant #7) |
 | 3 | `ai_difficulty` on sessions, from the Session packet |
 | 4 | **Lap context** (E17): `driver_status` / `pit_status` from Lap Data, the computed garage / out-lap / in-lap flags, and the Session packet's safety-car and red-flag state. Laps stored earlier read `None` and the charts fall back to the fuel and stint-shape inference, so nothing breaks without the re-ingest — the flags simply stay inferred |
+| 5 | **Event packets** (E15): the whole field's penalties (type, infringement, lap, added time, places) and the on-track passes between two racing cars, in `session_events`. **Plus the conditions at session start** — `track_temperature`, `air_temperature`, `time_of_day` on `sessions`, read from the first Session packet past the settle window (E15 branch 3, added under the same number rather than bumping to 6: 5 was never released, so a released user pays one prompt for the pair). Rows stored earlier hold no events and `None` for all three columns, and both read as "not captured", never as "nothing happened" |
 
 **Bumping past an unreleased number still costs nothing extra, and is usually right.** 3 was never
 released (v0.8.1 shipped 2), so E17 could have ridden it. It bumped to 4 anyway: a released user
 sees one prompt either way, while every *development* database already stamped 3 would otherwise
 never be offered the re-ingest and would quietly keep empty columns.
+
+**E15 branch 3 went the other way, deliberately — decided 2026-09-01.** It adds three
+capture-derived columns, which the rule above makes a bump trigger, and it did **not** bump: 5 is
+unreleased and ships whole in v0.10.0, so no released user can ever hold events without the columns.
+The population the paragraph above worries about is real here but is **one machine** — a development
+database stamped 5 by an earlier branch reads `Not captured` in the three new cells and is never
+offered the re-ingest, because `stored < current` is false. What closes it is
+**Help → "Re-read captures"**, the manual rebuild that already exists for exactly this; a bump would
+instead have charged every tester a second prompt for data the first one already covers.
 
 ---
 

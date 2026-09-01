@@ -4,11 +4,13 @@ import unittest
 from types import SimpleNamespace
 
 from datetime import datetime, timedelta, timezone
- 
+
+from f1telemetry.src.domain.models import SessionOvertake
 from f1telemetry.src.pipeline import RestoreOutcome, RestoreProblem
 from f1telemetry.src.protocol.enums import ResultStatus, SessionType, Weather
 from f1telemetry.src.protocol.reference import team_display_name, track_name
 from f1telemetry.src.ui.formatting import (
+    NOT_CAPTURED,
     capture_choice_label,
     compound_for_lap,
     deleted_capture_label,
@@ -27,6 +29,8 @@ from f1telemetry.src.ui.formatting import (
     lap_gap_label,
     laps_completed_label,
     non_race_result,
+    overtakes_label,
+    overtakes_tooltip,
     player_best_lap_ms,
     player_points_label,
     race_result,
@@ -38,6 +42,8 @@ from f1telemetry.src.ui.formatting import (
     session_context_label,
     session_fastest_lap,
     session_leader,
+    time_of_day_label,
+    track_air_temp_label,
     weather_label,
 )
 from f1telemetry.test.domain.test_seasons import make_session
@@ -371,10 +377,111 @@ def _rival(best=0, is_player=False):
 
 
 def _sess(session_type=SessionType.RACE, entries=(), total_laps=29, game_mode=78,
-          reconstructed=False):
+          reconstructed=False, player_vehicle_index=0,
+          track_temperature=None, air_temperature=None, time_of_day=None):
     classification = SimpleNamespace(entries=tuple(entries), is_reconstructed=reconstructed)
     return SimpleNamespace(session_type=session_type, total_laps=total_laps,
-                           game_mode=game_mode, classification=classification)
+                           game_mode=game_mode, classification=classification,
+                           player_vehicle_index=player_vehicle_index,
+                           track_temperature=track_temperature,
+                           air_temperature=air_temperature, time_of_day=time_of_day)
+
+
+def _pass(overtaking, overtaken, lap=1):
+    """One stored OVTK row, already filtered to two racing cars."""
+    return SessionOvertake(overtaking_vehicle_index=overtaking,
+                           overtaken_vehicle_index=overtaken, lap_number=lap)
+
+
+class OvertakesLabelTest(unittest.TestCase):
+    """The details grid's overtakes cell, against the shapes the real captures produced.
+
+    Player index 0 throughout, and every fixture is a shape measured in this database - see
+    TELEMETRY_NOTES -> "Event packets" and the branch-3 note in DECISIONS -> UI.
+    """
+
+    def test_a_race_counts_the_player_s_own_passes_both_ways(self):
+        """14435457337826486933 (a league race): 13 made, 29 suffered - the worst race here, and
+        the one that decided the passes are a count and not a list."""
+        rows = [_pass(0, 12)] * 13 + [_pass(12, 0)] * 29
+        self.assertEqual(overtakes_label(_sess(), rows), "+13 / \u221229")
+
+    def test_other_cars_passes_are_not_counted(self):
+        """93% of OVTK events are AI-on-AI; only the player's own belong in this cell."""
+        rows = [_pass(0, 5), _pass(7, 9), _pass(9, 7), _pass(4, 0)]
+        self.assertEqual(overtakes_label(_sess(), rows), "+1 / \u22121")
+
+    def test_a_lights_to_flag_win_reads_as_a_real_zero(self):
+        """Six of the 20 races here: grid P1 to P1, 146-562 field-wide passes, none the player's.
+        The rows being present is what makes this a fact rather than a gap."""
+        rows = [_pass(7, 9), _pass(9, 7), _pass(3, 4)]
+        self.assertEqual(overtakes_label(_sess(player_vehicle_index=21), rows), "+0 / \u22120")
+
+    def test_no_rows_at_all_is_not_captured(self):
+        """A session ingested before PIPELINE_VERSION 5 holds none, and a race that ran holds 52 to
+        562 - so an empty read is the store speaking, not the race. The only three races here with
+        no rows are reconstructed fragments, where "not captured" is the literal truth."""
+        self.assertIsNone(overtakes_label(_sess(), ()))
+
+    def test_practice_and_qualifying_are_an_em_dash(self):
+        """16.7% of filtered passes there have the two cars on different laps - traffic, not
+        racing - and the 892 practice / 994 qualifying "passes" are almost all out-lap traffic."""
+        rows = [_pass(0, 5), _pass(5, 0)]
+        self.assertEqual(overtakes_label(_sess(SessionType.PRACTICE_1), rows), "\u2014")
+        self.assertEqual(overtakes_label(_sess(SessionType.QUALIFYING_3), rows), "\u2014")
+
+    def test_a_sprint_race_counts_like_a_race(self):
+        """The Sprint Race shares session_type 15 with the Grand Prix (core invariant #5)."""
+        self.assertEqual(overtakes_label(_sess(SessionType.RACE), [_pass(0, 5)]), "+1 / \u22120")
+
+    def test_the_minus_is_a_minus_sign_not_a_hyphen(self):
+        """It sets beside the "+" at the same weight and width; a hyphen does not."""
+        self.assertIn("\u2212", overtakes_label(_sess(), [_pass(3, 0)]))
+        self.assertNotIn("-", overtakes_label(_sess(), [_pass(3, 0)]))
+
+    def test_the_tooltip_spells_out_what_was_counted(self):
+        rows = [_pass(0, 5), _pass(0, 6), _pass(7, 0)]
+        tooltip = overtakes_tooltip(_sess(), rows)
+        self.assertIn("2 passes made, 1 suffered", tooltip)
+        self.assertIn("pit lane", tooltip)
+
+    def test_there_is_no_tooltip_where_there_is_no_number(self):
+        self.assertEqual(overtakes_tooltip(_sess(), ()), "")
+        self.assertEqual(overtakes_tooltip(_sess(SessionType.PRACTICE_1), [_pass(0, 5)]), "")
+
+
+class TrackAirTempLabelTest(unittest.TestCase):
+    def test_both_temperatures_in_the_label_s_order(self):
+        self.assertEqual(track_air_temp_label(_sess(track_temperature=31, air_temperature=21)),
+                         "31 °C / 21 °C")
+
+    def test_a_row_ingested_before_the_columns_existed_is_not_captured(self):
+        self.assertIsNone(track_air_temp_label(_sess()))
+
+    def test_a_negative_temperature_is_a_real_reading(self):
+        """The wire field is a signed int8; nothing here may treat cold as missing."""
+        self.assertEqual(track_air_temp_label(_sess(track_temperature=-2, air_temperature=-5)),
+                         "-2 °C / -5 °C")
+
+
+class TimeOfDayLabelTest(unittest.TestCase):
+    def test_minutes_since_midnight_read_as_a_clock(self):
+        self.assertEqual(time_of_day_label(_sess(time_of_day=900)), "15:00")
+        self.assertEqual(time_of_day_label(_sess(time_of_day=983)), "16:23")
+        self.assertEqual(time_of_day_label(_sess(time_of_day=1439)), "23:59")
+
+    def test_midnight_is_a_value_and_not_an_absence(self):
+        """0 is a legitimate time_of_day and the reason the test is `is None`, not falsiness."""
+        self.assertEqual(time_of_day_label(_sess(time_of_day=0)), "00:00")
+
+    def test_a_row_ingested_before_the_column_existed_is_not_captured(self):
+        self.assertIsNone(time_of_day_label(_sess()))
+
+
+class NotCapturedTest(unittest.TestCase):
+    def test_the_phrase_is_shared_by_all_three_cells(self):
+        """One string, so the three cells cannot word the same absence differently."""
+        self.assertEqual(NOT_CAPTURED, "Not captured")
 
 
 class PlayerPointsLabelTest(unittest.TestCase):

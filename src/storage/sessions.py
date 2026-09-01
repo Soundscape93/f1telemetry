@@ -306,6 +306,9 @@ class SessionStore:
             track_length_m=result.track_length_m,
             sector2_start_m=result.sector2_start_m,
             sector3_start_m=result.sector3_start_m,
+            track_temperature=result.track_temperature,
+            air_temperature=result.air_temperature,
+            time_of_day=result.time_of_day,
             setup_history=[
                 {"from_lap": snap.from_lap, "setup": _setup_to_dict(snap.setup)}
                 for snap in result.setup_history
@@ -375,6 +378,11 @@ class SessionStore:
             track_length_m=row.track_length_m,
             sector2_start_m=row.sector2_start_m,
             sector3_start_m=row.sector3_start_m,
+            # No ``or 0`` here, unlike ai_difficulty above: None means "not captured" and 0 is a
+            # real midnight, so the two must not collapse (DECISIONS -> UI, the details grid).
+            track_temperature=row.track_temperature,
+            air_temperature=row.air_temperature,
+            time_of_day=row.time_of_day,
             setup_history=tuple(
                 SetupSnapshot(from_lap=item["from_lap"],
                               setup=_setup_from_dict(item["setup"]))

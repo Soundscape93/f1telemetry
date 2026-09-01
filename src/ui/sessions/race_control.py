@@ -115,9 +115,10 @@ class PenaltySummary:
     def heading(self) -> str:
         """The section heading, counting the rows it is actually about.
 
-        The count is a ``len()`` over the very rows below it, never a stored aggregate - the same
-        rule DECISIONS sets for the overtake counts, and for the same reason: a heading and the
-        list under it must not be able to disagree.
+        The count is a ``len()`` over the very rows below it, never a stored aggregate. DECISIONS
+        sets the same one-derivation rule for the overtake count, though only this box can still
+        show its rows: the details grid's ``+N / -M`` is a count with no list under it, so here a
+        heading and its list cannot disagree, while there the derivation is the whole safeguard.
         """
         return f"{_HEADING} ({self.total})" if self.rows else _HEADING
 

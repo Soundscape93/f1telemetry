@@ -1,15 +1,15 @@
 """The session detail page - what one session was, how it finished, and how it was driven.
 
-Five boxes over the shared classification builder: a 4x2 details grid and the final
+Five boxes over the shared classification builder: a 4x3 details grid and the final
 classification side by side, the player's laps and the session's race control below them, and
 (branch 2c) the stacked pace / tyre-life charts under that.
 
-Three things here are data-honesty rules rather than layout, and each is enforced in a Qt-free
-module so they stay testable: points are shown only for races because the stored value is a stale
-championship figure on every other session type; laps completed comes from the classification
-rather than the stored lap rows, which can be short; and the Race control box never reports a
-session clean off an empty read - an empty ``session_events`` read means "not captured", never
 "nothing happened", so it has a third state that says which (``sessions.race_control``).
+
+The details grid's three E15 cells follow the same rule from the other side. Each returns None
+from ``ui.formatting`` when its value was never captured, and this page renders that as a muted
+``Not captured`` rather than as the em dash it uses for "does not apply to this session type" -
+two different absences that must not read alike (DECISIONS -> UI).
 
 The classification table is ``components.build_classification_table``, the same builder the
 weekend page uses - this page must never grow a second one. A lap row emits upward rather than
@@ -42,7 +42,7 @@ from ..components import (
     WeatherIcon,
     TrackMap,
     build_classification_table,
-    build_pair_grid,
+    build_readout_grid,
     cell,
     clear_layout,
     confirm_and_delete,
@@ -54,16 +54,25 @@ from ..components import (
 from ..components.flags import flag_icon
 from ..components.tyres import tyre_pixmap
 from ..formatting import (
+    NOT_CAPTURED,
+    NOT_CAPTURED_TOOLTIP,
+    format_grid,
     format_lap_time,
     is_race,
     lap_gap_label,
     laps_completed_label,
+    overtakes_label,
+    overtakes_tooltip,
     player_best_lap_ms,
     player_points_label,
     recorded_label,
     session_best_lap_ms,
     session_context_label,
     slot_label,
+    time_of_day_label,
+    time_of_day_tooltip,
+    track_air_temp_label,
+    track_air_temp_tooltip,
 )
 from ..style import (
     FASTEST_LAP,
@@ -177,21 +186,29 @@ class DetailPage(QWidget):
         self._subtitle.setText(f"uid {session.session_uid} · Source capture: {self._capture_label(session)}")
 
         laps = self._stored_laps(session)
+
         # One classification for the page: the Laps box's indicators, the run split and the pace
         # averages all read this, so a lap the table flags and a lap the average drops are the same
         # lap by construction (ui/sessions/lap_context.py). ``is_race`` covers the Sprint Race too,
         # which shares its session_type with the Grand Prix (core invariant #5).
         analysis = analyse_session(laps, standing_start=is_race(slot.session_type))
+
         # Read once for the page: the classification0s grid badges and the Race control box are
         # two readings of the same rows, and two queries could not disagree bt would still be two.
         penalties = self._stored_penalties(session)
-        self._body.addWidget(self._top_row(session, slot, label, laps, penalties))
+
+        # The passes are read once too, and only the details grid reads them: the Race control box
+        # lists penalties and nothing else. Field-wide rows, because whether the session has *any*
+        # is what tells "+0 / -0" apart from "not captured".
+        overtakes = self._stored_overtakes(session)
+
+        self._body.addWidget(self._top_row(session, slot, label, laps, penalties, overtakes))
         self._body.addWidget(self._middle_row(session, laps, analysis, penalties))
         self._body.addWidget(self._charts_row(analysis))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
-    def _top_row(self, session, slot, label: str, laps, penalties=()) -> QWidget:
+    def _top_row(self, session, slot, label: str, laps, penalties=(), overtakes=()) -> QWidget:
         """Session details beside the final classification.
 
         Neither box is height-capped. The classification is sized to show every driver and the
@@ -199,7 +216,7 @@ class DetailPage(QWidget):
         visible rows, which is worse than scrolling the page.
         """
         details = _box("Session details", 
-                       self._details_box(session, slot, label, laps))
+                       self._details_box(session, slot, label, laps, overtakes))
         classification = _box(f"Final classification · {label}",
                                 build_classification_table(session, is_sprint_race=slot.is_sprint_race, 
                                                            grid_penalties=grid_penalty_places(penalties)), fill=True)
@@ -236,8 +253,8 @@ class DetailPage(QWidget):
         return _box("Tyre stints & pace", host)
 
     # --- boxes -----------------------------------------------------------------------------------
-    def _details_grid(self, session, slot, label: str, laps) -> QWidget:
-        """The 4x2 read out: results, pace, conditions, context."""
+    def _details_grid(self, session, slot, label: str, laps, overtakes=()) -> QWidget:
+        """The 4x3 read out: results, pace, conditions, context."""
         player = self._player(session)
         position =f"P{player.position}" if player is not None else "\u2014"
 
@@ -248,14 +265,25 @@ class DetailPage(QWidget):
             best.setStyleSheet(FASTEST_LAP_QSS)
             best.setToolTip("Fastest lap of the session")
 
-        return build_pair_grid([
-            (("Position", position), ("Points", player_points_label(session, slot.is_sprint_race))),
-            (("Fastest lap", best), ("Laps completed", laps_completed_label(session, stored_laps=len(laps)))),
-            (("Difficulty", self._difficulty_label(session)), ("Conditions", WeatherIcon(session_weather(session), size_px=24))),
-            (("Team & mode", session_context_label(session, label)), ("Recorded", recorded_label(session.recorded_at))),
+        return build_readout_grid([
+            (("Position", position), 
+             ("Points", player_points_label(session, slot.is_sprint_race)),
+             ("Started", format_grid(player.grid_position) if player is not None else "\u2014")),
+            (("Fastest lap", best), 
+             ("Laps completed", laps_completed_label(session, stored_laps=len(laps))),
+             ("Overtakes +/\u2212", _captured_cell(overtakes_label(session, overtakes), 
+                                                    overtakes_tooltip(session, overtakes)))),
+            (("Difficulty", self._difficulty_label(session)), 
+             ("Conditions", WeatherIcon(session_weather(session), size_px=24)),
+             ("Track & air temp", _captured_cell(track_air_temp_label(session), 
+                                                 track_air_temp_tooltip(session)))),
+            (("Team & mode", session_context_label(session, label)), 
+             ("Recorded", recorded_label(session.recorded_at)),
+             ("Time of day", _captured_cell(time_of_day_label(session), 
+                                             time_of_day_tooltip(session)))),
         ])
-
-    def _details_box(self, session, slot, label: str, laps) -> QWidget:
+    
+    def _details_box(self, session, slot, label: str, laps, overtakes=()) -> QWidget:
         """The read-out grid, with the circuit outline filling the space below it.
 
         A race classification is twenty rows tall and the grid is four, so without something in
@@ -266,7 +294,7 @@ class DetailPage(QWidget):
         host = QWidget()
         box = QVBoxLayout(host)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(self._details_grid(session, slot, label, laps))
+        box.addWidget(self._details_grid(session, slot, label, laps, overtakes))
         track = self._track_map(session, laps)
         if track is not None:
             box.addSpacing(6)
@@ -379,12 +407,19 @@ class DetailPage(QWidget):
         return table
 
     def _race_control_panel(self, session, penalties=()) -> QWidget:
-        """What race control did to this session: its penalties, and (branch 3) the player's passes.
+        """What race control did to this session: its penalties, field-wide.
 
-        One box rather than two, because both are per-lap event lists telling one story and a frame
-        through the middle of it would say otherwise (DECISIONS -> UI). The sub-heading is what
-        branch 3 hangs the passes off; it is here now so that branch adds a section rather than
-        rearranging this one.
+        **The player's passes were weighed for this box and left out** (DECISIONS -> UI, E15
+        branch 3). A pass is not a race-control action, so the box's own title argues against it;
+        the details grid's ``Overtakes +/-`` is on the same screen and a count line here would be
+        the only number on the page stated twice; and the measurement settles it - a list would
+        have *under*filled the box in 16 of the 17 races here that hold passes (median 3 rows, 5 or
+        fewer in 12 of them) and, in the seventeenth, printed 42 rows of which sixteen are one
+        incident inside 5.7 seconds, with 40% of all 95 player race rows the same pair swapping
+        back within 30 s. The count absorbs that; a list of rows reads as a fault.
+
+        It stays a panel rather than a bare table so the section keeps its own heading and empty
+        state, which the three-state honesty rule needs.
         """
         panel = QWidget()
         box = QVBoxLayout(panel)
@@ -435,6 +470,22 @@ class DetailPage(QWidget):
         if self._events is None:
             return ()
         return self._events.load_penalties(str(session.session_uid))
+
+    def _stored_overtakes(self, session) -> tuple:
+        """The session's stored passes - every car's, in the order the game announced them.
+
+        Field-wide, though only the player's count is shown, and that is deliberate rather than
+        incidental: whether the session holds *any* pass rows is the only thing that tells a real
+        ``+0 / -0`` apart from a session ingested before ``PIPELINE_VERSION`` 5. Six of the 20 races
+        in this database have no player passes and every one is a start from pole and a win.
+
+        Arrival order, not lap-then-frame like the penalties - two passes can share a frame and a
+        pass is not "greater" than another. Nothing on screen is ordered, only counted, so that
+        never reaches the user.
+        """
+        if self._events is None:
+            return ()
+        return self._events.load_overtakes(str(session.session_uid))
     
     @staticmethod
     def _player(session):
@@ -609,6 +660,23 @@ def _bold_cell(item) -> None:
     font = item.font()
     font.setBold(True)
     item.setFont(font)
+
+
+def _captured_cell(text: str | None, tooltip: str = "") -> QLabel:
+    """A details-grid value, or a muted ``Not captured`` when ``ui.formatting`` returned None.
+
+    The only thing decided here is the *painting*. Which of the two absences applies is decided
+    Qt-free: an em dash comes back as a string and means "does not apply to this session type",
+    while None means "we do not have it" and is the one that reads muted (DECISIONS -> UI). A row
+    ingested before the value existed must never render as a confident number.
+    """
+    label = QLabel(text if text is not None else NOT_CAPTURED)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if text is None:
+        # MUTED_TEXT_QSS states its colour outright, the one stylesheet invariant #11 allows.
+        label.setStyleSheet(MUTED_TEXT_QSS)
+    label.setToolTip(tooltip if text is not None else NOT_CAPTURED_TOOLTIP)
+    return label
 
 
 def _muted_label(text: str) -> QLabel:

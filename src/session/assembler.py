@@ -372,6 +372,11 @@ class _SessionBuilder:
         # (see _note_weather). The scaffold's `weather` stays the end-of-session snapshot.
         self._weather_seen: list[int] = []
 
+        # (track temp, air temp, time of day) from the first settled Session packet, or None if
+        # none arrived (see _note_conditions). Kept out of the scaffold deliberately: the scaffold
+        # is rebuilt from every Session packet and would end up holding the last one's values.
+        self._conditions: tuple[int, int, int] | None = None
+
         # events (see _note_event). Penalties arrive twice - live during the session and again in
         # the end-of-session replay on a zeroed header - so the live rows and the replay are kept
         # apart until build time, where _build_penalties reconciles them.
@@ -404,6 +409,7 @@ class _SessionBuilder:
             self._scaffold = normalize_session(packet)
             self._note_race_control(packet)
             self._note_weather(packet)
+            self._note_conditions(packet)
         elif pid == PacketId.EVENT:
             self._note_event(packet)
         elif pid == PacketId.PARTICIPANTS:
@@ -500,7 +506,6 @@ class _SessionBuilder:
         if runs:
             self._lap_runs[lap_number] = runs
 
-
     def _note_race_control(self, packet) -> None:
         """Attribute the Session packet's safety-car and red-flag state to the lap in progress.
 
@@ -552,6 +557,33 @@ class _SessionBuilder:
         weather = int(packet.weather)
         if weather not in self._weather_seen:
             self._weather_seen.append(weather)
+
+    def _note_conditions(self, packet) -> None:
+        """Track temp, air temp and the in-game clock, from the FIRST settled Session packet.
+
+        First rather than last, and one reading rather than three: the three fields are a snapshot
+        of the session as it started, and the game sends them together - measured across all 33
+        captures, they go blank together, in exactly the same packets. Taking them separately would
+        let a session report a temperature from one moment and a clock from another.
+
+        The window is ``_WEATHER_SETTLE_S``, reused rather than duplicated, because it is the same
+        artifact seen from a different angle. Its own comment explains why the guard is in seconds;
+        what it clears here is broader than the zeroed payload TELEMETRY_NOTES describes. In 58 of
+        72 sessions the opening Session packet disagrees with the settled reading: 4 carry the
+        wholly zeroed payload, and 54 carry the *previous* session's values, which would give a Q2
+        the Q1 clock and misread the track temperature by up to 18 C.
+
+        Left as None when nothing arrives past the window - a capture holding only the opening
+        seconds. 11 of the 72 sessions joined mid-session and their first packet is already past
+        it, so for those "at session start" is really "the earliest reading captured"; that is the
+        same qualification ``weather_seen`` carries and it needs no code.
+        """
+        if self._conditions is not None:
+            return                          # first settled packet wins; the rest are ignored
+        if packet.header.session_time < _WEATHER_SETTLE_S:
+            return
+        self._conditions = (int(packet.track_temperature), int(packet.air_temperature),
+                            int(packet.time_of_day))
 
     def _note_event(self, packet) -> None:
         """Keep the two Event codes this pipeline ingests, and drop the other sixteen.
@@ -744,6 +776,9 @@ class _SessionBuilder:
                 roster, self._last_lap_data, self._session_history_by_index,
                 self._best_lap_num_by_index
             )
+        # One unpack, so a capture with no settled Session packet leaves all three None together
+        # rather than letting a caller read one of them as 0.
+        track_temperature, air_temperature, time_of_day = self._conditions or (None, None, None)        
 
         return dataclasses.replace(
             self._scaffold,
@@ -752,6 +787,9 @@ class _SessionBuilder:
             classification=classification,
             setup_history=tuple(self._setup_history),
             weather_seen=tuple(safe_enum(Weather, w) for w in self._weather_seen),
+            track_temperature=track_temperature,
+            air_temperature=air_temperature,
+            time_of_day=time_of_day,
             penalties=self._build_penalties(),
             overtakes=tuple(self._overtakes)
         )

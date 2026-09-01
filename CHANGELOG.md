@@ -44,6 +44,19 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   now alternates with the places the car actually lost — `⚑ 10-place grid` — the way a race's TIME
   column already alternates with the seconds a penalty added. Two 5-place penalties read as the
   ten places they add up to, since that is where the car starts.
+- **A race now shows how many cars you passed, and how many passed you.** `Overtakes +/−` in a
+  session's details, counted from the passes read out of your capture. Races only: the "passes" a
+  practice or qualifying session reports are almost all traffic on an out-lap, which is not the same
+  thing. A race you led from pole reads `+0 / −0`, and it means it.
+- **A session's details now show the track and air temperature, and the in-game time of day.**
+  Both read from the session as it started — the temperature is the biggest thing outside the car
+  driving how quickly the tyres go off, and the clock sits beside the recording time as the race's
+  own time of day rather than yours.
+
+### Changed
+- **A session's details grid is now three columns rather than two.** The three new read-outs above,
+  plus your starting position, fit across the existing four rows, so the panel gains what it says
+  without getting any taller.
 
 ### Fixed
 - **A practice or qualifying driver who set no lap time now shows a dash rather than an empty
@@ -53,7 +66,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 4 → 5. The new storage is created silently on
 startup, so nothing breaks and nothing is lost, but sessions already in your database will show no
-penalties or passes until the guided re-ingest has re-read their captures.
+penalties or passes, and no temperature or time of day, until the guided re-ingest has re-read their
+captures. Those cells say `Not captured` in the meantime rather than showing a plausible zero.
 
 **Known issues**
 
