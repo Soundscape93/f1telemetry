@@ -210,7 +210,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 | Release | Contents | Label | Re-ingest |
 |---|---|---|---|
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
-| **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — 3 → 4 |
+| **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
 | **v0.11.0** | **E1c** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework) | `minor` | no |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
@@ -284,7 +284,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E3 | Analytics surface | open — **after E1/E2** | ROADMAP → Other surfaces |
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
-| E15 | Ingest Event packets — overtakes + penalty detail | open — **found 2026-08-24** while specifying the E1 detail view; bundle with **E14**, one re-ingest | the note below |
+| E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
@@ -328,19 +328,85 @@ TELEMETRY_NOTES → "What the `weather` field reports", reasoning in DECISIONS �
 **E15 — the Event packets are already in every capture, unparsed.** Found 2026-08-24 while
 checking what the E1 session detail view could actually show. `session/assembler.py` dispatches on
 ten packet ids and **`PacketId.EVENT` is not one of them**, so every event the game sends is
-decoded past. The recorder writes *every* datagram unfiltered, so the data is on disk already —
-decoding one real capture gives:
+decoded past. The recorder writes *every* datagram unfiltered, so the data is on disk already and
+**a re-ingest recovers it retroactively, with no re-recording**. `reference.PENALTY_NAMES` and
+`INFRINGEMENT_NAMES` already exist and are unused — the *display* half was written years before
+the ingest half.
 
-    BUTN 8096 · OVTK 881 · SPTP 509 · PENA 79 · FTLP 17 · COLL 14 · STLG 10 · SEND/SSTA/RTMT 5 …
+**The shape was settled against all 33 captures before any code — 2026-09-01 — and the replay
+changed it three times.** Full numbers in TELEMETRY_NOTES → *Event packets*; reasoning in
+DECISIONS → Storage and → UI. What the data overturned:
 
-`OVTK` carries the overtaking and overtaken vehicle indices; `PENA` carries penalty type,
-infringement, vehicle index, **lap number** and time. `reference.PENALTY_NAMES` and
-`INFRINGEMENT_NAMES` already exist and are unused — the *display* half is written.
+1. **`OVTK` is not a count of overtakes.** 93% of events do not involve the player; 35% have a car
+   in the pit lane and 19% have the overtaken car sitting in the *garage*. Against `LAP_POSITIONS`
+   ground truth, raw `OVTK` is **4.5× too high**. The obvious guard — a minimum track gap — provably
+   cannot work: the game fires the event on the frame the two `lap_distance` values cross, so the
+   gap is < 0.5 m in ~90% of *both* real and spurious events. No reversal-cancel window is per-race
+   accurate either (0.61×-1.91× at the window that matches in total). This is E14's
+   minimum-packet-count all over again, and the same lesson: **the plan was wrong in a way no
+   amount of reasoning would have caught.**
+2. **Core invariant #3 is false for Event packets.** 37% of all penalties arrive with
+   `session_uid == 0` — the game's end-of-session replay of the accumulated penalty log, on a zeroed
+   header, repeated up to seven times. `SessionAssembler.process` drops uid 0 as init noise, so
+   routing `EVENT` naively would have silently lost more than a third of the feature.
+   The merge rule that survives reproduces the game's own `num_penalties` **and**
+   `penalties_time_s` for **9 of 9 cars**.
+3. **`PENA` does not mean what `num_penalties` means.** Of 127 live events, 69 are Warnings, 28 are
+   lap-invalidations and 19 are Retirements; only 11 are sporting penalties. `lap_num` is exact
+   (126/127 match the car's `current_lap_num`), so it lines up with the stored lap rows unadjusted.
+4. **`FLBK` never fires** in any capture — flashback is off on the recording machine — so the
+   double-counted-pass risk is real but unmeasured. Overtake rows carry `frame_identifier`, which a
+   flashback rewinds, so a future rule has its discriminator without a schema change.
 
-**This is recoverable retroactively**: a re-ingest of existing captures fills it in, with no
-re-recording. It needs a `PIPELINE_VERSION` 3→4 bump, which is why it should **land with E14** and
-share one re-ingest prompt rather than asking twice. It fills two E1 gaps: the detail view's
-`Laps completed` cell becomes **real overtakes**, and the penalties box gains type + lap + time.
+**Settled shape.** Allow-list **`PENA` + `OVTK` only** (`BUTN` alone is 79% of 134,208 event
+packets). One `session_events` table with an `EventStore` copying `LapStore`'s replace-by-uid /
+delete-by-uid contract, so invariant #4 and the delete / tombstone / restore paths need no new
+thinking. **Events are stored; no overtake count is** — the UI derives `+N / −M` from the same rows
+it lists, so the header and the list cannot disagree. Exactly one filter at ingest: *neither car in
+the pit lane, neither in the garage*.
+
+**UI, approved 2026-09-01.** The Penalties box becomes a scrollable, height-capped **Race control**
+box holding the field's penalties. It was to hold the player's passes too; **branch 3 left them
+out** — see the branch plan below. The details grid becomes **4×3 rather than
+4×2 plus a fifth row** — a fifth row would stretch the details/classification band further, worst in
+Q3 where the classification is already short. `Laps completed` **keeps its cell**; the 2026-08-24
+note calling it a placeholder that "becomes real overtakes" was wrong and is corrected in DECISIONS.
+The three new cells are `Overtakes +/−` (player only, races only), `Track & air temp` (chosen over
+`Rain %`, which is a forecast *probability* beside an observed condition) and `Time of day`
+(nothing already stored fits — every candidate was measured and rejected).
+
+**Branch plan — four branches, E1-shaped. Branches 0, 1 and 2 are done.** Branch 0 routes `EVENT`,
+fixes the uid-0 rule and adds the domain models (PR #47). Branch 1 is storage plus the
+`PIPELINE_VERSION` **4 → 5** bump — the `session_events` table, `EventStore` (replace-by-uid /
+delete-by-uid, `LapStore`'s contract exactly), the pipeline and UI-delete wiring, verified against
+all 33 captures: **129 penalty rows, 6,130 passes (85/session, 562 in the worst), and the
+sporting-penalty subset reproduces `num_penalties` for 9 of 9 penalised cars**. The 73 sessions this
+note quotes are 73 session *instances*; one uid is held by two captures, so 72 distinct sessions are
+stored — both numbers are right and the difference predates E15. It ships storage that is written
+and not read, which is the branch seam. **Branch 2** fills the penalties half of the Race control
+box and is the first reader: field-wide, every row named from the classification by `vehicle_index`
+(129 of 129 resolve), the Qt-free rules in `ui/sessions/race_control.py`, and
+`reference.penalty_name()` / `infringement_name()` finally called. The non-AI filter considered
+during it was measured and rejected — it is player-only in 35 of 42 penalised sessions and empties
+four non-empty boxes; DECISIONS → UI carries the numbers. **Branch 3** carries the 4×3 grid, the three new Session columns the two conditions cells need —
+those land with their only consumer, the way E17's lap-context columns landed with the Laps box that
+reads them, and they need no second bump because branch 1 has already stamped 5 — and the overtakes,
+**as a details-grid count with no list in the box**. That last part revises the UI note above and was
+decided on the measurement, not on taste: a per-pass list would have *under*filled the Race control
+box in 16 of the 17 races that hold passes (median 3 player rows, 5 or fewer in 12 of them, and 0 in
+six, every one of those a start from pole and a win), so "it would overload the box" was not what the
+data said. The seventeenth race is: 42 rows, sixteen of them the whole field streaming past a car
+that had gone off inside 5.7 seconds, and 40% of all 95 player race rows the same pair swapping back
+within 30 s. A count absorbs that; a list of rows reads as a fault. The field-wide rows stay stored
+and are now load-bearing rather than merely kept — whether a session holds *any* is the only thing
+that tells a real `+0 / −0` apart from a session ingested before `PIPELINE_VERSION` 5, and the only
+three races here with none are reconstructed fragments, where "not captured" is the literal truth. Full reasoning and the
+rewritten sentences in DECISIONS → Storage and → UI. Branch 0 stands alone deliberately: the uid-0 rule
+contradicts a documented core invariant and deserves its own review context.
+
+**`PIPELINE_VERSION` is a real second prompt this time — 4 → 5.** That is exactly the cost the
+v0.9.0 grouping decision accepted on purpose; the release-shape table's "3 → 4" was stale and is
+corrected above.
 
 **The red-flag rules were corrected on manual check, 2026-08-30.** Worth keeping because the scan
 that designed them was not wrong about the data and was still wrong about the game. `driver_status`

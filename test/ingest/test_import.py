@@ -39,9 +39,12 @@ class _Ingest:
         self._sessions = list(sessions)
         self.boom = boom
         self.calls: list[tuple[str, str | None]] = []
+        self.event_stores: list[object] = []      # what each call was handed to write events into
 
-    def __call__(self, path, store, lap_store=None, capture_store=None, recorded_by=None):
+    def __call__(self, path, store, lap_store=None, event_store=None, capture_store=None,
+                 recorded_by=None):
         self.calls.append((path, recorded_by))
+        self.event_stores.append(event_store)
         if os.path.basename(path) in self.boom:
             raise RuntimeError("corrupt archive")
         for session in self._sessions:
@@ -156,6 +159,16 @@ class ImportCapturesTest(_ImportTestCase):
         self._import(self._candidate(source), recorded_by="kevin", ingest=ingest)
 
         self.assertEqual([by for _, by in ingest.calls], ["kevin"])
+
+    def test_the_event_store_is_passed_through_to_ingest(self):
+        """An imported league capture stores its events like any other - same path, same stores."""
+        source = self._file(self.source, "monza.f1cap.zst")
+        ingest = _Ingest([_session(111)])
+        events = object()
+
+        self._import(self._candidate(source), event_store=events, ingest=ingest)
+
+        self.assertEqual(ingest.event_stores, [events])
 
     def test_blank_recorded_by_is_fine(self):
         source = self._file(self.source, "monza.f1cap.zst")

@@ -13,6 +13,11 @@ Within a frame, the player's Lap Data and Car Telemetry entries are joined by ma
 header.frame_identifier before becoming one sample. Routing is by header.packet_id,
 so the same code drives both 2025 and 2026 streams.
 
+Event packets (id 3) are routed too, but only ``PENA`` and ``OVTK`` are kept - ``BUTN`` alone is
+79% of every event the game sends. They are the one packet for which ``session_uid == 0`` is not
+init noise (core invariant #3): the game replays a session's whole penalty log on a zeroed header
+after the Final Classification, and 37% of all penalties arrive only that way.
+
 Lap times, sectors, and validitiy come from the Session History (authorative, sent through
 the session and refreshed in a bulk update at the end) - NOT from live Lap Data. The trace
 pipeline only decides which frames belong to which lap; the join is by lap number:
@@ -32,6 +37,8 @@ from ..domain.models import (
     Lap,
     LapTyreContext,
     Participant,
+    SessionOvertake,
+    SessionPenalty,
     SessionResult,
     SetupSnapshot,
 )
@@ -98,6 +105,54 @@ _SAFETY_CAR_DEPLOYED = (int(SafetyCarStatus.FULL), int(SafetyCarStatus.VIRTUAL))
 # artifact, which makes a packet count useless as a dwell. The shortest real stretch measured is
 # 26.4 s, so 3.0 clears both edges by an order of magnitude. See TELEMETRY_NOTES -> weather.
 _WEATHER_SETTLE_S = 3.0  # seconds
+
+# --- events (E15) -----------------------------------------------------------------------------
+# Measured across all 33 captures, 2026-09-01: 134,208 Event packets. The allow-list is part of the
+# storage shape, not a filter bolted on afterwards - BUTN alone is 79% of them (106,126 controller
+# inputs) and SPTP another 9.2% of a value already carried per car on Lap Data. Everything outside
+# these two is excluded for a reason recorded in TELEMETRY_NOTES -> "Codes deliberately not
+# ingested"; adding one back is a line here plus a handler, never a schema change.
+_EVENT_PENALTY = b"PENA"
+_EVENT_OVERTAKE = b"OVTK"
+
+# The Penalty detail's "not applicable" sentinel. It is NOT interchangeable with 0: `places_gained`
+# is legitimately 0 in 73 of 127 measured rows and 255 in 47 of them, so collapsing the two would
+# invent a fact ("gained no places") where the game said nothing.
+_PENALTY_NOT_APPLICABLE = 255
+
+# An overtake counts only when BOTH cars are racing - not in the pit lane, not sitting in the
+# garage. This is the ONLY filter applied at ingest, because it is the only one the data supports
+# without qualification: 5,112 of 14,635 raw events have the *overtaken* car in the pit lane and
+# 2,827 have it parked in the garage, and driving past a stationary car is not a pass.
+#
+# Nothing further is filtered here, and that is deliberate. The obvious next guard - a minimum
+# track gap between the two cars - provably cannot work: the game fires OVTK on the frame the two
+# lap_distance values cross, so the gap is under 0.5 m in ~90% of *both* the passes that stick and
+# the ones reversed seconds later. Nor can a reversal-cancel window: the one that matches the
+# LAP_POSITIONS ground truth in total (30 s) ranges 0.61x-1.91x per race. See TELEMETRY_NOTES.
+_RACING_STATUSES = frozenset({int(DriverStatus.FLYING_LAP), int(DriverStatus.ON_TRACK)})
+
+
+def _optional_penalty_field(value: int) -> int | None:
+    """A Penalty detail field, or None where the game sent its 255 "not applicable" sentinel."""
+    return None if value == _PENALTY_NOT_APPLICABLE else int(value)
+
+
+def _is_racing(entry) -> bool:
+    """Whether one car's Lap Data entry says it is out in track and racing, not in pits or garage."""
+    return (not entry.pit_status
+            and not entry.pit_lane_timer_active
+            and entry.driver_status in _RACING_STATUSES)
+
+
+def _penalty_key(penalty: SessionPenalty) -> tuple:
+    """Everything the game says about a penalty except when it was announced.
+    
+    The identity used to reconcile the live stream against the end-of-session replay, whose rows
+    carry no usable frame or session time. Deliberately excludes ``frame``: matching *is* the point.
+    """
+    return (penalty.vehicle_index, penalty.penalty_type, penalty.infringement_type,
+            penalty.lap_number, penalty.other_vehicle_index, penalty.time_s, penalty.places_gained)
 
 
 def _sector_ms(minutes_part: int, ms_part: int) -> int:
@@ -317,6 +372,19 @@ class _SessionBuilder:
         # (see _note_weather). The scaffold's `weather` stays the end-of-session snapshot.
         self._weather_seen: list[int] = []
 
+        # (track temp, air temp, time of day) from the first settled Session packet, or None if
+        # none arrived (see _note_conditions). Kept out of the scaffold deliberately: the scaffold
+        # is rebuilt from every Session packet and would end up holding the last one's values.
+        self._conditions: tuple[int, int, int] | None = None
+
+        # events (see _note_event). Penalties arrive twice - live during the session and again in
+        # the end-of-session replay on a zeroed header - so the live rows and the replay are kept
+        # apart until build time, where _build_penalties reconciles them.
+        self._penalty_live: list[SessionPenalty] = []   # in arrival order, one row per frame
+        self._penalty_live_keys: set[tuple] = set()     # _penalty_key of every live row
+        self._penalty_replay: dict[tuple, SessionPenalty] = {}  # _penalty_key -> first replay row
+        self._overtakes: list[SessionOvertake] = []     # already filtered on two racing cars
+
         # lap_number -> candidate runs from that lap's buffer; the timed run is chosen at build
         # time (see _build_laps), once the Session History lap time is known.
         self._lap_runs: dict[int, list[list[Sample]]] = {}
@@ -341,6 +409,9 @@ class _SessionBuilder:
             self._scaffold = normalize_session(packet)
             self._note_race_control(packet)
             self._note_weather(packet)
+            self._note_conditions(packet)
+        elif pid == PacketId.EVENT:
+            self._note_event(packet)
         elif pid == PacketId.PARTICIPANTS:
             # union aross frames: a late (post-race) frame can drop cars, so merge rather
             # than overwrite, keeping the most complete identity seen for each car index.
@@ -435,7 +506,6 @@ class _SessionBuilder:
         if runs:
             self._lap_runs[lap_number] = runs
 
-
     def _note_race_control(self, packet) -> None:
         """Attribute the Session packet's safety-car and red-flag state to the lap in progress.
 
@@ -487,6 +557,127 @@ class _SessionBuilder:
         weather = int(packet.weather)
         if weather not in self._weather_seen:
             self._weather_seen.append(weather)
+
+    def _note_conditions(self, packet) -> None:
+        """Track temp, air temp and the in-game clock, from the FIRST settled Session packet.
+
+        First rather than last, and one reading rather than three: the three fields are a snapshot
+        of the session as it started, and the game sends them together - measured across all 33
+        captures, they go blank together, in exactly the same packets. Taking them separately would
+        let a session report a temperature from one moment and a clock from another.
+
+        The window is ``_WEATHER_SETTLE_S``, reused rather than duplicated, because it is the same
+        artifact seen from a different angle. Its own comment explains why the guard is in seconds;
+        what it clears here is broader than the zeroed payload TELEMETRY_NOTES describes. In 58 of
+        72 sessions the opening Session packet disagrees with the settled reading: 4 carry the
+        wholly zeroed payload, and 54 carry the *previous* session's values, which would give a Q2
+        the Q1 clock and misread the track temperature by up to 18 C.
+
+        Left as None when nothing arrives past the window - a capture holding only the opening
+        seconds. 11 of the 72 sessions joined mid-session and their first packet is already past
+        it, so for those "at session start" is really "the earliest reading captured"; that is the
+        same qualification ``weather_seen`` carries and it needs no code.
+        """
+        if self._conditions is not None:
+            return                          # first settled packet wins; the rest are ignored
+        if packet.header.session_time < _WEATHER_SETTLE_S:
+            return
+        self._conditions = (int(packet.track_temperature), int(packet.air_temperature),
+                            int(packet.time_of_day))
+
+    def _note_event(self, packet) -> None:
+        """Keep the two Event codes this pipeline ingests, and drop the other sixteen.
+
+        Routed from ``feed`` like any other packet, with one asymmetry that core invariant #3 did
+        not anticipate: **a zeroed ``session_uid`` is not init noise on an Event packet.** After the
+        Final Classification the game re-broadcasts the session's whole accumulated penalty log with
+        ``session_uid == 0`` and ``frame_identifier == 0``, repeatedly - one 11-row log arrived 64
+        times in a measured capture. 75 of 202 penalties across all 33 captures arrive *only* that
+        way, so ``SessionAssembler.process`` hands those packets through and this reads them as a
+        replay rather than as live events.
+
+        Overtakes on a zeroed header are ignored rather than merged: none was ever observed, and one
+        could not be placed in the session anyway - the replay carries no usable frame or lap.
+        """
+        code = packet.event_string_code
+        replayed = packet.header.session_uid == 0
+        if code == _EVENT_PENALTY:
+            self._note_penalty(packet, replayed=replayed)
+        elif code == _EVENT_OVERTAKE and not replayed:
+            self._note_overtake(packet)
+
+    def _note_penalty(self, packet, *, replayed: bool) -> None:
+        """Record one penalty, keeping the live stream and the end-of-session replay apart.
+
+        The replay is deduped on arrival (``setdefault``) because it repeats itself; the live rows
+        are not, because two identical-looking live rows are two real penalties - one car took two
+        Grid penalties for the same infringement on the same lap, eight seconds apart, and the game
+        classified it ``num_penalties = 2``. Measured, a live key never appears twice on one frame,
+        so arrival order alone keeps them distinct.
+        """
+        detail = packet.event_data_details.penalty
+        penalty = SessionPenalty(
+            vehicle_index = int(detail.vehicle_idx),
+            penalty_type = int(detail.penalty_type),
+            infringement_type = int(detail.infringement_type),
+            lap_number = int(detail.lap_num),
+            other_vehicle_index = _optional_penalty_field(detail.other_vehicle_idx),
+            time_s = _optional_penalty_field(detail.time),
+            places_gained = _optional_penalty_field(detail.places_gained),
+            session_time_s = float(packet.header.session_time),
+            frame = int(packet.header.frame_identifier)
+        )
+        if replayed:
+            self._penalty_replay.setdefault(_penalty_key(penalty), penalty)
+        else:
+            self._penalty_live.append(penalty)
+            self._penalty_live_keys.add(_penalty_key(penalty))
+
+    def _note_overtake(self, packet) -> None:
+        """Record one pass, if both cars were racing at the frame the game announced it.
+
+        Needs the latest Lap Data frame for the pit/garage test and for the lap number, and that is
+        always there in practice - measured over 14,635 events, every one had an entry for both
+        cars. A stream that opens with an Event packet before any Lap Data simply has no context to
+        judge the pass by, so it is skipped rather than guessed at.
+        """
+        lap_data = self._last_lap_data
+        if lap_data is None:
+            return
+        detail = packet.event_data_details.overtake
+        overtaking = int(detail.overtaking_vehicle_idx)
+        overtaken = int(detail.being_overtaken_vehicle_idx)
+        entries = lap_data.lap_data
+        if not (0 <= overtaking < len(entries) and 0 <= overtaken < len(entries)):
+            return                      # never observed: indices were valid in all measured events
+        if not (_is_racing(entries[overtaking]) and _is_racing(entries[overtaken])):
+            return
+        self._overtakes.append(SessionOvertake(
+            overtaking_vehicle_index=overtaking,
+            overtaken_vehicle_index=overtaken,
+            lap_number=int(entries[overtaking].current_lap_num),
+            session_time_s=float(packet.header.session_time),
+            frame=int(packet.header.frame_identifier)
+        ))
+
+    def _build_penalties(self) -> tuple[SessionPenalty, ...]:
+        """Reconcile the live penalties with the end-of-session replay.
+
+        **Neither source alone is right, and this is the rule that reproduces the game's own
+        figures.** Every live row is kept, and a replay row is added only for a key the live stream
+        never carried. Taking the replay instead would collapse the two identical Grid penalties one
+        car really took; ignoring it would lose a 3 s time penalty whose live packet never arrived
+        (Wi-Fi loss is a documented baseline here). Across the nine penalised cars in all 33
+        captures this matches ``num_penalties`` 9 times out of 9, and ``penalties_time_s`` on every
+        time penalty.
+
+        Ordered by lap, then by frame, so the Race control box reads chronologically. Replay-only
+        rows carry frame 0 and sort first within their lap - they have no better ordering to offer.
+        """
+        rows = list(self._penalty_live)
+        rows.extend(penalty for key, penalty in self._penalty_replay.items() 
+                    if key not in self._penalty_live_keys)
+        return tuple(sorted(rows, key=lambda p: (p.lap_number, p.frame)))
 
     def _record_setup(self, setup) -> None:
         """Append a setup snapshot when the setup changes, deduping consecutive identical ones.
@@ -585,6 +776,9 @@ class _SessionBuilder:
                 roster, self._last_lap_data, self._session_history_by_index,
                 self._best_lap_num_by_index
             )
+        # One unpack, so a capture with no settled Session packet leaves all three None together
+        # rather than letting a caller read one of them as 0.
+        track_temperature, air_temperature, time_of_day = self._conditions or (None, None, None)        
 
         return dataclasses.replace(
             self._scaffold,
@@ -592,7 +786,12 @@ class _SessionBuilder:
             laps=self._build_laps(),
             classification=classification,
             setup_history=tuple(self._setup_history),
-            weather_seen=tuple(safe_enum(Weather, w) for w in self._weather_seen)
+            weather_seen=tuple(safe_enum(Weather, w) for w in self._weather_seen),
+            track_temperature=track_temperature,
+            air_temperature=air_temperature,
+            time_of_day=time_of_day,
+            penalties=self._build_penalties(),
+            overtakes=tuple(self._overtakes)
         )
 
 class SessionAssembler:
@@ -606,6 +805,14 @@ class SessionAssembler:
     def process(self, packet) -> SessionResult | None:
         uid = packet.header.session_uid
         if uid == 0:            # frame-1 init packets: no session yet, ignore
+            # Init noise for every packet id EXCEPT Event, where a zeroed header is how the game
+            # replays a finished session's penalty log (core invariant #3, amended for E15). It
+            # belongs to the session already being built: measured over all 104 such packets, the
+            # packets either side of them always carry the same uid, so there is no ambiguity about
+            # which session they close out. Before any session has started there is nowhere to put
+            # one, and none was ever observed there.
+            if packet.header.packet_id == PacketId.EVENT and self._current_uid is not None:
+                self._builder.feed(packet)
             return None
         
         emitted = None

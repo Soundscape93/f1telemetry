@@ -50,15 +50,16 @@ class IngestPipelineTest(unittest.TestCase):
         fd, self.db_path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         self.store = SessionStore(f"sqlite:///{self.db_path}")
+        from f1telemetry.src.storage.events import EventStore
         from f1telemetry.src.storage.laps import LapStore
         self.trace_dir = tempfile.mkdtemp(prefix="_traces")
         self.lap_store = LapStore(f"sqlite:///{self.db_path}", trace_dir=self.trace_dir)
+        self.event_store = EventStore(f"sqlite:///{self.db_path}")
 
     def tearDown(self):
         """Clean up the temporary SQLite database."""
+        self.event_store.close()
         self.lap_store.close()
-        os.unlink(self.db_path)
-        shutil.rmtree(self.trace_dir, ignore_errors=True)
 
     def test_capture_ingest_and_round_trips(self):
         """Test that a capture can be ingested and its sessions round-trip through the store."""
@@ -138,6 +139,28 @@ class IngestPipelineTest(unittest.TestCase):
         hydrated = self.lap_store.load(session.session_uid, stored[0].lap_number)
         self.assertIsNotNone(hydrated.trace, "a persisted lap has no dense trace")
         self.assertGreater(len(hydrated.trace), 0, "the persisted trace is empty")
+
+    def test_ingest_with_an_event_store_persists_the_events_the_assembler_kept(self):
+        """With an EventStore supplied, ingest writes the session's penalties and passes.
+
+        Mirrors what every worker now does. The assertion is a round-trip identity rather than a
+        count: what the assembler built out of the real Event packets has to be exactly what comes
+        back out of the database, because nothing reads these rows yet and a silent mangling would
+        not surface until the Race control box is built on top of them.
+        """
+        from f1telemetry.src.pipeline import ingest_capture
+        sessions = ingest_capture(_FIXTURE, self.store, event_store=self.event_store)
+        self.assertTrue(sessions, "The capture produced no sessions")
+
+        with_events = [s for s in sessions if s.penalties or s.overtakes]
+        if not with_events:
+            self.skipTest("this fixture assembled no penalties or passes")
+        for session in with_events:
+            with self.subTest(uid=session.session_uid):
+                self.assertEqual(self.event_store.load_penalties(session.session_uid),
+                                 session.penalties)
+                self.assertEqual(self.event_store.load_overtakes(session.session_uid),
+                                 session.overtakes)
 
 
 if __name__ == "__main__":

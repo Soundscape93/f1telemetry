@@ -24,7 +24,8 @@ def _season_phrase(season) -> str:
         return "another season"
     return f"Season {season.number}" + (f" (“{season.nickname}”)" if season.nickname else "")
 
-def confirm_and_delete(parent, session_uid: int, session_store, season_store, lap_store=None) -> bool:
+def confirm_and_delete(parent, session_uid: int, session_store, season_store,
+                        lap_store=None, event_store=None) -> bool:
     """Confirm, then delete a session's stored results. True if anything was actually deleted.
 
     Returns False for a cancel *and* for a refusal - the caller only needs to know whether to
@@ -44,7 +45,8 @@ def confirm_and_delete(parent, session_uid: int, session_store, season_store, la
     if confirm != QMessageBox.StandardButton.Yes:
         return False
 
-    outcome = delete_session(session_uid, session_store, season_store, lap_store=lap_store)
+    outcome = delete_session(session_uid, session_store, season_store, 
+                             lap_store=lap_store, event_store=event_store)
     if outcome.refused_assigned:
         season = season_store.get_season(outcome.season_id)
         QMessageBox.warning(

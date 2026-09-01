@@ -15,11 +15,12 @@ from .setup_panel import build_setup_table
 from .slider_row import SetupSliderRow, SliderMarkerBar
 from .tables import (
     build_kv_table,
-    build_pair_grid,
+    build_readout_grid,
     cell, 
     clear_layout,
     fit_columns,
     fit_table_height,
+    hold_column_width,
     tidy_table
 )
 from .trace_plot import TracePlot
@@ -36,11 +37,12 @@ __all__ = [
     "SetupSliderRow",
     "SliderMarkerBar",
     "build_kv_table",
-    "build_pair_grid",
+    "build_readout_grid",
     "cell",
     "clear_layout",
     "fit_columns",
     "fit_table_height",
+    "hold_column_width",
     "tidy_table",
     "TracePlot",
     "TrackMap",
