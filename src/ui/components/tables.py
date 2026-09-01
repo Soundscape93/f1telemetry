@@ -22,6 +22,10 @@ from PySide6.QtWidgets import (
 
 from ..style import apply_bold
 
+# A little air either side of an alternating cell, so the widest of its two texts is not flush
+# against the column edge.
+_ALTERNATE_PADDING = 8
+
 
 def cell(text: str) -> QTableWidgetItem:
     """Return a read-only table cell with the given text."""
@@ -67,6 +71,38 @@ def fit_table_height(table: QTableWidget, max_height: int | None = None) -> None
         return
     table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     table.setFixedHeight(height)
+
+
+def hold_column_width(table: QTableWidget, column: int, alternates) -> None:
+    """Freeze ``column`` wide enough for every text its cells will ever show.
+
+    A column left on ``ResizeToContents`` is measured against whatever its cells say *now*, so a
+    cell that alternates between two texts of different widths makes the whole table jump each
+    time it flips - and it takes the stretched columns beside it with it. Sizing to the wider of
+    the two states and pinning it there stops that: the column never moves, and the spare width it
+    gives up or takes comes out of the stretched columns, which is what they are for.
+
+    Both states are measured by actually putting them in the cells and asking Qt, rather than by
+    comparing string lengths: the answer has to include the font, the icon and the cell margins,
+    and "⚑ 10-place grid" is not wider than "+1:23.456" by character count.
+
+    ``alternates`` are the ``(item, first_text, second_text)`` triples the alternation timer
+    drives. An empty sequence leaves the column exactly as it was.
+    """
+    if not alternates:
+        return
+    original = [(item, item.text()) for item, _, _ in alternates]
+    widest = 0
+    for index in (1, 2):
+        for entry in alternates:
+            entry[0].setText(entry[index])
+        table.resizeColumnToContents(column)
+        widest = max(widest, table.columnWidth(column))
+    for item, text in original:
+        item.setText(text)
+    table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+    table.setColumnWidth(column, widest + _ALTERNATE_PADDING)
+
 
 
 def build_kv_table(rows: list[tuple[str, str | None]]) -> QTableWidget:

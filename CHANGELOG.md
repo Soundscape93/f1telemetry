@@ -24,8 +24,32 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   to re-record. What is kept is the whole field's penalties, each with what it was for, which lap it
   happened on and any time added, and every pass where both cars were genuinely racing: the game also
   announces a "pass" for driving by a car sitting in the pit lane or parked in its garage, and those
-  are left out. **Nothing shows them yet** — the session pages that read them come later in this same
-  release, and this is the half that makes them survive the ingest.
+  are left out.
+- **A session's Penalties box is now a Race control box, and it shows the whole field.** A table
+  of every penalty the session issued, in the order race control issued them: the lap, the driver
+  with their flag, what the penalty was and what it was for — a warning, an invalidated lap, a
+  retirement, or a real sporting penalty with the seconds or grid places it cost. **A collision
+  names the other car involved**, so an incident reads as the incident it was rather than as two
+  unrelated lines. Drivers who are people rather than AI cars are picked out, so a league race
+  reads at a glance, and the penalties the classification actually counts are picked out too,
+  which is what explains a box listing eleven beside a result showing one. Hovering a row gives
+  the whole thing, in the game's own words. The box scrolls and is height-capped, so a chaotic
+  race cannot stretch the page.
+- **A session whose penalties haven't been read yet says so.** It no longer reports itself clean:
+  where only the total survives, the total is what it shows, plus a line saying the detail is still
+  in the capture. Sessions recorded before this release stay in that state until the re-ingest.
+- **Grid penalties now show in a practice or qualifying classification.** A car sent back on the
+  next race's grid had nothing to show for it here: the result screen counts penalties but records
+  no added time, so a 10-place drop appeared as a bare flag or as nothing at all. The GAP column
+  now alternates with the places the car actually lost — `⚑ 10-place grid` — the way a race's TIME
+  column already alternates with the seconds a penalty added. Two 5-place penalties read as the
+  ten places they add up to, since that is where the car starts.
+
+### Fixed
+- **A practice or qualifying driver who set no lap time now shows a dash rather than an empty
+  cell.** The BEST column was filled only for a car whose best lap could be matched to a tyre
+  compound, so a driver who never set a time was left blank — which reads as something the app
+  failed to draw rather than as "no time set".
 
 **Re-ingest needed: yes** — `PIPELINE_VERSION` moves 4 → 5. The new storage is created silently on
 startup, so nothing breaks and nothing is lost, but sessions already in your database will show no
