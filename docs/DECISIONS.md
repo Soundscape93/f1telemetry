@@ -79,6 +79,31 @@ what would trigger revisiting it.
 - **`session_assignments.session_uid` is NOT a foreign key** to `sessions`. Re-ingesting a
   capture replaces its session row by uid; a FK (or cascade) would wipe the manual league round
   placements. Keeping them independent means results can be re-processed freely.
+- **Automatic round assignment is proposed, never written — and only where the identifier earns
+  it** *(decided 2026-09-01, v0.11.0)*. Measured first: see TELEMETRY_NOTES → *The three link
+  identifiers*, over all 72 sessions in all 33 captures. Two rules came out of it, and both end in
+  a confirmation the user can decline rather than in a write.
+  - **Weekend propagation — every mode.** Assigning one session to `(season, round)` offers every
+    other stored session sharing its `weekend_link_identifier` for the same round. Licensed by the
+    data: all 13 weekends have exactly one `track_id`, and all 7 rounds assigned by hand in this
+    database contain exactly one weekend id, none mixing two. It also adds **no new trust** — the
+    app already groups on this id in `domain/season.slot_for_session` and in the laps surface's
+    canonical track-map cache.
+  - **Season inference — career modes only.** `season_link_identifier` is a real season identifier
+    only where it *differs* from `weekend_link_identifier`; in Online Custom / League Racing and in
+    `game_mode` 4 the game reports the weekend's own id in that field (8 of 8 weekends), so grouping
+    by it is grouping by weekend and buys nothing. Where a career id does exist it can name the
+    **season**, never the **round**: no identifier carries a round number, so the round still comes
+    from a track match against the calendar — and only when that track appears in it exactly once
+    (a sandbox calendar may legitimately repeat one; ambiguous means ask).
+  - **A slot with several attempts is never propagated.** Two attempts at one slot are
+    indistinguishable in the telemetry (below), so proposing both would fill a slot twice and
+    proposing one would be the silent choice this whole design refuses. Such a slot is left for the
+    user. In this database that holds back exactly one slot across the 11 stored weekends.
+  - **Why not a silent write.** A wrong automatic assignment is worse than no automatic
+    assignment: it is invisible, it survives into standings, and `set_calendar`'s locked-round rule
+    then freezes the calendar around it. The proposal costs one click and makes the mistake
+    impossible.
 - **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
   single recording often holds several attempts of the same session (a crash/restart, or a
   re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.
@@ -558,11 +583,16 @@ what would trigger revisiting it.
   recorder worker's lifecycle belongs to the long-lived window; putting the control on the
   Dashboard page would mean building that worker wiring twice when it later needs to be reachable
   everywhere. As a bonus the capture can be started/stopped from any page.
-- **Session→round assignment is round-centric** (open a season → a round → its weekend → assign
-  captures), rather than session-centric (a global sessions list). A league weekend is several
-  sessions at one track, so matching a capture's track to the round makes assignment nearly
-  one-click, and it keeps the weekend view and its assignment together. *A session-centric view
-  in the Sessions surface is a fine complement later.*
+- **Session→round assignment was round-centric, and is session-centric from v0.11.0.**
+  *Originally:* open a season → a round → its weekend → assign captures, rather than a global
+  sessions list — a league weekend is several sessions at one track, so matching a capture's track
+  to the round made assignment nearly one-click, and it kept the weekend view and its assignment
+  together. That bullet closed "*a session-centric view in the Sessions surface is a fine
+  complement later*", and **v0.11.0 is that later**: assignment moves into the weekend-filtered
+  Sessions overview and the round-centric weekend page is retired (E1d, below). The original
+  reasoning is not overturned — the track match is *kept*, as the round half of the automatic
+  proposal in → Storage — only its housing changes, because "open the round → see that weekend's
+  sessions" is the flow a user expects and the Sessions surface is where sessions belong.
 - **Bundled imagery is open-licensed only — no third-party logos.** The nationality flags are
   flag-icons (MIT), vendored under `src/ui/assets/flags/` with the licence reproduced in
   `ATTRIBUTION.md`; anything else we ship must clear the same bar. That rules out **team logos**
@@ -1278,6 +1308,107 @@ what would trigger revisiting it.
   of the wire format and not something a user has any use for. Fixing it in `slot_label` rather than
   per surface is what makes it one line instead of six, and it also makes the number useful where
   there is no weekend to resolve against at all: a tombstone reading 16 is a Grand Prix on its own.
+
+- **A weekend slot holds every attempt, and the app never picks one** *(decided 2026-09-01,
+  v0.11.0)*. A restarted or re-driven session keeps the same season, weekend and session link ids,
+  the same `session_type` and the same track as the attempt it replaces — only `session_uid` and
+  `recorded_at` differ (TELEMETRY_NOTES → *The three link identifiers*). `weekend_slots` mapped
+  sessions into a dict keyed by type, so the second attempt **overwrote the first and vanished**:
+  measured live, weekend `3602002284` holds 8 stored sessions and rendered 7, silently losing the
+  later Practice 2. That is A8, fixed as part of this release.
+  - **`WeekendSlot` carries all of a slot's attempts, in recorded order, and the view lists them
+    all.** A restart usually means something went wrong in the earlier run, and which attempt
+    "counts" is a judgement about that session, not a fact in the telemetry — nothing stored can
+    distinguish them. Taking the newest would be a silent decision dressed as a rule, and taking
+    the oldest is no better.
+  - **Assignment stays explicit, and never replaces.** Assigning a later attempt to a round does
+    not unassign an earlier one; the user unassigns the other attempts themselves, and may then
+    delete them through the shared guarded delete. The automatic proposal in → Storage skips
+    multi-attempt slots for the same reason.
+  - **Only the unassigned pool is ambiguous.** `rounds_with_results` returns the sessions actually
+    assigned to a round, so once the user has chosen, `grand_prix_session` and the calendar's
+    Results column see one attempt and nothing downstream has to think about this at all.
+- **The weekend-filtered overview shares the normal overview's *rules*, not its widget tree**
+  *(decided 2026-09-01, v0.11.0)*. Routing Seasons into a weekend-filtered Sessions overview gives
+  the surface two display modes, which was accepted deliberately (PRIORITIES → E1d) — the question
+  was how to keep them from becoming two implementations that drift.
+  - **What is shared is a Qt-free rules module** (`ui/sessions/weekend_view.py`), which decides
+    *which* rows a view shows and *in what order*, returning session rows and pending/skipped slot
+    rows, **plus one card widget** (`ui/components/session_card.py`). The two pages stay separate
+    thin `QWidget`s over that spine and own only their own chrome.
+  - **Not inheritance.** The pages differ in chrome, not in logic: a subclass would inherit a
+    header with a "Deleted sessions (n)" button and a track/session search box it does not want —
+    the weekend *is* the filter — so the base `__init__` would have to grow hooks for a population
+    of one. The reusable part is `reload()`, which does query → slot resolve → filter → build →
+    empty state in one pass; overriding it means inheriting the widget tree but not the behaviour.
+    And the drift being guarded against is in the **rules** — ordering, labels, what a card says —
+    which a Qt-free module makes impossible *and* unit-testable, where inheritance would make it
+    merely unlikely and untestable without a `QApplication`.
+  - **Repo precedent settles it.** There is no page-to-page inheritance anywhere in `src/ui` —
+    every page is a direct `QWidget`, and the only widget subclasses are two leaf renderers
+    (`_TitleButton`, `CarStatusGraphic`). Sharing already happens by *builder*
+    (`build_classification_table`, called by three unrelated pages) and by *Qt-free rules module*
+    (`race_control.py`, `lap_context.py`, `tyre_stints.py`). This is that pattern, not a new one.
+  - **Not a mode flag on one class** either: `if self._weekend is None:` would thread through
+    `reload`, the card builder, the meta line, the header and the empty state, which moves the
+    drift inside one file rather than removing it.
+- **Pending and Skipped slot rows are the filtered overview's job, and they live in the rules
+  module** *(decided 2026-09-01, v0.11.0)*. A filtered list of *stored* sessions cannot express a
+  session that does not exist, so routing Seasons into Sessions would have silently dropped the one
+  thing the weekend page said that a session list cannot — that Practice 3 was **skipped** rather
+  than merely absent. `weekend_view` therefore emits slot rows for uncaptured positions, and the
+  skipped-vs-pending rule (a gap *before* the latest captured session is Skipped; one after it is
+  still to come) moves out of the weekend page's `_pending_slot_row` into that module with unit
+  tests. Both real cases are in this database: Practice 3 skipped in weekend `3602002184`, and
+  Q1/Q2/Q3 still pending before a stored Race in `4046315905`.
+- **League display names on the Sessions surface read the saved roster file only — no seeding**
+  *(E1c, decided 2026-09-01)*. `SeasonRosterFiles.roster_for` falls back to seeding a roster from
+  captures, and seeding needs `rounds_with_results`, which hydrates **every session in the season** —
+  37 in this database. That is not something to run on the GUI thread while painting a list, and it
+  was the stated reason E1c was deferred out of E1 in the first place. So the Sessions surface
+  resolves a session's season through `season_assignments` and loads that season's **saved** roster
+  JSON (`SeasonRosterFiles.load`), which touches no sessions at all.
+  - **What this costs, knowingly:** a LEAGUE season whose roster file the user never created reads
+    exactly as it does today — the entry's own captured name, so a member captured as `"Player"`
+    stays `"Player"`. It degrades to the current behaviour rather than to something worse, and the
+    fix is the "Create roster file" button that already exists on the season detail page.
+  - **An unassigned session has no season, so it has no roster**, and that is correct rather than a
+    gap: nothing links it to a league.
+  - **The roster-mode test is `ROSTER_SEASON_MODES`, not `mode == LEAGUE`** — and the two disagree
+    in the code today. `seasons/detail_page.py` gates on `ROSTER_SEASON_MODES` (LEAGUE **and**
+    GRAND_PRIX, the domain's own definition of a season raced against other people), while
+    `seasons/weekend_page.py:186` gates on `mode != SeasonMode.LEAGUE`. The consequence is not
+    hypothetical: this database's only real league — *Mittwoch League*, season 1 — is a
+    **GRAND_PRIX** season, because 2026 leagues run in multiplayer GP lobbies where League Racing
+    has no DLC cars (the reason `ROSTER_SEASON_MODES` exists at all). So the weekend page shows
+    that league raw captured names today, while the season detail page beside it resolves them.
+    E1c uses `ROSTER_SEASON_MODES`, which incidentally means the Sessions surface will read
+    *better* than the weekend page it is due to replace, rather than merely catching up.
+- **Share exports a PNG the app renders itself, not a screenshot of its own widgets** *(E19,
+  decided 2026-09-01)*. The output is pasted into a league WhatsApp chat, replacing hand-taken
+  screenshots.
+  - **Rendered, not captured.** `widget.grab()` is the size of the user's window, carries the
+    current theme (dark-on-dark reads wrong in a chat), includes scrollbars — and the Race control
+    box is height-capped at `_MID_ROW_MAX_H` and *scrolls*, so a capture would **cut the penalty
+    list off**, which is exactly the information the export exists to carry. Rendering our own
+    layout also fixes a light palette, so the file is theme-independent.
+  - **PNG, not PDF, for a session.** An image lands in the chat readable without a tap; a PDF
+    arrives as a document that has to be opened. Prototyped against the worst session in this
+    database (Shanghai, 22 drivers, 11 penalty rows): `QTextDocument` → `QImage` → PNG gives
+    1080 × 1290 px at 168 KB. 1080 px keeps text legible after WhatsApp re-encodes a photo, and
+    1:1.19 is a near-square that reads on a phone rather than a tall strip.
+  - **No new dependency, and no packaging change.** `QTextDocument`, `QImage` and `QPdfWriter` are
+    all in `QtGui`; the bundle excludes `QtPdf`/`QtPdfWidgets`, which are the *reader* modules and
+    are not needed. Verified working with those exclusions in place.
+  - **The clipboard is the real path.** `QApplication.clipboard().setImage(...)` pastes straight
+    into WhatsApp Desktop with no file at all; Save-As is the fallback, defaulting to a new
+    `paths.exports_dir()` under `data_root()` — the same class of per-user writable data as
+    `rosters/` and `logs/`, never `app_dir()`, which is for files shipped *with* the app.
+  - **A weekend exports as N PNGs in one folder**, reusing the per-session renderer unchanged,
+    rather than as a multi-page PDF: eight sessions stacked into one image is ~10 000 px tall and
+    unreadable, and one file per session is what a league admin posts anyway — one message each.
+  - **Every string the export decides is Qt-free and unit-tested** (`share_document.py`), with a
+    thin painter over it (`share_image.py`), the same split as `race_control.py`.
 
 ## Localization
 

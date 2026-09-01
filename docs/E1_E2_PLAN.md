@@ -679,6 +679,25 @@ Called out explicitly because B2's bugs were only reachable this way.
 23. **A4 regression** on the detail page specifically: switch the OS theme — the blue and green
     lap colours and the chart must both survive.
 
+## The three deferrals this plan recorded are executed in v0.11.0
+
+*Added 2026-09-01.* E1 deliberately deferred **E1b** (session-centric assignment), **E1c** (league
+display names in Sessions) and **E1d** (Seasons routing into a weekend-filtered overview). All
+three are the whole of **v0.11.0**, planned as seven branches in PRIORITIES → the E1d note, which
+is the live plan from here — this file stays as the record of why they were deferred, not of how
+they are being built.
+
+Two things settled since, both in DECISIONS:
+
+- **E1c takes the saved roster file only, and does not seed.** The seeding cost this plan named —
+  `roster_for` needing `rounds_with_results`, which hydrates every session in the season — is
+  exactly why: the Sessions surface loads the season's saved roster JSON and skips seeding
+  entirely. A LEAGUE season with no roster file therefore reads as it does today, which is the
+  behaviour this plan already documented and asked to be written down.
+- **A slot can hold more than one session.** `weekend_slots` was dropping a re-driven session's
+  second attempt (A8); a slot now keeps every attempt and the app never picks one, so the
+  session-centric assignment E1b builds is explicit rather than a silent replacement.
+
 ## Docs to update as the branches land
 
 **Applied 2026-08-24** (the planning half — layout, decisions and the data findings):
