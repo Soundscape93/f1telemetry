@@ -18,6 +18,9 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Re-ingest needed: yes/no** - yes whenever PIPELINE_VERSION moved.
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
+
+## v0.10.0 — 2026-09-01
+
 ### Added
 - **Your recordings' penalties and on-track passes are now read and kept.** Every capture you have
   ever made already contains them. Re-reading your captures recovers them retroactively, with nothing
@@ -77,7 +80,6 @@ captures. Those cells say `Not captured` in the meantime rather than showing a p
   classification show a reconstructed result instead.
 - Dashboard, Analytics and Bug report pages are placeholders.
 - The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
-
 
 ## v0.9.0 — 2026-08-31
 
