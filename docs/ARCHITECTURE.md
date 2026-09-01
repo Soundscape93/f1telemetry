@@ -157,6 +157,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   trace (detail page; the iter-2 overlay calls it per selected lap), `load_laps(uid)` the full set.
   The session's setup **history** (`setup_history`) is a JSON column on the session row, not a lap
   concern. Repository-per-aggregate (own table cluster; `schema.py` stays the shared layer).
+- **`events.py`** *(E15 branch 1; `PIPELINE_VERSION` 5)* — `EventStore` over `session_events`:
+  the Event packets the assembler kept, which is `PENA` and `OVTK` and nothing else. **One table
+  with a `code` discriminator** plus a JSON `detail` for the code-specific remainder, so adding a
+  third code later is rows rather than a migration (DECISIONS → Storage). Write: `save_events(uid,
+  penalties, overtakes)` (replace-by-uid, both codes together) / `delete(uid)`. Read:
+  `load_penalties(uid)` ordered by lap then frame, `load_overtakes(uid)` in announcement order —
+  two readers because a session holds a handful of penalties and up to 562 passes, and neither
+  surface should pay for the other. There is deliberately **no count method**: a view's `+N / −M`
+  must be a `len()` over the rows it already holds, or the header and the list can disagree.
+  `session_uid` is not a FK (mirrors `laps` / `season_assignments`), so `pipeline.delete_session`
+  and the restore rollback are what remove these rows — nothing else does.
 - **`captures.py`** *(hybrid capture storage)* — `CaptureStore` over `captures` +
   `capture_sessions`: what recordings exist, what sessions each holds, and where each was last
   seen — so a capture is queryable without decompressing it. Keyed by a **content hash of the
@@ -343,11 +354,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   through signals as `str` (uint64-safe). Track-country flags are deferred (no `track_id → country`
   map exists yet).
 - **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
-  `SessionStore`, `LapStore`, **and** `CaptureStore` in-thread (SQLite dislikes cross-thread
-  connections) and calls `pipeline.archive_and_ingest`, so app-side ingest archives the capture,
-  writes laps + Parquet traces (under an injectable `trace_dir`, which the app supplies from
-  `paths.trace_dir()`),
-  and records capture metadata — not just the classification. All three stores are disposed in a
+  `SessionStore`, `LapStore`, `EventStore` **and** `CaptureStore` in-thread (SQLite dislikes
+  cross-thread connections) and calls `pipeline.archive_and_ingest`, so app-side ingest archives the
+  capture, writes laps + Parquet traces (under an injectable `trace_dir`, which the app supplies from
+  `paths.trace_dir()`), writes the session's penalties and passes,
+  and records capture metadata — not just the classification. All four stores are disposed in a
   single `finally`. It's a thin wrapper: the archive/ingest/delete ordering lives in the pipeline.
 - **`formatting.py`** — Qt-free presentation helpers (winner time / gap / +laps / status;
   best-lap-or-status; `is_race`, `slot_label`), unit-testable without importing PySide6.

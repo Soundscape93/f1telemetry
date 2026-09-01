@@ -52,13 +52,15 @@ class WeekendPage(QWidget):
     overview_requested = Signal()
     sessions_changed = Signal()      # Stored sessions data was deleted - other surfaces must re-read
 
-    def __init__(self, season_store, session_store, season_rosters, lap_store=None, parent=None) -> None:
+    def __init__(self, season_store, session_store, season_rosters, lap_store=None,
+                  event_store=None, parent=None) -> None:
         """Initialize the weekend page."""
         super().__init__(parent)
         self._seasons = season_store
         self._sessions = session_store
         self._season_rosters = season_rosters
         self._laps = lap_store              # deleting a session takes its laps + traces with it
+        self._events = event_store          # ... and its penalties + passes
         self._season_id: int | None = None
         self._round_number: int | None = None
         self._track_id: int | None = None
@@ -348,7 +350,7 @@ class WeekendPage(QWidget):
         so neither needs a re-query.
         """
         if not confirm_and_delete(self, session_uid, self._sessions, self._seasons,
-                                  lap_store=self._laps):
+                                  lap_store=self._laps, event_store=self._events):
             return
         self.sessions_changed.emit()  # laps surface caches a layout built from these laps
         self.reload()

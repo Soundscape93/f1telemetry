@@ -151,6 +151,44 @@ class LapRow(Base):
     red_flagged: Mapped[bool | None] = mapped_column(nullable=True)         # a red flag began here
 
 
+class SessionEventRow(Base):
+    """One Event-packet event kept from a session: a penalty, or a pass between two racing cars.
+
+    **One table with a ``code`` discriminator, not one per code** (DECISIONS -> Storage). Penalties
+    alone (129 rows across 73 captured sessions) would have fitted a JSON column on the session row
+    the way ``setup_history`` does; overtakes would not - ~84 filtered rows a session, 562 in the
+    worst - and splitting one aggregate across two shapes would double the read paths. So the
+    columns here are what both codes share and ``detail`` carries the code-specific remainder, which
+    makes adding ``COLL`` later a matter of rows rather than a migration.
+
+    Deliberately NOT a foreign key to ``sessions`` (mirrors ``laps`` and ``season_assignments``):
+    the EventStore manages events by ``session_uid`` explicitly - replace-by-uid on a re-save,
+    delete-by-uid on a session delete - so nothing here depends on cross-store cascade behaviour
+    (core invariant #4).
+
+    ``vehicle_index`` is the car the event is *about*: the penalised car for ``PENA``, the
+    overtaking car for ``OVTK``. ``other_vehicle_index`` is the second car when there is one - the
+    car involved in the infringement (the wire's 255 "not applicable" sentinel becomes NULL, 79 of
+    127 measured penalties) or the car that was passed.
+    """
+
+    __tablename__ = "session_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_uid: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String)               # the Event packet's 4-char code: "PENA" or "OVTK"
+    session_time_s: Mapped[float]                           # header session_time, seconds into the session
+    frame: Mapped[int]                                      # header frame_identifier; 0 for a replay-only penalty
+    lap_number: Mapped[int]                                 # PENA: the packet's own lap_num. OVTK: the passing car's
+    vehicle_index: Mapped[int]                              # penalisez car / overtaking car
+    other_vehicle_index: Mapped[int | None] = mapped_column(nullable=True)  # other car; Null when n/a
+    # The code-specific remainder: penalty_type / infringement_type / time_s / places_gained for
+    # PENA, and {} for OVTK, which has nothing left over. Keys are written even when their value is
+    # None, because on a penalty "not applicable" and 0 are different answers (places_gained is
+    # legitimately 0 in 73 of 127 measured rows).
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class DeletedSessionRow(Base):
     """A tombstone for a session deleted from the store.
 

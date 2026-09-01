@@ -65,7 +65,8 @@ class _FakeIngest:
         self.fails_late = fails_late
         self.calls: list[tuple[str, str | None]] = []
 
-    def __call__(self, path, store, lap_store=None, capture_store=None, recorded_by=None):
+    def __call__(self, path, store, lap_store=None, event_store=None, 
+                 capture_store=None, recorded_by=None):
         name = os.path.basename(path)
         self.calls.append((path, recorded_by))
         if name in self.fails:
@@ -75,6 +76,8 @@ class _FakeIngest:
             store.save(session)
             if lap_store is not None:
                 lap_store.save_laps(session.session_uid, ())
+            if event_store is not None:
+                event_store.save_events(session.session_uid, (), ())
             saved.append(session)
         if name in self.fails_late:
             raise RuntimeError("a later session in this capture failed")
@@ -89,6 +92,21 @@ class _FakeLapStore:
         self.deleted: list[str] = []
 
     def save_laps(self, session_uid, laps) -> None:
+        self.saved.append(str(session_uid))
+
+    def delete(self, session_uid) -> int:
+        self.deleted.append(str(session_uid))
+        return 0
+
+
+class _FakeEventStore:
+    """The same recorder for the events - what a restore wrote, and what a rollback took back."""
+
+    def __init__(self) -> None:
+        self.saved: list[str] = []
+        self.deleted: list[str] = []
+
+    def save_events(self, session_uid, penalties=(), overtakes=()) -> None:
         self.saved.append(str(session_uid))
 
     def delete(self, session_uid) -> int:
@@ -111,6 +129,7 @@ class RestoreTestBase(unittest.TestCase):
         self.addCleanup(self.captures.close)
         self.addCleanup(self.sessions.close)
         self.laps = _FakeLapStore()
+        self.events = _FakeEventStore()
 
     # --- fixtures ----------------------------------------------------------
     def _capture(self, name: str, uids: tuple[int, ...], *, on_disk: bool = True,
@@ -167,9 +186,10 @@ class RestoreHappyPathTest(RestoreTestBase):
         ingest = _FakeIngest({"cap_b.f1cap.zst": [_session(1002)]})
 
         restore_session(1002, self.sessions, self.captures, lap_store=self.laps,
-                        captures_dir=self.captures_dir, ingest=ingest)
+                        event_store=self.events, captures_dir=self.captures_dir, ingest=ingest)
 
         self.assertEqual(self.laps.saved, ["1002"])
+        self.assertEqual(self.events.saved, ["1002"], "a restored session gets its events back too")
         self.assertEqual(ingest.calls[0][1], "Sam")
 
     def test_finds_the_archive_through_the_captures_folder_when_the_path_is_stale(self):
@@ -251,13 +271,15 @@ class RestoreRollbackTest(RestoreTestBase):
 
         with self.assertLogs("f1telemetry.src.pipeline", level="ERROR"):
             outcome = restore_session(2003, self.sessions, self.captures, lap_store=self.laps,
-                                      captures_dir=self.captures_dir, ingest=ingest)
+                                      event_store=self.events, captures_dir=self.captures_dir,
+                                      ingest=ingest)
 
         self.assertFalse(outcome.restored)
         self.assertIs(outcome.reason, RestoreProblem.INGEST_FAILED)
         self.assertIsNone(self.sessions.load(2003), "the resurrected row goes back out")
         self.assertTrue(self.sessions.is_deleted(2003))
         self.assertEqual(self.laps.deleted, ["2003"], "and its laps go with it, as a delete does")
+        self.assertEqual(self.events.deleted, ["2003"], "and so do its events")
 
     def test_a_capture_that_does_not_hold_the_uid_rolls_back(self):
         """``capture_sessions`` rows go stale - pruned, re-recorded, or written by an older
@@ -268,7 +290,8 @@ class RestoreRollbackTest(RestoreTestBase):
         ingest = _FakeIngest({"stale.f1cap.zst": [_session(9999)]})
 
         outcome = restore_session(2004, self.sessions, self.captures, lap_store=self.laps,
-                                  captures_dir=self.captures_dir, ingest=ingest)
+                                  event_store=self.events, captures_dir=self.captures_dir,
+                                  ingest=ingest)
 
         self.assertFalse(outcome.restored)
         self.assertIs(outcome.reason, RestoreProblem.NOT_IN_CAPTURE)
@@ -276,6 +299,7 @@ class RestoreRollbackTest(RestoreTestBase):
         self.assertTrue(self.sessions.is_deleted(2004))
         self.assertIsNone(self.sessions.load(2004))
         self.assertEqual(self.laps.deleted, [], "nothing of ours was written, so nothing to undo")
+        self.assertEqual(self.events.deleted, [], "and nothing of its events either")
 
     def test_other_sessions_from_the_same_capture_are_left_alone(self):
         """The rollback is for the uid being restored, not for the capture: sessions the ingest

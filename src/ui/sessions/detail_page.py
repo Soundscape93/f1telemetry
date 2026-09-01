@@ -104,12 +104,14 @@ class DetailPage(QWidget):
     sessions_changed = Signal()
     lap_requested = Signal(str, int)  # session_uid (str, uint64-safe), lap_number
 
-    def __init__(self, session_store, season_store, capture_store=None, lap_store=None, parent=None):
+    def __init__(self, session_store, season_store, capture_store=None, lap_store=None, 
+                 event_store=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
         self._seasons = season_store
         self._captures = capture_store
         self._laps = lap_store
+        self._events = event_store
         self._session_uid: str | None = None
 
         outer = QVBoxLayout(self)
@@ -460,7 +462,7 @@ class DetailPage(QWidget):
         if self._session_uid is None:
             return
         if not confirm_and_delete(self, int(self._session_uid), self._sessions, self._seasons,
-                                  lap_store=self._laps):
+                                  lap_store=self._laps, event_store=self._events):
             return
         self.sessions_changed.emit()
         self.overview_requested.emit()

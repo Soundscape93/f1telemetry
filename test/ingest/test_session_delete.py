@@ -1,9 +1,9 @@
 """``pipeline.delete_session`` - the one write point for removing a stored session.
 
 Covers the guard (an assigned session is refused, and the refusal says where it is placed), the
-happy path (session row, lap rows and Parquet traces all go together) and the no-op. The guard
-is why this function exists at all: ``SessionStore.delete`` will delete an assigned session
-happily, and the weekend picker used to let it.
+happy path (session row, lap rows, Parquet traces and event rows all go together) and the no-op.
+The guard is why this function exists at all: ``SessionStore.delete`` will delete an assigned
+session happily, and the weekend picker used to let it.
 """
 from __future__ import annotations
 
@@ -20,8 +20,10 @@ from f1telemetry.src.pipeline import delete_session
 from f1telemetry.src.protocol.enums import (
     Formula, ResultReason, ResultStatus, SessionType, Weather,
 )
+from f1telemetry.src.storage.events import EventStore
 from f1telemetry.src.storage.seasons import SeasonStore
 from f1telemetry.src.storage.sessions import SessionStore
+from f1telemetry.test.storage.test_event_store import make_overtake, make_penalty
 
 try:
     import pyarrow  # noqa: F401
@@ -177,3 +179,63 @@ class DeleteRemovesLapsTest(DeleteSessionTestBase):
         outcome = delete_session(1007, self.sessions, self.seasons)
         self.assertTrue(outcome.deleted)
         self.assertEqual(outcome.laps_removed, 0)
+
+
+class DeleteRemovesEventsTest(DeleteSessionTestBase):
+    """The same promise as the laps, for the same reason - and with less to notice if it breaks.
+
+    ``session_events`` is keyed on the uid and not FK'd to ``sessions`` (core invariant #4), so
+    nothing collects its rows unless this does. Unlike the laps they leave nothing on disk, so an
+    orphaned penalty would only ever surface as a count in a later release. No pyarrow here: events
+    are rows, not Parquet.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.events = EventStore(f"sqlite:///{self._db}")
+        self.addCleanup(self.events.close)
+
+    def test_removes_the_penalties_and_the_passes(self):
+        self.sessions.save(_session(1008))
+        self.events.save_events("1008", (make_penalty(), make_penalty()), (make_overtake(),))
+
+        outcome = delete_session(1008, self.sessions, self.seasons, event_store=self.events)
+
+        self.assertTrue(outcome.deleted)
+        self.assertEqual(outcome.events_removed, 3, "both codes are counted together")
+        self.assertEqual(self.events.load_penalties("1008"), ())
+        self.assertEqual(self.events.load_overtakes("1008"), ())
+
+    def test_refusal_leaves_the_events_alone(self):
+        """The guard runs before anything is removed, so a refusal touches nothing at all."""
+        self.sessions.save(_session(1009))
+        self.events.save_events("1009", (make_penalty(),))
+        season = self._season()
+        self.seasons.assign_session(1009, season.season_id, 1)
+
+        outcome = delete_session(1009, self.sessions, self.seasons, event_store=self.events)
+
+        self.assertTrue(outcome.refused_assigned)
+        self.assertEqual(outcome.events_removed, 0)
+        self.assertEqual(len(self.events.load_penalties("1009")), 1)
+
+    def test_another_session_keeps_its_events(self):
+        self.sessions.save(_session(1010))
+        self.sessions.save(_session(1011))
+        self.events.save_events("1010", (make_penalty(),))
+        self.events.save_events("1011", (make_penalty(),))
+
+        delete_session(1010, self.sessions, self.seasons, event_store=self.events)
+
+        self.assertEqual(len(self.events.load_penalties("1011")), 1)
+
+    def test_delete_without_an_event_store_still_works(self):
+        """event_store is optional, exactly as lap_store is - a headless caller can still delete."""
+        self.sessions.save(_session(1012))
+        outcome = delete_session(1012, self.sessions, self.seasons)
+        self.assertTrue(outcome.deleted)
+        self.assertEqual(outcome.events_removed, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -29,11 +29,12 @@ class SessionsView(QWidget):
     restore_requested = Signal(str, str)  # session uid (str, uint64-safe), content_hash ("" = pick)
 
     def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
-                 parent=None):
+                 event_store=None, parent=None):
         super().__init__(parent)
-        self._overview = OverviewPage(session_store, season_store, lap_store=lap_store)
-        self._detail = DetailPage(session_store, season_store,
-                                  capture_store=capture_store, lap_store=lap_store)
+        self._overview = OverviewPage(session_store, season_store, 
+                                      lap_store=lap_store, event_store=event_store)
+        self._detail = DetailPage(session_store, season_store, capture_store=capture_store,
+                                   lap_store=lap_store, event_store=event_store)
         self._deleted = DeletedPage(session_store, capture_store=capture_store)
 
         self._overview.session_requested.connect(self._show_detail)
