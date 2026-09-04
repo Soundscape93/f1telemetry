@@ -142,7 +142,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   **refuses** an edit that would move, re-point or drop a round holding an assigned session —
   raises `CalendarConflictError`; the rule lives in `domain/calendars`, see DECISIONS),
   `assign_session` / `unassign_session`, `assignments_for_season`,
-  `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
+  `rounds_with_results(season_id, session_store)`. Two reverse lookups answer "where does this
+  session live?": `assignment_for(uid)` for one session, and `assigned_seasons()` — every assigned
+  uid mapped to its season id, in **one** query — for a whole list at once, which is what the
+  Sessions surface needs to name a page of cards without a query per card. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
   re-ingest never wipes manual placements.
 - **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
@@ -324,6 +327,19 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   session, then emits `restore_requested(uid, content_hash)` upward. `sessions_changed` is the
   non-navigation signal, re-emitted for `MainWindow` to fan out exactly as `SeasonsView` does; so is
   `restore_requested`, which asks for a *job* rather than a page, because the window owns workers.
+  **`league_names.py`** (`SessionRosters`, Qt-free) is why a league session reads with its members'
+  names here rather than the raw capture: it resolves a session's season through
+  `SeasonStore.assigned_seasons()` and loads that season's **saved** roster JSON via
+  `SeasonRosterFiles.load`, and both pages wrap the answer in the existing
+  `components.display_name_fn` — so the captured alias still wins and the roster is only the
+  fallback for a generic `""` / `"Player"`. It decides *which roster*, never how a name reads;
+  `components` is shared and must not import from a surface. Deliberately **not** `roster_for` /
+  `seed`, which need `rounds_with_results` and would hydrate every session in the season while a
+  list is painted (DECISIONS → UI, E1c); the mode test is `ROSTER_SEASON_MODES`, since a 2026
+  league is commonly a GRAND_PRIX season. A missing or unreadable roster file, a solo-mode season
+  and an unassigned session all resolve to `None`, which is today's behaviour unchanged — it never
+  raises, because a message box per card is the worse failure. Cached per paint and cleared by each
+  page's `reload`, so assigning a session on the Seasons surface shows up here without a restart.
   **Two cross-cutting rules live here.** Points are rendered only for race/sprint sessions because
   the stored value is a carried-over championship figure on every other type (DECISIONS → UI);
   and a lap row emits `lap_requested(uid, lap_number)` upward, which `MainWindow` turns into a

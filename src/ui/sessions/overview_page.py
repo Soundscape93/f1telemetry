@@ -29,7 +29,13 @@ from PySide6.QtWidgets import (
 
 from ...domain.season import slot_for_session
 from ...protocol.reference import track_name
-from ..components import WeatherIcon, clear_layout, confirm_and_delete, session_weather
+from ..components import (
+    WeatherIcon,
+    clear_layout,
+    confirm_and_delete,
+    display_name_fn,
+    session_weather
+)
 from ..formatting import (
     recorded_label,
     session_fastest_lap,
@@ -37,7 +43,9 @@ from ..formatting import (
     slot_label,
     weather_label
 )
+from ..season_roster import SeasonRosterFiles
 from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
+from .league_names import SessionRosters
 
 
 class _TitleButton(QToolButton):
@@ -68,12 +76,16 @@ class OverviewPage(QWidget):
     deleted_requested = Signal()  # open the deleted-sessions manager (the container hops)
 
     def __init__(self, session_store, season_store, lap_store=None,
-                 event_store=None, parent=None):
+                 event_store=None, rosters=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
         self._seasons = season_store
         self._lap_store = lap_store
         self._event_store = event_store         # deleting a session takes its penalties + passes too
+        # A league member who raced with online-name sharing off captured as "Player"; this resolves
+        # that through the season's saved roster (E1c). Built here when the container did not inject
+        # one, so the names are right by default rather than only when a caller remembers to wire it.
+        self._rosters = rosters or SessionRosters(season_store, SeasonRosterFiles())
         self._expanded: set[str] = set()  # uids whose card is open (survives a re-filter)
         self._query =  ""
 
@@ -116,6 +128,9 @@ class OverviewPage(QWidget):
     def reload(self) -> None:
         """Rebuild the cards from the session store, honouring the current filter."""
         clear_layout(self._body)
+        # Re-read the assignments and roster files for this paint: assigning a session on the
+        # Seasons surface, or hand-editing a roster JSON, has to show up without a restart.
+        self._rosters.invalidate()
         self._deleted.setText(f"Deleted sessions ({len(self._sessions.deleted_sessions())})")
         all_sessions = self._sessions.list_sessions()      # already recorded_at desc
         shown = 0
@@ -175,7 +190,10 @@ class OverviewPage(QWidget):
         header.addWidget(self._meta_label(session))
         vbox.addLayout(header)
 
-        summary = self._summary_row(session, label)
+        # Resolved per card, off the cached roster: the captured name wins whenever it is not
+        # generic, so this changes the sessions that acutally need it.
+        name_of = display_name_fn(self._rosters.roster_for_session(session.session_uid))
+        summary = self._summary_row(session, label, name_of)
         summary.setVisible(toggle.isChecked())
         toggle.toggled.connect(partial(self._toggle_card, uid, summary, toggle))
         vbox.addWidget(summary)
@@ -199,7 +217,7 @@ class OverviewPage(QWidget):
         meta.setStyleSheet(MUTED_TEXT_QSS)
         return meta
 
-    def _summary_row(self, session, label: str) -> QWidget:
+    def _summary_row(self, session, label: str, name_of) -> QWidget:
         """One compact line - muted keys, normal values, pipe separators.
 
         A single row rather than a key/value block: the track is already in the card header, so
@@ -209,7 +227,7 @@ class OverviewPage(QWidget):
         row = QHBoxLayout(body)
         row.setContentsMargins(24, 2, 0, 6)
         row.setSpacing(6)
-        for index, (key, value) in enumerate(self._summary_fields(session, label)):
+        for index, (key, value) in enumerate(self._summary_fields(session, label, name_of)):
             if index:
                 row.addWidget(_muted("|"))
             row.addWidget(_muted(f"{key}:"))
@@ -217,15 +235,15 @@ class OverviewPage(QWidget):
         row.addStretch(1)
         return body
 
-    def _summary_fields(self, session, label: str) -> list[tuple[str, object]]:
+    def _summary_fields(self, session, label: str, name_of) -> list[tuple[str, object]]:
         """Key/value pairs for the summary line; a value may be a widget (the weather icon)."""
         fields: list[tuple[str, object]] = [("Session", label)]
         # "Winner" for every session type: a practice or qualifying session's winner is whoever
         # ended up P1, which is what the classification's first entry already is.
-        leader = session_leader(session)
+        leader = session_leader(session, name_of)
         if leader is not None:
             fields.append(("Winner", leader))
-        fastest = session_fastest_lap(session)
+        fastest = session_fastest_lap(session, name_of)
         if fastest is not None:
             fields.append(("Fastest lap", fastest))
         fields.append(("Weather", WeatherIcon(session_weather(session), size_px=22)))

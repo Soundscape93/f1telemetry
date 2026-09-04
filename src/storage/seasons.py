@@ -185,7 +185,24 @@ class SeasonStore:
         with self._Session() as db:
             return {int(uid) for uid in
                     db.scalars(select(SeasonAssignmentRow.session_uid)).all()}
-        
+
+    def assigned_seasons(self) -> dict[int, int]:
+        """Every assigned session uid mapped to the season it is placed in - one query.
+
+        The bulk form of :meth:`assignment_for`, and the round number is dropped on purpose: the
+        Sessions surface asks "whose roster names this session?" for a whole list at once, and
+        calling ``assignment_for`` per card would be one query per row. ``assigned_uids`` cannot
+        answer it either - it says which uids are placed, never whose they are.
+
+        A session has at most one assignment (``assign_session`` moves rather than duplicates), so
+        the uid keys cannot collide.
+        """
+        with self._Session() as db:
+            rows = db.execute(
+                select(SeasonAssignmentRow.session_uid, SeasonAssignmentRow.season_id)
+            ).all()
+            return {int(uid): season_id for uid, season_id in rows}
+                        
     # --- combined read -----------------------------------------------------------------
 
     def rounds_with_results(self, season_id: int, session_store) -> list[RoundResults]:

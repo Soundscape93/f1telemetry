@@ -1362,7 +1362,7 @@ what would trigger revisiting it.
   tests. Both real cases are in this database: Practice 3 skipped in weekend `3602002184`, and
   Q1/Q2/Q3 still pending before a stored Race in `4046315905`.
 - **League display names on the Sessions surface read the saved roster file only — no seeding**
-  *(E1c, decided 2026-09-01)*. `SeasonRosterFiles.roster_for` falls back to seeding a roster from
+  *(E1c, decided 2026-09-01; shipped 2026-09-03 as `ui/sessions/league_names.py`)*. `SeasonRosterFiles.roster_for` falls back to seeding a roster from
   captures, and seeding needs `rounds_with_results`, which hydrates **every session in the season** —
   37 in this database. That is not something to run on the GUI thread while painting a list, and it
   was the stated reason E1c was deferred out of E1 in the first place. So the Sessions surface

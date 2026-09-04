@@ -19,6 +19,21 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Added
+- **League members are now named on the Sessions surface, not just on a season's weekend page.**
+  If your league raced with online-name sharing switched off, the game captures every one of you as
+  `Player` — so the sessions list and a session's own page could only ever show `Player`. They now
+  fall back to the season's saved roster file, the same one the season pages already use, across the
+  session cards (winner and fastest lap), the final classification and the Race control box. The
+  names the game *did* capture are never overwritten: a real online name always wins, and the roster
+  is only ever the fallback for a blank or generic one. A session that isn't assigned to a season,
+  or a season with no roster file saved yet, reads exactly as it did before — and the roster file is
+  the one the season detail page's **Create roster file** button writes.
+
+**Re-ingest needed: no**
+
+**Known issues:** None
+
 ## v0.10.0 — 2026-09-01
 
 ### Added

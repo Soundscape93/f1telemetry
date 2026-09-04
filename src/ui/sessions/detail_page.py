@@ -46,6 +46,7 @@ from ..components import (
     cell,
     clear_layout,
     confirm_and_delete,
+    display_name_fn,
     fit_columns,
     fit_table_height,
     session_weather,
@@ -83,7 +84,9 @@ from ..style import (
     apply_bold,
     apply_heading
 )
+from ..season_roster import SeasonRosterFiles
 from .lap_context import analyse_session
+from .league_names import SessionRosters
 from .race_control import grid_penalty_places, summarise_penalties
 from .stint_charts import StintCharts
 
@@ -117,13 +120,17 @@ class DetailPage(QWidget):
     lap_requested = Signal(str, int)  # session_uid (str, uint64-safe), lap_number
 
     def __init__(self, session_store, season_store, capture_store=None, lap_store=None, 
-                 event_store=None, parent=None):
+                 event_store=None, rosters=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
         self._seasons = season_store
         self._captures = capture_store
         self._laps = lap_store
         self._events = event_store
+        # A league member who raced with online-name sharing off captured as "Player"; this resolves
+        # that through the season's saved roster (E1c). Built here when the container did not inject
+        # one, so the names are right by default rather than only when a caller remembers to wire it.
+        self._rosters = rosters or SessionRosters(season_store, SeasonRosterFiles())
         self._session_uid: str | None = None
 
         outer = QVBoxLayout(self)
@@ -175,6 +182,9 @@ class DetailPage(QWidget):
     def reload(self) -> None:
         """Re-query the session and rebuild; leave for the overview if it has vanished."""
         clear_layout(self._body)
+        # Re-read the assignments and roster files for this paint: assigning a session on the
+        # Seasons surface, or hand-editing a roster JSON, has to show up without a restart.
+        self._rosters.invalidate()
         session, slot = self._current()
         if session is None:
             self.overview_requested.emit()      # deleted underneath us, or a re-ingest dropped it
@@ -202,13 +212,19 @@ class DetailPage(QWidget):
         # is what tells "+0 / -0" apart from "not captured".
         overtakes = self._stored_overtakes(session)
 
-        self._body.addWidget(self._top_row(session, slot, label, laps, penalties, overtakes))
-        self._body.addWidget(self._middle_row(session, laps, analysis, penalties))
+        # one resolver for the page, so the Classification and the Race control box cannot name
+        # the same driver differently. Non-generic captured names win, so this is a no-op for a
+        # session whose drivers shared their online names (E1c).
+        name_of = display_name_fn(self._rosters.roster_for_session(session.session_uid))
+
+        self._body.addWidget(self._top_row(session, slot, label, laps, penalties, overtakes, name_of))
+        self._body.addWidget(self._middle_row(session, laps, analysis, penalties, name_of))
         self._body.addWidget(self._charts_row(analysis))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
-    def _top_row(self, session, slot, label: str, laps, penalties=(), overtakes=()) -> QWidget:
+    def _top_row(self, session, slot, label: str, laps, penalties=(), overtakes=(),
+                 name_of=lambda entry: entry.driver_name) -> QWidget:
         """Session details beside the final classification.
 
         Neither box is height-capped. The classification is sized to show every driver and the
@@ -218,11 +234,13 @@ class DetailPage(QWidget):
         details = _box("Session details", 
                        self._details_box(session, slot, label, laps, overtakes))
         classification = _box(f"Final classification · {label}",
-                                build_classification_table(session, is_sprint_race=slot.is_sprint_race, 
+                                build_classification_table(session, name_of, 
+                                                           is_sprint_race=slot.is_sprint_race, 
                                                            grid_penalties=grid_penalty_places(penalties)), fill=True)
         return _row(details, classification)
 
-    def _middle_row(self, session, laps, analysis, penalties=()) -> QWidget:
+    def _middle_row(self, session, laps, analysis, penalties=(), 
+                    name_of=lambda entry: entry.driver_name) -> QWidget:
         """The player's laps beside the session's race control, capped.
 
         The Laps table scrolls itself (header pinned); the Race control panel is plain widgets, so
@@ -230,8 +248,8 @@ class DetailPage(QWidget):
         able to grow the page (DECISIONS -> UI) - the worst session in this database is eleven
         rows, and the cap is what keeps that a property of the box rather than of the data."""
         return _row(_box("Laps", self._laps_table(session, laps, analysis)),
-                    _box("Race control", self._race_control_panel(session, penalties), scroll=True),
-                    max_height=_MID_ROW_MAX_H)
+                    _box("Race control", self._race_control_panel(session, penalties, name_of),
+                          scroll=True), max_height=_MID_ROW_MAX_H)
 
     def _charts_row(self, analysis) -> QWidget:
         """The stacked pace and tyre-life charts, under the laps.
@@ -406,7 +424,8 @@ class DetailPage(QWidget):
         table.cellClicked.connect(partial(self._open_lap, table))
         return table
 
-    def _race_control_panel(self, session, penalties=()) -> QWidget:
+    def _race_control_panel(self, session, penalties=(),
+                            name_of=lambda entry: entry.driver_name) -> QWidget:
         """What race control did to this session: its penalties, field-wide.
 
         **The player's passes were weighed for this box and left out** (DECISIONS -> UI, E15
@@ -424,20 +443,25 @@ class DetailPage(QWidget):
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(self._penalties_section(session, penalties))
+        box.addWidget(self._penalties_section(session, penalties, name_of))
         box.addStretch(1)
         return panel
 
-    def _penalties_section(self, session, penalties=()) -> QWidget:
+    def _penalties_section(self, session, penalties=(), 
+                           name_of=lambda entry: entry.driver_name) -> QWidget:
         """The session's penalties - every car's, named, in the order they were issued.
 
         Field-wide rather than the player's: what a league reader opens this page for is what
         happened to the whole field, and ``EventStore`` stores it that way. Every text decision -
         the wording, the three states, the driver join - is ``race_control.summarise_penalties``,
         so this only lays out what it returns.
+
+        The rows are the ones ``reload`` already read. They used to be re-read here, which made the
+        page query ``EventStore`` twice for the same session while the comment above the first read
+        said it happened onece.
         """
         entries = session.classification.entries if session.classification else ()
-        summary = summarise_penalties(self._stored_penalties(session), entries)
+        summary = summarise_penalties(penalties, entries, name_of)
 
         host = QWidget()
         box = QVBoxLayout(host)

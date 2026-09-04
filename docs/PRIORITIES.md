@@ -476,13 +476,26 @@ tests. See DECISIONS → UI.
 
 | # | Branch | Contents |
 |---|---|---|
-| 1 | `feature/league-names-in-sessions` | **E1c** — saved roster file only, no seeding |
+| 1 | `feature/league-names-in-sessions` | **E1c** — saved roster file only, no seeding — **done 2026-09-03** |
 | 2 | `fix/weekend-slots-second-attempt` | **A8** — a slot keeps every attempt |
 | 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing |
 | 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal |
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes |
 | 6 | `feature/share-session-results` | **E19** — one session |
 | 7 | `feature/share-weekend-results` | **E19** — a whole weekend |
+
+**Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
+(the bulk uid → season read), `ui/sessions/league_names.py` (`SessionRosters`, Qt-free) and the
+`name_of` injection into `race_control.summarise_penalties` — the last module on the surface that
+read `driver_name` directly. **On the league weekends it changes nothing, and that is correct**:
+all six humans in *Mittwoch League*'s 12 assigned sessions already captured real online names
+(`soundscape93`, `remoriginal69`, `patrickstein12`, `Fabibyte`, `rolandmeier8302`, and
+`B3UDE3MUSSLOS` on Shanghai only), and the captured alias always wins — the roster is only ever the
+fallback for a generic `"Player"`. Verified against the live database: **`changed: none` on all 12**.
+The case it does change is the *old* league's Abu Dhabi weekend (season 4, `LEAGUE`, round 24, four
+sessions), raced with online-name sharing off, where all five humans capture as `"Player"` and
+resolve through `rosters/season_4.json` by race number. So a test that asserts "league weekends look
+different now" is asserting the wrong thing; the assertion is that they look *the same*.
 
 **Branch 5 is the retirement, and five things must be true first:** the new page renders every
 assigned session in weekend order with league names (1, 3); it shows Pending and Skipped slots (3);
