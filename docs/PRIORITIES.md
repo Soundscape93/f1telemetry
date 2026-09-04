@@ -211,7 +211,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 |---|---|---|---|
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
-| **v0.11.0** | **E1c** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework) | `minor` | no |
+| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export | `minor` | no — and **must not cause one** |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
 and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
@@ -285,7 +285,9 @@ re-run under WAL on 2026-08-05 and passes.
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
-| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | open — **decided 2026-08-24**; **step 4 of 4**, blocked on **E1c** (P3), then the filtered overview, then **E1b** (P3) | **`E1_E2_PLAN.md`**; the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **in progress** — the whole of **v0.11.0**; planned 2026-09-01 as **seven branches**, order forced (see the note below); E1d itself is branch 5 | **`E1_E2_PLAN.md`**; the note below |
+| A8 | `weekend_slots` silently drops a re-driven session's second attempt | **in progress** — **branch 2 of v0.11.0**; found 2026-09-01 while measuring the link identifiers, reproduced against the live database | the note below; DECISIONS → UI |
+| E19 | Share / export a session's result to the league chat | **in progress** — **branches 6 and 7 of v0.11.0**; new 2026-09-01; PNG the app renders itself, format prototyped before it was chosen | DECISIONS → UI; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
@@ -461,11 +463,73 @@ Sessions surface is where sessions belong.
    `season_assignments`. It cannot be removed until assignment has somewhere else to live.
 4. **Only then** can the weekend page be retired.
 
-**One thing has no home yet and must not be dropped silently:** the weekend page's *pending* and
-*skipped* slot rows. `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
-weekend where P3 was skipped shows it as "Skipped" rather than merely absent. A filtered list of
-*stored* sessions cannot express a session that does not exist — the filtered overview needs to
-carry this over explicitly, or the information is lost.
+**The one thing with no home — now closed, 2026-09-01.** The weekend page's *pending* and
+*skipped* slot rows: `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
+weekend where P3 was skipped shows it as "Skipped" rather than merely absent, and a filtered list of
+*stored* sessions cannot express a session that does not exist. **Its home is the Qt-free rules
+module** the two overviews share (`ui/sessions/weekend_view.py`), which emits slot rows for
+uncaptured positions; the skipped-vs-pending rule moves there out of the weekend page with unit
+tests. See DECISIONS → UI.
+
+**Planned in full 2026-09-01, after measuring the identifiers.** The four forced steps became
+**seven branches**, each PRing into `staging` unlabelled:
+
+| # | Branch | Contents |
+|---|---|---|
+| 1 | `feature/league-names-in-sessions` | **E1c** — saved roster file only, no seeding — **done 2026-09-03** |
+| 2 | `fix/weekend-slots-second-attempt` | **A8** — a slot keeps every attempt |
+| 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing |
+| 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal |
+| 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes |
+| 6 | `feature/share-session-results` | **E19** — one session |
+| 7 | `feature/share-weekend-results` | **E19** — a whole weekend |
+
+**Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
+(the bulk uid → season read), `ui/sessions/league_names.py` (`SessionRosters`, Qt-free) and the
+`name_of` injection into `race_control.summarise_penalties` — the last module on the surface that
+read `driver_name` directly. **On the league weekends it changes nothing, and that is correct**:
+all six humans in *Mittwoch League*'s 12 assigned sessions already captured real online names
+(`soundscape93`, `remoriginal69`, `patrickstein12`, `Fabibyte`, `rolandmeier8302`, and
+`B3UDE3MUSSLOS` on Shanghai only), and the captured alias always wins — the roster is only ever the
+fallback for a generic `"Player"`. Verified against the live database: **`changed: none` on all 12**.
+The case it does change is the *old* league's Abu Dhabi weekend (season 4, `LEAGUE`, round 24, four
+sessions), raced with online-name sharing off, where all five humans capture as `"Player"` and
+resolve through `rosters/season_4.json` by race number. So a test that asserts "league weekends look
+different now" is asserting the wrong thing; the assertion is that they look *the same*.
+
+**Branch 5 is the retirement, and five things must be true first:** the new page renders every
+assigned session in weekend order with league names (1, 3); it shows Pending and Skipped slots (3);
+it shows **every** attempt at a slot rather than one (2); it is the writer of `season_assignments`,
+covering assign, unassign and move, and `SeasonsView` no longer routes to the old page (4); and no
+caller of `seasons/weekend_page` remains, with the suite green.
+
+**One deliberate scaffold, in branch 3 only.** Branch 3 re-routes the calendar's double-click to
+the new page while assignment still lives on the old one, so the new page carries a temporary
+"Assign captures…" button that hops back through `MainWindow`. It keeps assignment working between
+branches 3 and 4 with no unreachable code and no broken intermediate state; branch 4 deletes the
+button and branch 5 deletes the page. Accepted knowingly 2026-09-01 rather than merging 3 and 4
+into one unreviewable branch.
+
+**A8 was found on the way in, and is not optional.** Measuring the link identifiers turned up that
+`weekend_slots` maps sessions into a dict keyed by session type, so a re-driven session's second
+attempt **overwrites the first and disappears**: weekend `3602002284` holds 8 stored sessions and
+renders 7. It is fixed before the new page is built because that page must show all of them —
+and because the dropped session is one of only two in that weekend that were never assigned, which
+is how the bug hid. A slot keeps every attempt and the app never picks one; see DECISIONS → UI.
+
+**E19 — Share a result to the league chat.** *New 2026-09-01, requested alongside the Seasons
+rework.* Today a result reaches the league WhatsApp group as a hand-taken screenshot. The
+**minimum** is the session detail page exporting one session with its Final Classification and its
+Race control box, penalty detail and all; the **ideal** is the weekend-filtered overview exporting
+every session assigned to that weekend in one go. Per-session ships first (branch 6) and
+weekend-wide is its own step (branch 7), which the format choice makes cheap — a weekend is N
+per-session PNGs in one folder, not a new renderer.
+
+**The format was prototyped before it was chosen**, against the worst session in this database
+(Shanghai, 22 drivers, 11 penalty rows): a PNG the app lays out itself, 1080 × 1290 px at 168 KB,
+with no new dependency and no packaging change. A screenshot of the app's own widgets was rejected
+on a measurement, not a preference — the Race control box is height-capped and scrolls, so a
+capture cuts off the very penalty list the export exists to carry. Full reasoning in DECISIONS → UI.
 
 **Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
 E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates
@@ -551,8 +615,8 @@ costs users a second one.
 | A7 | First-run "no telemetry arriving" hint in the UI — name the restart-after-install case | **done 2026-08-09** — folded into C8b; PACKAGING → C8b scope |
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
-| E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **step 1 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
-| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **step 3 of 4** toward E1d; `E1_E2_PLAN.md`; the E1d note in P2 |
+| E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **in progress** — **branch 1 of v0.11.0**; saved roster file only, no seeding (DECISIONS → UI); the E1d note in P2 |
+| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **in progress** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |

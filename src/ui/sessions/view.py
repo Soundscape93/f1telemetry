@@ -16,8 +16,10 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
+from ..season_roster import SeasonRosterFiles
 from .deleted_page import DeletedPage
 from .detail_page import DetailPage
+from .league_names import SessionRosters
 from .overview_page import OverviewPage
 
 
@@ -31,10 +33,17 @@ class SessionsView(QWidget):
     def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
                  event_store=None, parent=None):
         super().__init__(parent)
+        # One resolver shared by both pages, the way ``SeasonsView`` owns one ``SeasonRosterFiles`` 
+        # for its own: it caches per paint and each page clears it in ``reload``, so sharing costs
+        # nothing and keeps a single answer to "whose roster names this session?" (E1c).
+        self._rosters = SessionRosters(season_store, SeasonRosterFiles())
+
         self._overview = OverviewPage(session_store, season_store, 
-                                      lap_store=lap_store, event_store=event_store)
+                                      lap_store=lap_store, event_store=event_store,
+                                      rosters=self._rosters)
         self._detail = DetailPage(session_store, season_store, capture_store=capture_store,
-                                   lap_store=lap_store, event_store=event_store)
+                                   lap_store=lap_store, event_store=event_store, 
+                                   rosters=self._rosters)
         self._deleted = DeletedPage(session_store, capture_store=capture_store)
 
         self._overview.session_requested.connect(self._show_detail)

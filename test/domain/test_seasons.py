@@ -222,7 +222,40 @@ class AssignmentTest(StoreTestBase):
 
         self.seasons.unassign_session(1009)
         self.assertEqual(self.seasons.assigned_uids(), {1010})
-        
+
+    def test_assigned_seasons_maps_every_uid_to_its_season(self):
+        """The bulk reverse lookup the Sessions surface needs: one query for a whole list, where
+        ``assignment_for`` would be one per card and ``assigned_uids`` cannot say whose a uid is."""
+        other = self.seasons.create_season(SeasonMode.LEAGUE, 3, 2025,
+                                           rounds=official_calendar(2025))
+        self.sessions.save(make_session(1011))
+        self.sessions.save(make_session(1012))
+        self.assertEqual(self.seasons.assigned_seasons(), {})
+
+        self.seasons.assign_session(1011, self.season.season_id, 1)
+        self.seasons.assign_session(1012, other.season_id, 4)
+        self.assertEqual(self.seasons.assigned_seasons(),
+                         {1011: self.season.season_id, 1012: other.season_id})
+
+    def test_assigned_seasons_follows_a_move_and_an_unassign(self):
+        """One row per session, so a move re-points the uid rather than adding a second season."""
+        other = self.seasons.create_season(SeasonMode.LEAGUE, 4, 2025,
+                                           rounds=official_calendar(2025))
+        self.sessions.save(make_session(1013))
+        self.seasons.assign_session(1013, self.season.season_id, 3)
+        self.seasons.assign_session(1013, other.season_id, 9)      # move between seasons
+        self.assertEqual(self.seasons.assigned_seasons(), {1013: other.season_id})
+
+        self.seasons.unassign_session(1013)
+        self.assertEqual(self.seasons.assigned_seasons(), {})
+
+    def test_assigned_seasons_agrees_with_assignment_for(self):
+        """The bulk read and the single read must not be able to give different answers."""
+        self.sessions.save(make_session(1014))
+        self.seasons.assign_session(1014, self.season.season_id, 7)
+        bulk = self.seasons.assigned_seasons()
+        self.assertEqual(bulk[1014], self.seasons.assignment_for(1014)[0])
+
 
 class RosterSeasonModesTest(unittest.TestCase):
     """Which season modes offer the roster workflow (online-name + race-number standings).
