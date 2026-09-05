@@ -30,6 +30,17 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   or a season with no roster file saved yet, reads exactly as it did before — and the roster file is
   the one the season detail page's **Create roster file** button writes.
 
+### Fixed
+- **A session you drove twice no longer disappears from its weekend.** Restarting or re-driving a
+  session — a red flag, a crash on the opening lap, or a session you simply ran again — stores a
+  second recording that the game labels identically to the first. A weekend kept only one of them,
+  and which one it kept was an accident of the order the database happened to return. Every attempt
+  is now kept and listed in the order you recorded them, and the app never decides which one counts:
+  that is a judgement about the session, and nothing in the recording can make it for you. Assigning
+  one attempt to a round leaves the others alone, so you unassign and delete the ones you don't want
+  yourself. The same fix stops a re-driven Sprint Race being mistaken for the Grand Prix on a sprint
+  weekend, which would have put the wrong result in a season's Results column.
+
 **Re-ingest needed: no**
 
 **Known issues:** None

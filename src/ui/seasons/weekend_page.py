@@ -167,17 +167,22 @@ class WeekendPage(QWidget):
             # session deliberately skipped, e.g. Practice 3 - is "Skipped" once you've moved past
             # it. It flips back to a real table if you later capture and assign it.
             last_captured = max(
-                (slot.order for slot in slots if slot.session is not None), default=-1
+                (slot.order for slot in slots if slot.sessions), default=-1
             )
             for slot in slots:
-                if slot.session is not None:
-                    self._assigned_body.addWidget(self._session_block(slot, name_of))
+                if slot.sessions:
+                    # A restarted or re-driven session is a second attempt at the same slot. Each
+                    # attempt gets its own block, in the order they were driven, and the app never
+                    # picks between them - the user unassigns the ones that don't count (DECISIONS -> UI).
+                    for session in slot.sessions:
+                        self._assigned_body.addWidget(
+                            self._session_block(slot, session, name_of)
+                        )
                 else:
                     self._assigned_body.addWidget(
                         self._pending_slot_row(slot, skipped=slot.order < last_captured)
                     )
         self._assigned_body.addStretch(1)
-
         self._reload_capture_picker()
 
     def _league_roster_for_weekend(self, season, rounds) -> LeagueRoster | None:
@@ -203,13 +208,14 @@ class WeekendPage(QWidget):
         label.setStyleSheet(f"{MUTED_TEXT_QSS} font-style: italic; padding: 4px 0;")
         return label
 
-    def _session_block(self, slot, name_of=lambda entry: entry.driver_name) -> QWidget:
+    def _session_block(self, slot, session, name_of=lambda entry: entry.driver_name) -> QWidget:
         """A labelled classification table for one assigned session, with an Unassign button.
-
+        
         ``slot`` is the session's :class:`WeekendSlot`, so the header reads "Sprint Race" vs
-        "Race" from the weekend context rather than the (identical) raw session type.
+        "Race" from the weekend context rather than the (identical) raw session type. ``session`` 
+        is passed alongside it because a slot can hold more than one attempt, and each attempt
+        gets its own block.
         """
-        session = slot.session
         block = QWidget()
         vbox = QVBoxLayout(block)
         vbox.setContentsMargins(0, 0, 0, 0)

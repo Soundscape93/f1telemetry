@@ -1,6 +1,7 @@
 """Candidate-lap enumeration for the overlay (comparison.candidate_laps), over fake stores."""
 import unittest
 from dataclasses import dataclass
+from datetime import datetime
 
 from f1telemetry.src.ui.laps import comparison
 
@@ -18,6 +19,7 @@ class _Session:
     session_link_id: int = 0
     session_type: int = 15
     weekend_structure: tuple = ()
+    recorded_at: datetime | None = None     # orders a slot's attempts (weekend_slots)
 
 
 class _SessionStore:
