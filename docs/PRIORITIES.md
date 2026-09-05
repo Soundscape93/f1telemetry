@@ -513,9 +513,20 @@ into one unreviewable branch.
 **A8 was found on the way in, and is not optional.** Measuring the link identifiers turned up that
 `weekend_slots` maps sessions into a dict keyed by session type, so a re-driven session's second
 attempt **overwrites the first and disappears**: weekend `3602002284` holds 8 stored sessions and
-renders 7. It is fixed before the new page is built because that page must show all of them —
-and because the dropped session is one of only two in that weekend that were never assigned, which
-is how the bug hid. A slot keeps every attempt and the app never picks one; see DECISIONS → UI.
+renders 7. It is fixed before the new page is built because that page must show all of them. A slot
+keeps every attempt and the app never picks one; see DECISIONS → UI.
+
+**Why it hid — corrected 2026-09-05.** Not "the dropped session was never assigned": measured
+again on the live database, `15062953857885398583` **is** assigned (season 2, round 5), and the
+only unassigned session in that weekend is `8448489651239998166` — the attempt that renders. It
+hid for two other reasons. The **weekend page loses nothing today**, because `rounds_with_results(2)`
+hands round 5 seven assigned sessions with seven distinct types; the bug is latent there and fires
+the moment the second attempt is assigned to the same round. What **does** lose today is
+`slot_for_session`, which filters the whole store by `weekend_link_id`, so it sees all 8, drops one
+and returns a bare fallback slot for `15062953857885398583`. A Practice 2's label does not depend
+on slot resolution, so that fallback is invisible — it would not be if the duplicate were a race on
+a sprint weekend, where the fallback loses `is_sprint_race` / `is_grand_prix` and the Grand Prix
+would read as a Sprint (invariant #5).
 
 **E19 — Share a result to the league chat.** *New 2026-09-01, requested alongside the Seasons
 rework.* Today a result reaches the league WhatsApp group as a hand-taken screenshot. The

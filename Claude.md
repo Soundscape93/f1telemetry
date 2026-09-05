@@ -147,6 +147,11 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    (16) — so rendering the raw enum name put "Race 2" on every sprint weekend's Grand Prix until
    2026-08-26. `ui/formatting.slot_label` renders **every** non-sprint race type as "Race"; position
    decides which race it is, never the value.
+   **A slot also holds *every* attempt, not one** (v0.11.0): a re-driven session keeps the same
+   link ids, type and track, and only `session_uid` / `recorded_at` differ, so `WeekendSlot.sessions`
+   is a tuple in `recorded_at` order and the app never picks which attempt counts. Keying them by
+   type dropped the second attempt outright and let a re-driven Sprint take the Grand Prix's
+   position. See DECISIONS → UI.
 6. **Traces are indexed by lap DISTANCE, not time.** The header is 29 bytes. The recorder binds
    `0.0.0.0:20777` (set the game's UDP to broadcast).
 7. **Race numbers are unique only among humans**, so league identity never keys on a number

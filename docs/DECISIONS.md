@@ -1316,6 +1316,14 @@ what would trigger revisiting it.
   sessions into a dict keyed by type, so the second attempt **overwrote the first and vanished**:
   measured live, weekend `3602002284` holds 8 stored sessions and rendered 7, silently losing the
   later Practice 2. That is A8, fixed as part of this release.
+  - **Losing a session was not the worst of it.** The race-type sessions were laid onto the
+    weekend's race positions with `zip`, pairing *sessions* with *positions* rather than *slots*
+    with positions — so on a sprint weekend whose Sprint was driven twice, the second Sprint
+    attempt takes the **Grand Prix's** position and the real Grand Prix disappears entirely:
+    `grand_prix_session` returns a Sprint, and the calendar's Results column and the points table
+    both read the wrong session (invariant #5). Found on a fixture 2026-09-05; no weekend in this
+    database has a duplicate race, so it was latent rather than live. Attempts at one slot share a
+    `session_link_id`, which is what lets them be grouped before they are placed.
   - **`WeekendSlot` carries all of a slot's attempts, in recorded order, and the view lists them
     all.** A restart usually means something went wrong in the earlier run, and which attempt
     "counts" is a judgement about that session, not a fact in the telemetry — nothing stored can
