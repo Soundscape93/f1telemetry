@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 from ..style import apply_heading
 
 
-def panel_box(title: str, content: QWidget, fill: bool = True,
+def panel_box(title: str, content: QWidget, fill: bool = False,
               scroll: bool = False) -> QWidget:
     """One titled section: a bold heading over its content, inside a light frame.
 
