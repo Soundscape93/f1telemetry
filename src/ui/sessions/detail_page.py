@@ -24,7 +24,6 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -49,6 +48,7 @@ from ..components import (
     display_name_fn,
     fit_columns,
     fit_table_height,
+    panel_box,
     session_weather,
     tidy_table,
 )
@@ -231,9 +231,9 @@ class DetailPage(QWidget):
         page's own scroll area takes the overflow - capping the row turned a 20-car field into six
         visible rows, which is worse than scrolling the page.
         """
-        details = _box("Session details", 
+        details = panel_box("Session details", 
                        self._details_box(session, slot, label, laps, overtakes))
-        classification = _box(f"Final classification · {label}",
+        classification = panel_box(f"Final classification · {label}",
                                 build_classification_table(session, name_of, 
                                                            is_sprint_race=slot.is_sprint_race, 
                                                            grid_penalties=grid_penalty_places(penalties)), fill=True)
@@ -247,8 +247,8 @@ class DetailPage(QWidget):
         it takes a scroll area. A race can issue any number of penalties and the box must not be
         able to grow the page (DECISIONS -> UI) - the worst session in this database is eleven
         rows, and the cap is what keeps that a property of the box rather than of the data."""
-        return _row(_box("Laps", self._laps_table(session, laps, analysis)),
-                    _box("Race control", self._race_control_panel(session, penalties, name_of),
+        return _row(panel_box("Laps", self._laps_table(session, laps, analysis)),
+                    panel_box("Race control", self._race_control_panel(session, penalties, name_of),
                           scroll=True), max_height=_MID_ROW_MAX_H)
 
     def _charts_row(self, analysis) -> QWidget:
@@ -262,13 +262,13 @@ class DetailPage(QWidget):
         flying lap in dry qualifying genuinely has no stint to draw.
         """
         if not analysis.stints:
-            return _box("Tyre stints & pace", _muted_label(_NO_STINTS))
+            return panel_box("Tyre stints & pace", _muted_label(_NO_STINTS))
         host = QWidget()
         box = QVBoxLayout(host)
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(StintCharts(analysis))
         box.addWidget(_muted_label(_FUEL_CAVEAT))
-        return _box("Tyre stints & pace", host)
+        return panel_box("Tyre stints & pace", host)
 
     # --- boxes -----------------------------------------------------------------------------------
     def _details_grid(self, session, slot, label: str, laps, overtakes=()) -> QWidget:
@@ -579,44 +579,6 @@ class DetailPage(QWidget):
             return
         self.sessions_changed.emit()
         self.overview_requested.emit()
-
-
-def _box(title: str, content: QWidget, fill: bool = False, scroll: bool = False) -> QWidget:
-    """One titled section: a bold heading over its content, inside a light frame.
-
-    A framed ``QLabel`` heading rather than a ``QGroupBox``: a group box draws its title in the
-    *widget's* own font, so sizing the title up would size every child that inherits it. Here only
-    the heading is styled, and ``StyledPanel`` follows the palette with no stylesheet at all.
-
-    ``fill`` pushes the content to the top, leaving empty space below its last row, so the shorter
-    box in a row sits naturally beside a taller one instead of stretching its rows apart.
-
-    ``scroll`` puts the content in a scroll area, for a box inside a height-capped row whose
-    content has no upper bound. It supersedes ``fill``: the scroll area already takes the spare
-    height, so a stretch beside it would have nothing to push against. A *table* does not need
-    this - left unfrozen it scrolls itself and keeps its header row pinned, which a scroll area
-    around the whole table would not.
-    """
-    frame = QFrame()
-    frame.setFrameShape(QFrame.Shape.StyledPanel)
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(10, 8, 10, 10)
-    heading = QLabel(title)
-    apply_heading(heading, size_px=17)
-    layout.addWidget(heading)
-
-    if scroll:
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setFrameShape(QFrame.Shape.NoFrame)
-        area.setWidget(content)
-        layout.addWidget(area, 1)
-        return frame
-
-    layout.addWidget(content)
-    if fill:
-        layout.addStretch(1)
-    return frame
 
 
 def _row(left: QWidget, right: QWidget, max_height: int | None = None) -> QWidget:

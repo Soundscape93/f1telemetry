@@ -463,13 +463,16 @@ Sessions surface is where sessions belong.
    `season_assignments`. It cannot be removed until assignment has somewhere else to live.
 4. **Only then** can the weekend page be retired.
 
-**The one thing with no home — now closed, 2026-09-01.** The weekend page's *pending* and
-*skipped* slot rows: `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
+**The one thing with no home — closed 2026-09-01, shipped 2026-09-06.** The weekend page's
+*pending* and *skipped* slot rows: `weekend_slots` reconstructs the full weekend from `weekend_structure`, so a
 weekend where P3 was skipped shows it as "Skipped" rather than merely absent, and a filtered list of
 *stored* sessions cannot express a session that does not exist. **Its home is the Qt-free rules
 module** the two overviews share (`ui/sessions/weekend_view.py`), which emits slot rows for
 uncaptured positions; the skipped-vs-pending rule moves there out of the weekend page with unit
-tests. See DECISIONS → UI.
+tests. See DECISIONS → UI. **Measured on the way in, and DECISIONS corrected:** both of this
+database's uncaptured-slot weekends are entirely *skipped* (`3602002184`'s Practice 3, and
+`4046315905`'s Q1/Q2/Q3, which sit before its stored Race), so **Pending has no live example** and
+the unit tests are its only cover.
 
 **Planned in full 2026-09-01, after measuring the identifiers.** The four forced steps became
 **seven branches**, each PRing into `staging` unlabelled:
@@ -478,7 +481,7 @@ tests. See DECISIONS → UI.
 |---|---|---|
 | 1 | `feature/league-names-in-sessions` | **E1c** — saved roster file only, no seeding — **done 2026-09-03** |
 | 2 | `fix/weekend-slots-second-attempt` | **A8** — a slot keeps every attempt |
-| 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing |
+| 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing — **done 2026-09-06** |
 | 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal |
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes |
 | 6 | `feature/share-session-results` | **E19** — one session |
@@ -508,7 +511,12 @@ the new page while assignment still lives on the old one, so the new page carrie
 "Assign captures…" button that hops back through `MainWindow`. It keeps assignment working between
 branches 3 and 4 with no unreachable code and no broken intermediate state; branch 4 deletes the
 button and branch 5 deletes the page. Accepted knowingly 2026-09-01 rather than merging 3 and 4
-into one unreviewable branch.
+into one unreviewable branch. **Built as planned**, plus what branch 3 had to settle itself: the
+new page lives on the *Sessions* surface and the calendar's double-click leaves Seasons through
+`MainWindow` (`_show_lap`'s shape); a round with nothing assigned has no weekend and gets an empty
+state rather than a guess from its track (**88 of 96 rounds**); and the two overviews differ in
+population by design — weekend `3602002284` renders 7 blocks on the old page and 8 on the new one.
+See DECISIONS → UI.
 
 **A8 was found on the way in, and is not optional.** Measuring the link identifiers turned up that
 `weekend_slots` maps sessions into a dict keyed by session type, so a re-driven session's second

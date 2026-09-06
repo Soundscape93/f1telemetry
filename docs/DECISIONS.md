@@ -1360,6 +1360,75 @@ what would trigger revisiting it.
   - **Not a mode flag on one class** either: `if self._weekend is None:` would thread through
     `reload`, the card builder, the meta line, the header and the empty state, which moves the
     drift inside one file rather than removing it.
+  - **Shipped 2026-09-06** as `ui/sessions/weekend_view.py` (`overview_rows`, `weekend_rows`,
+    `weekend_of`), `ui/components/session_card.py` (`SessionCard` + `CardAction`) and
+    `ui/sessions/weekend_page.py`. Four things the plan did not pin down were settled on the way
+    in, and are recorded below.
+  - **The new page belongs to the Sessions surface, and the hop goes through `MainWindow`.**
+    E1d's own wording — the Sessions surface is where sessions belong — plus two practical
+    reasons: the page needs the `SessionRosters` that `SessionsView` already owns and shares
+    between its pages, and "open this session" is free inside that surface and a cross-surface
+    signal outside it. So `SeasonsView` re-emits `weekend_requested` instead of opening its own
+    page, and the window switches the sidebar and calls `SessionsView.show_weekend` — exactly
+    `_show_lap`'s shape, for exactly its reason.
+    - **The show-event stash is load-bearing, and it is only taken while the surface is hidden.**
+      A stack switch delivers `showEvent` synchronously, and both surfaces reset to their overview
+      there, so a target navigated to before the show event would be silently undone. The window
+      shows the surface *first*, though, which means an unconditional stash is never consumed and
+      hijacks the user's **next** plain visit to that surface. `LapsView.show_lap` has had that
+      bug since it was written (verified on `origin/staging`: open a lap, leave, come back to Laps
+      → the lap's detail page, not the laps overview). The two stashes added here guard on
+      `isVisible()` and are correct in both call orders; the `LapsView` one is untouched and still
+      wrong.
+  - **A round with nothing assigned has no weekend, and gets an empty state.** The only link from
+    a round to a `weekend_link_id` runs through its *assigned* sessions, so a round with none has
+    nothing to filter by — and that is **88 of this database's 96 rounds**, the common case rather
+    than an edge one. Falling back to the round's track was rejected as silently wrong: a track is
+    not a weekend, and Suzuka alone has three here (`473146008`, `2412784517`, `1178290434`).
+    Routing to the old page in that case was rejected too — one double-click with two
+    destinations, which branch 5 would then have to unpick. `weekend_of` returns `None` and the
+    page says so, with the "Assign captures…" scaffold as the way forward.
+  - **The two overviews disagree on population by design, and it is visible.** The old page
+    renders `rounds_with_results` — the sessions *assigned* to a round — while this one filters
+    *stored* sessions by weekend, so an attempt nobody assigned is invisible there and shown here.
+    Measured: 64 stored / 48 assigned / 16 unassigned across 13 weekends, of which only 8 have any
+    assigned session. The one visible difference is weekend `3602002284` (season 2, round 5): 8
+    stored, 7 assigned, so the old page renders 7 blocks and this one renders **8** — both
+    attempts at Practice 2, `8448489651239998166` (11:59, unassigned) and `15062953857885398583`
+    (12:07, assigned). That is the point rather than a regression: branch 5 cannot be retired
+    until the new page shows *every* attempt at a slot, which the old page structurally cannot do.
+    The other direction is correct too — weekend `4046315905` (one Race, assigned to nothing) is
+    invisible from Seasons today and stays invisible, because no round points at it; it is still
+    reachable from the plain Sessions overview.
+  - **The full classifications belong to the weekend's races, not to every card** *(amended
+    2026-09-06, after seeing it run)*. E1d asked for "each session's classification shown below
+    it", and the first build did exactly that — every card carried a `build_classification_table`.
+    A nine-session sprint weekend then opens as nine full grids, and the table answers a question
+    nobody asks of a practice session: what a card needs to say is already its summary line
+    (winner, fastest lap, weather). So the **races** get one each, in a row beneath the cards, and
+    nothing else does.
+    - **Both races, side by side.** The Sprint Race scores championship points too, so a sprint
+      weekend has two classifications and they sit in the two halves, in running order. They reuse
+      the half-width boxes the session detail page already reads in, which is what promoted its
+      private `_box` to `components.panels.panel_box` — a second hand-rolled titled box is exactly
+      the drift this branch exists to prevent, and sharing by *builder* is the pattern already in
+      use. `_row` stayed on the detail page: its "exactly two, equal width" contract does not fit
+      one-to-three boxes.
+    - **One race still sits at half width**, padded by a stretch rather than spanning the page. A
+      classification is a narrow thing and full width makes it harder to read, not easier.
+    - Which rows earn one is `weekend_view.race_rows`, not something the page decides, and it
+      returns **every** attempt: a race driven twice gets a box each, in recorded order, with the
+      recorded time joining that race's title to tell them apart. The app picks no attempt here
+      either (core invariant #5).
+    - An uncaptured Grand Prix is always **Pending** and never Skipped — nothing in a weekend
+      comes after it, so its slot can never be a gap the weekend moved past. The row is simply
+      absent while a weekend's races are still to come.
+    - `SessionCard` lost the `detail` parameter it had been given for this, rather than keeping an
+      unused hook: re-adding it is three lines if a later branch wants one.
+  - **The new page never calls `rounds_with_results`**, for the reason E1c was deferred over: it
+    hydrates every session in the season. The round's number and track come off `season.rounds`,
+    its uids off `assignments_for_season`, and the weekend's sessions out of the single
+    `list_sessions` the rows need anyway.
 - **Pending and Skipped slot rows are the filtered overview's job, and they live in the rules
   module** *(decided 2026-09-01, v0.11.0)*. A filtered list of *stored* sessions cannot express a
   session that does not exist, so routing Seasons into Sessions would have silently dropped the one
@@ -1367,8 +1436,16 @@ what would trigger revisiting it.
   than merely absent. `weekend_view` therefore emits slot rows for uncaptured positions, and the
   skipped-vs-pending rule (a gap *before* the latest captured session is Skipped; one after it is
   still to come) moves out of the weekend page's `_pending_slot_row` into that module with unit
-  tests. Both real cases are in this database: Practice 3 skipped in weekend `3602002184`, and
-  Q1/Q2/Q3 still pending before a stored Race in `4046315905`.
+  tests.
+  - **Corrected 2026-09-06, measured against the live database: both real cases are *skipped*,
+    and there is no pending example anywhere.** Practice 3 in weekend `3602002184` is skipped, as
+    documented. `4046315905` was documented as Q1/Q2/Q3 "still pending before a stored Race" —
+    they are **Skipped**, because the stored Race is that weekend's last captured session and the
+    three qualifying slots sit *before* it, which is exactly what the rule says. Measured:
+    `4046315905` → `[Q1 SKIPPED, Q2 SKIPPED, Q3 SKIPPED, Race captured]`; `3602002184` → 6 stored
+    across 7 slots, Practice 3 skipped at order 2. Those two are the **only** weekends here with
+    an uncaptured slot at all, and both are entirely skipped — so **Pending is reachable only
+    from fixtures**, and `test/ui/test_weekend_view.py` is the only cover it has.
 - **League display names on the Sessions surface read the saved roster file only — no seeding**
   *(E1c, decided 2026-09-01; shipped 2026-09-03 as `ui/sessions/league_names.py`)*. `SeasonRosterFiles.roster_for` falls back to seeding a roster from
   captures, and seeding needs `rounds_with_results`, which hydrates **every session in the season** —
