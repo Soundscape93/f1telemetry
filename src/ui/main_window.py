@@ -223,6 +223,12 @@ class MainWindow(QMainWindow):
         # Same rule, the other direction: a lap row on the Session detail page opens the lap's
         # telemetry, which lives on a diffrent surface. Only the window owns both.
         self._sessions_view.lap_requested.connect(self._show_lap)
+        # The same rule for the three hops between Seasons and Sessions: activating a round
+        # opens that weekend on the Sessions surface (E1d), and the weekend page there comes back
+        # for the season, or for the round-centric page that still writes the assignments.
+        self._seasons_view.weekend_requested.connect(self._show_weekend)
+        self._sessions_view.season_requested.connect(self._show_season)
+        self._sessions_view.assign_requested.connect(self._show_round_assignments)
         # And a job rather than a page: the deleted-sessions manager asks, the window runs it.
         self._sessions_view.restore_requested.connect(self._on_restore_requested)
         self._stack.addWidget(self._laps_view)
@@ -393,6 +399,33 @@ class MainWindow(QMainWindow):
         self._sidebar.setCurrentRow(_SECTIONS.index("Laps"))
         self._laps_view.show_lap(session_uid, lap_number)
 
+    def _show_weekend(self, season_id: int, round_number: int) -> None:
+        """Switch to the Sessions surface and open one round's weekend, from a season's calendar.
+
+        E1d's routing: a round opens the Sessions overview filtered to that weekend, rather than
+        the Seasons surface's own round-centric page. Both halves are needed for the same reason
+        they are in :meth:`_show_lap` - ``SessionsView.show_weekend`` only moves that surface's
+        *own* stack, so without the sidebar row changing the window stays on Seasons.
+        """
+        self._sidebar.setCurrentRow(_SECTIONS.index("Sessions"))
+        self._sessions_view.show_weekend(season_id, round_number)
+
+    def _show_season(self, season_id: int) -> None:
+        """Switch to the Seasons surface and open one season, from the Sessions weekend page."""
+        self._sidebar.setCurrentRow(_SECTIONS.index("Seasons"))
+        self._seasons_view.show_season(season_id)
+
+    def _show_round_assignments(self, season_id: int, round_number: int) -> None:
+        """Hop back to the round-centric weekend page to assign captures. **Temporary.**
+
+        That page is still the only writer of ``season_assignments``, so the Sessions weekend
+        page carries a button that lands here rather than growing an assignment UI that the
+        session-centric assignment branch would immediately replace. That branch deletes this
+        method and the button together (PRIORITIES -> E1d).
+        """
+        self._sidebar.setCurrentRow(_SECTIONS.index("Seasons"))
+        self._seasons_view.show_season(season_id, round_number)
+
     # --- restoring a deleted session --------------------------------------------------------
 
     def _on_restore_requested(self, session_uid: str, content_hash: str) -> None:
@@ -447,7 +480,7 @@ class MainWindow(QMainWindow):
         A packaged build can silently lose a lazily-imported dependency or a bundled asset
         (docs/PACKAGING.md "Risks & fallbacks"); the user then meets the fallback with no
         explanation and reports it as a bug in the feature. Logged every launch, dialogued only
-        wehen something is actually degraded: the log line is what a tester report needs, the 
+        when something is actually degraded: the log line is what a tester report needs, the 
         dialog is what stops a silent downgrade going unnoticed.
         """
         from ..capabilities import check_capabilities, degraded, log_capabilities

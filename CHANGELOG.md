@@ -20,6 +20,19 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
 ### Added
+- **Opening a round now shows that whole weekend's sessions, on the Sessions page.** Double-clicking
+  a round in a season's calendar used to open a page of its own; it now opens the sessions list
+  filtered to that weekend, in the order the weekend actually ran — P1, P2, P3, qualifying, the
+  race — each showing the same summary line the sessions list gives you (winner, fastest lap,
+  weather), and double-clicking one opens the session itself. The **full classifications sit
+  underneath, one per race**: a sprint weekend shows the Sprint Race beside the Grand Prix, and a
+  normal weekend shows the race on its own. A session the game expected but you never recorded still has its place
+  in the list, marked **Skipped** if you drove past it or *not captured yet* if it is still to come,
+  so a weekend where you sat out Practice 3 reads as a decision rather than as a gap. Every attempt
+  at a session appears, including ones you have not assigned to the round, so a session you drove
+  twice shows both — told apart by the time you recorded them. Rounds you have not assigned anything
+  to yet say so, and point you at the **Assign captures…** button, which is still where assigning
+  happens for now.
 - **League members are now named on the Sessions surface, not just on a season's weekend page.**
   If your league raced with online-name sharing switched off, the game captures every one of you as
   `Player` — so the sessions list and a session's own page could only ever show `Player`. They now

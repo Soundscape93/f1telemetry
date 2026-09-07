@@ -244,6 +244,23 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `display_name_fn(roster)`, the roster→name resolver passed
   as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
   surfaces reuse the same builder.
+  `session_card.py` holds `SessionCard` — the one foldable session card **both** Sessions
+  overviews build (title, optional `CardAction` buttons, muted recorded-time / driver-count line,
+  and an unfoldable summary row of session / winner / fastest lap / weather / AI difficulty). What
+  differs per page is passed in: the `title` (the plain overview prefixes the track; the weekend
+  page has it in its header), the `actions`, and whether it opens `expanded`. It carries the
+  summary and nothing heavier: a full classification belongs to the weekend's races rather than to
+  a row, so the weekend page renders those beneath its list instead. It never owns the fold
+  *state*: it emits
+  `toggled` and the page remembers, because the two pages remember opposite things (which cards
+  were opened vs which were closed). Shared as a widget rather than a base class — see
+  DECISIONS → UI.
+  `panels.py` holds `panel_box(title, content, fill=, scroll=)` — the titled, lightly framed
+  section every page's content sits in. It was the session detail page's private `_box` until the
+  weekend page needed the same half-width classification boxes; promoting it rather than copying
+  it is the same sharing-by-builder rule as `build_classification_table`. Its companion `_row`
+  (two equal boxes side by side) stayed on the detail page — the weekend page's race row holds one
+  to three boxes and pads a lone one to half width, which that contract does not cover.
   The lap-detail widgets also live here: `damage_panel.py` (`build_damage_table` over the Qt-free
   `damage_rows`, rendered via `tables.build_kv_table` — a shared key/value table with bold section
   headers), `setup_panel.py` (`build_setup_table` over the Qt-free `setup_fields`, rendered as
@@ -298,6 +315,15 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   It is **not** in `refresh()`'s if-chain on purpose: an ingest completing mid-edit must not reload
   the page and discard work in progress.
   `labels.py` holds the shared `mode_label` / `format_label` / `season_title` helpers.
+  **The calendar no longer opens `weekend_page.py`** (E1d): `SeasonsView` re-emits
+  `weekend_requested` for `MainWindow`, which switches the sidebar and calls
+  `SessionsView.show_weekend` — the same two halves, for the same reason, as `_show_lap`. The
+  round-centric page stays reachable through `SeasonsView.show_season(season_id, round_number)`,
+  which is where the new page's temporary "Assign captures…" button lands: that page is still the
+  only writer of `season_assignments` until branch 4. Both `show_season` and
+  `SessionsView.show_weekend` stash their target for a `showEvent` that has not arrived yet, and
+  **only while the surface is hidden** — the window reveals the surface before calling, so an
+  unconditional stash is never consumed and would hijack the next plain visit.
   LEAGUE detail/weekend pages are roster-aware: they load-or-seed the season JSON read-only, offer
   a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
   names through `display_name_fn` (captured public alias first, roster `online_names` fallback)
@@ -307,6 +333,26 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   reference siblings. `overview_page.py` lists every stored session as foldable cards, newest
   first, with a track/session filter — one query, no `LapStore` read — and a compact summary line
   (session, winner, fastest lap, weather icon, AI difficulty) plus a shared delete.
+  `weekend_page.py` is the **weekend-filtered** overview a season's calendar opens (E1d): the same
+  spine, different chrome — a round header and an "Assign captures…" button instead of the heading,
+  no deleted-sessions button and no search box (the weekend *is* the filter), and cards open on
+  their summary line. The **full classifications belong to the races**, not to every card: the
+  Sprint Race and the Grand Prix get one each, side by side in `panel_box`es beneath the cards
+  (one race keeps half the width rather than spanning the page), because every other session's
+  result is already its card's summary line and a table per session was height without an answer —
+  a nine-session sprint weekend opened as nine full grids. It shows the *weekend's stored* sessions rather than
+  the *round's assigned* ones, so every attempt at a slot appears; a round with nothing assigned has
+  no weekend and says so. It never calls `rounds_with_results` (E1c's cost).
+  **`weekend_view.py`** (Qt-free) is what those two pages share instead of a base class: `overview_rows`
+  (store order, slot label per session resolved against the whole pool, the track/label filter),
+  `weekend_rows` (one weekend in running order — a row per attempt at every slot, plus a `SlotRow`
+  for each uncaptured position, **Skipped** before the last captured one and **not captured yet**
+  after it — the rule moved out of `seasons/weekend_page._pending_slot_row`), `race_rows`
+  (which rows earn a full classification — every attempt at each of the weekend's races, and
+  nothing else) and `weekend_of`
+  (which weekend a round's assigned sessions belong to, `None` when it has none). Anything deciding
+  *which* rows a view shows lives here precisely so it is asserted without a `QApplication`
+  (DECISIONS → UI).
   `detail_page.py` is the per-session page: a header (track, slot label, recorded time, weather ·
   laps · uid, and the **source capture** resolved via `CaptureStore.for_session` +
   `resolve_capture_path`), then a 4×2 details grid, the shared
