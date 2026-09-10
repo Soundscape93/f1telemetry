@@ -80,9 +80,11 @@ what would trigger revisiting it.
   capture replaces its session row by uid; a FK (or cascade) would wipe the manual league round
   placements. Keeping them independent means results can be re-processed freely.
 - **Automatic round assignment is proposed, never written — and only where the identifier earns
-  it** *(decided 2026-09-01, v0.11.0)*. Measured first: see TELEMETRY_NOTES → *The three link
-  identifiers*, over all 72 sessions in all 33 captures. Two rules came out of it, and both end in
-  a confirmation the user can decline rather than in a write.
+  it** *(decided 2026-09-01, shipped 2026-09-07, v0.11.0)*. Measured first: see TELEMETRY_NOTES →
+  *The three link identifiers*, over all 72 sessions in all 33 captures. Two rules came out of it,
+  and both end in a confirmation the user can decline rather than in a write. They live in
+  `ui/sessions/assignment.py` — Qt-free, with unit tests, because what to propose is a rule and
+  not a widget.
   - **Weekend propagation — every mode.** Assigning one session to `(season, round)` offers every
     other stored session sharing its `weekend_link_identifier` for the same round. Licensed by the
     data: all 13 weekends have exactly one `track_id`, and all 7 rounds assigned by hand in this
@@ -94,16 +96,68 @@ what would trigger revisiting it.
     `game_mode` 4 the game reports the weekend's own id in that field (8 of 8 weekends), so grouping
     by it is grouping by weekend and buys nothing. Where a career id does exist it can name the
     **season**, never the **round**: no identifier carries a round number, so the round still comes
-    from a track match against the calendar — and only when that track appears in it exactly once
-    (a sandbox calendar may legitimately repeat one; ambiguous means ask).
+    from a track match against the calendar.
   - **A slot with several attempts is never propagated.** Two attempts at one slot are
     indistinguishable in the telemetry (below), so proposing both would fill a slot twice and
     proposing one would be the silent choice this whole design refuses. Such a slot is left for the
-    user. In this database that holds back exactly one slot across the 11 stored weekends.
+    user — left *to* them, not withheld from them: the picker lists every attempt and each is
+    assignable by hand, and only the automatic offer stands back. In this database that holds back
+    exactly one slot across the 13 stored weekends (weekend `3602002284`'s Practice 2), re-measured
+    2026-09-07.
+
+    The slot is identified by `session_link_id`, not by `WeekendSlot`. A retry keeps the whole
+    identifier and changes only `session_uid` / `recorded_at`, so the link id is exact in all 72
+    measured sessions — while `weekend_slots` falls back to one slot per session on a row with no
+    stored `weekend_structure`, which would split a repeat attempt into two single-attempt slots
+    and silently defeat the rule that exists to catch it.
   - **Why not a silent write.** A wrong automatic assignment is worse than no automatic
     assignment: it is invisible, it survives into standings, and `set_calendar`'s locked-round rule
     then freezes the calendar around it. The proposal costs one click and makes the mistake
     impossible.
+  - **A repeated track is answered, not refused** *(revised 2026-09-07, superseding "only when
+    that track appears exactly once")*. A sandbox calendar may legitimately run one track several
+    times, and the original rule shrugged at exactly the calendar that needs the most help.
+    Instead the matching rounds are taken **in calendar order** and the first that does not already
+    hold a *different* weekend wins: Monza at rounds 2, 8 and 16 suggests 2, then 8 once 2 is
+    taken, then 16, and nothing once all three are. A round already holding **this session's own**
+    weekend is the answer rather than an obstacle — a round holds exactly one weekend, so the
+    weekend is the stronger evidence and it outranks the free-round scan. Safe because it is still
+    only a suggestion: it marks a row and sorts it first, and the user has to select it and press
+    Assign.
+
+    **Its reach is narrower than that reason suggests** *(checked 2026-09-10)*. Season inference
+    needs a career id, and Grand Prix (Solo) — `game_mode` 4 — reports the weekend's own id in that
+    field (5 of 5 weekends), so a sandbox calendar's *own* sessions never reach this rule; and a
+    career calendar cannot repeat a track (`domain/calendars`: fixed order, no duplicates). It fires
+    only for a career session filed in a Grand Prix or League season whose calendar repeats a track.
+    Dormant in practice, and kept because it is the right answer on the one path that reaches it.
+  - **Season inference marks the picker; it never opens a dialog of its own.** Weekend propagation
+    extends an assignment the user just made, so it can ask straight away. Season inference answers
+    "where does this session belong at all", and a dialog offering to write into rounds the user is
+    not looking at is precisely the invisible assignment this whole bullet refuses. So it marks
+    rows **suggested** in the picker for the round being filled and sorts them first; declining is
+    not pressing Assign.
+  - **The weekend proposal includes weekend-mates already in *another* round, and names the
+    moves.** Excluding them was drafted first and breaks the most useful bulk action there is —
+    re-filing a whole weekend from round 3 to round 4 would propagate nothing, leaving a session at
+    a time. It is also the literal rule above. The safety is in the wording: the confirmation
+    counts them, names the round and season they leave, and defaults to **No** whenever a Yes would
+    take something out of another round (it defaults to Yes when the proposal only adds). The only
+    exclusions are therefore "already in this exact round" and the multi-attempt rule.
+  - **Measured on the way in 2026-09-07, checked live 2026-09-10 — season inference marks nothing
+    at rest, and the reason is not the obvious one.** Only the four career weekends carry a season
+    id at all, and the rule answers for their 28 sessions — but **every answer names the round that
+    session is already assigned to**, so with everything assigned no picker row is marked, across
+    all 96 rounds and both filter states. The one unassigned session it could otherwise reach
+    (`8448489651239998166`, which resolves cleanly to season 2 round 5) is the second attempt at
+    the single multi-attempt slot, and the rule above refuses it.
+
+    **The live check gave it its first real example.** With the Jeddah weekend (season 2, round 5)
+    unassigned by hand, the picker marked that weekend's sessions *suggested* for round 5 and left
+    both Practice 2 attempts unmarked — season inference and the multi-attempt refusal both behaving
+    as written, on real data. The **repeated-track rule** is still where Pending slot rows are: no
+    calendar here repeats a track, so it has **no live example** and its unit tests are the only
+    cover it has.
 - **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
   single recording often holds several attempts of the same session (a crash/restart, or a
   re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.
@@ -1391,8 +1445,11 @@ what would trigger revisiting it.
   - **The two overviews disagree on population by design, and it is visible.** The old page
     renders `rounds_with_results` — the sessions *assigned* to a round — while this one filters
     *stored* sessions by weekend, so an attempt nobody assigned is invisible there and shown here.
-    Measured: 64 stored / 48 assigned / 16 unassigned across 13 weekends, of which only 8 have any
-    assigned session. The one visible difference is weekend `3602002284` (season 2, round 5): 8
+    Measured 2026-09-06: 64 stored / 48 assigned / 16 unassigned across 13 weekends, of which only
+    8 have any assigned session. *(Re-measured 2026-09-07, after the Abu Dhabi weekend `845505695`
+    was assigned by hand: **64 stored / 52 assigned / 12 unassigned, 9 rounds populated**. The
+    figures move with use; the shape does not.)* The one visible difference is weekend
+    `3602002284` (season 2, round 5): 8
     stored, 7 assigned, so the old page renders 7 blocks and this one renders **8** — both
     attempts at Practice 2, `8448489651239998166` (11:59, unassigned) and `15062953857885398583`
     (12:07, assigned). That is the point rather than a regression: branch 5 cannot be retired
@@ -1429,6 +1486,40 @@ what would trigger revisiting it.
     hydrates every session in the season. The round's number and track come off `season.rounds`,
     its uids off `assignments_for_season`, and the weekend's sessions out of the single
     `list_sessions` the rows need anyway.
+- **The weekend-filtered overview is the writer of `season_assignments`** *(E1b, shipped
+  2026-09-07, v0.11.0)*. Assign, unassign and move all happen there, the round-centric page is
+  reached from nowhere, and branch 3's "Assign captures…" scaffold is gone from all four of its
+  sites. What may be *proposed* is `ui/sessions/assignment.py` (Qt-free, unit-tested, see →
+  Storage); the page asks the question and performs the writes.
+  - **A picker is how assignment reaches a round with no weekend.** The page resolves its weekend
+    from the sessions already assigned to the round, so a round with none has nothing to draw — 87
+    of this database's 96 rounds. `AssignDialog` lists *sessions* rather than a weekend precisely
+    so it works in that state, defaulting to the round's own track with a checkbox for the rest.
+    Both halves are carried over from the round-centric page's capture picker, which had them for
+    reasons that did not change: a track is the obvious thing a round and a recording share and it
+    cuts the list to a handful, and a session assigned elsewhere stays listed and marked because
+    picking it **moves** it — the repair for a misfiled weekend, which hiding it would make
+    unfindable.
+  - **One pick and one confirmation fill a round**, because the picker composes with the weekend
+    proposal: choose any session of the weekend, and the rest of it is offered immediately. That
+    is also why re-filing a weekend is done from the round it is moving *to* rather than by
+    unassigning the round it is in.
+  - **Unassigned rows are marked; assigned ones are not** *(the marker deferred from branch 3)*.
+    The page deliberately shows the weekend's *stored* sessions rather than the round's assigned
+    ones, so a card has to say which it is — but marking the ordinary case would put a note on 52
+    of this database's 64 rows. So only the exceptions carry one ("not assigned", or the round they
+    are in), and the action beside it says the same thing a second way: **Unassign**, **Assign**,
+    or **Move here**. `SessionCard` regained a parameter for it (`note`), which is the three lines
+    the branch-3 note said it would be.
+  - **Unassigning the round's last session empties the page, and that is left as it is.** The
+    round genuinely holds nothing then, and → *A round with nothing assigned has no weekend* is
+    already the rule. Remembering the last-resolved weekend so the cards stay on screen was
+    considered and dropped: it invents page state that contradicts the store, and the move flow
+    above never empties anything, so the trap is avoidable rather than routine.
+  - **`components.session_actions._season_phrase` became public** rather than growing a second
+    "name a season" for the markers. Same reason `_box` became `panels.panel_box` in branch 3: a
+    second hand-rolled version is the drift this work exists to prevent, and `components/` is
+    already where a phrase lives that must not import a surface package.
 - **Pending and Skipped slot rows are the filtered overview's job, and they live in the rules
   module** *(decided 2026-09-01, v0.11.0)*. A filtered list of *stored* sessions cannot express a
   session that does not exist, so routing Seasons into Sessions would have silently dropped the one

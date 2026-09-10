@@ -20,6 +20,20 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
 ### Added
+- **Sessions are now assigned to a round from the Sessions page, and the app offers to fill in the
+  rest of the weekend.** Assigning, unassigning and moving a session all happen where the weekend
+  is shown: each session carries **Assign**, **Unassign** or **Move here** beside its name, and the
+  ones that are not in the round you are looking at say so, so an attempt you never assigned is
+  obvious at a glance. A round you have not put anything in yet has a **Assign sessions…** button
+  that lists your stored sessions — this round's track first, with a tick-box for the rest — and
+  says which of them are already in another round, because picking one of those *moves* it rather
+  than copying it.
+  **Assign one session and the app offers the rest of that weekend in one go**, so a whole race
+  weekend is normally one pick and one confirmation. It only ever offers; nothing is assigned until
+  you say yes, and the question spells out what it will do — including naming any round the
+  sessions would be moved out of. **A session you drove twice is never filled in automatically:**
+  nothing in the recording says which attempt counts, so the app says so and leaves that one to
+  you, with both attempts listed side by side to choose from.
 - **Opening a round now shows that whole weekend's sessions, on the Sessions page.** Double-clicking
   a round in a season's calendar used to open a page of its own; it now opens the sessions list
   filtered to that weekend, in the order the weekend actually ran — P1, P2, P3, qualifying, the
@@ -31,8 +45,7 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   so a weekend where you sat out Practice 3 reads as a decision rather than as a gap. Every attempt
   at a session appears, including ones you have not assigned to the round, so a session you drove
   twice shows both — told apart by the time you recorded them. Rounds you have not assigned anything
-  to yet say so, and point you at the **Assign captures…** button, which is still where assigning
-  happens for now.
+  to yet say so, and point you at the **Assign sessions…** button.
 - **League members are now named on the Sessions surface, not just on a season's weekend page.**
   If your league raced with online-name sharing switched off, the game captures every one of you as
   `Player` — so the sessions list and a session's own page could only ever show `Player`. They now

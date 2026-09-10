@@ -8,7 +8,13 @@ Navigation stays inside this widget, and inside the one application window, with
 each direction. Activating a round no longer opens the weekend page here: `weekend_requested` is
 re-emitted for the window, which routes it to the *Sessions* surface's weekend-filtered overview
 (E1d - the Sessions surface is where sessions belong). And `show_season` is how the window brings
-navigation the other way, back from there.
+navigation the other way, back from there - a season, never a round, since the Sessions surface now
+owns round assignment too.
+
+The round-centric `weekend` page below is **no longer reachable**. Nothing routes to it as of the
+session-centric assignment branch, and the retirement branch deletes it; it is left in place for
+exactly one branch rather than removed here, where the check that no caller remains belongs
+(PRIORITIES -> E1d).
 """
 
 from __future__ import annotations
@@ -41,7 +47,7 @@ class SeasonsView(QWidget):
         super().__init__(parent)
         self._season_rosters = SeasonRosterFiles()
         # A season another surface asked for, consumed by the next showEvent. See show_season.
-        self._pending: tuple[int, int | None] | None = None
+        self._pending: int | None = None
 
         self._overview = OverviewPage(season_store)
         self._create = CreatePage(season_store)
@@ -55,13 +61,12 @@ class SeasonsView(QWidget):
         self._create.season_requested.connect(self._show_detail)
         self._create.cancelled.connect(self._show_overview)
         self._detail.overview_requested.connect(self._show_overview)
-        # Straight back out to the window: the calendar's round opens the Sessions surface's
-        # weekend-filtered overview. The page below is still reachable, but only through
-        # ``show_season`` - the temporary "Assign captures..." hop, since it remains the one writer
-        # of ``season_assignments`` unit branch 4 (PRIORITIES -> E1d).
-        self._detail.weekend_requested.connect(self.weekend_requested)
         self._weekend.detail_requested.connect(self._show_detail)
         self._weekend.overview_requested.connect(self._show_overview)
+        # Straight back out to the window: the calendar's round opens the Sessions surface's
+        # weekend-filtered overview, which is now also where the round's sessions are assigned.
+        # Nothing reaches the page below any more - see the docstring.
+        self._detail.weekend_requested.connect(self.weekend_requested)
         self._weekend.sessions_changed.connect(self.sessions_changed)
         self._detail.edit_calendar_requested.connect(self._show_edit_calendar)
         self._edit_calendar.saved.connect(self._show_detail)
@@ -84,16 +89,12 @@ class SeasonsView(QWidget):
         super().showEvent(event)
         pending, self._pending = self._pending, None
         if pending is not None:
-            season_id, round_number = pending
-            if round_number is None:
-                self._show_detail(season_id)
-            else:
-                self._show_weekend(season_id, round_number)
+            self._show_detail(pending)
             return
         self._show_overview()
 
-    def show_season(self, season_id: int, round_number: int | None = None) -> None:
-        """Open a season from outside this surface - its detail page, or one round's weekend.
+    def show_season(self, season_id: int) -> None:
+        """Open one season's detail page from outside this surface.
 
         The order of the two halves is not ours to rely on: the window switches its stack to this
         widget and calls here, and a stack switch fires ``showEvent`` - which resets to the
@@ -102,17 +103,13 @@ class SeasonsView(QWidget):
         The stash is taken **only while this surface is hidden**, or it would outlive the request
         and hijack the user's next plain visit to Seasons.
 
-        ``round_number`` reaches the round-centric weekend page, which the calendar no longer
-        opens. It is still the only writer of ``season_assignments``, so the Sessions weekend
-        page hops here to assign; branch 4 moves that and this argument goes with it.
+        The one caller is the Sessions weekend page's back button, which wants the season. The
+        ``round_number`` this used to take existed only for that page's temporary hop back here to
+        assign, and went with it when assignment moved (PRIORITIES -> E1d).
         """
         if not self.isVisible():
-            self._pending = (int(season_id), 
-                             None if round_number is None else int(round_number))
-        if round_number is None:
-            self._show_detail(int(season_id))
-        else:
-            self._show_weekend(int(season_id), int(round_number))
+            self._pending = int(season_id)
+        self._show_detail(int(season_id))
 
     def refresh(self) -> None:
         """Re-query whatever page is showing."""

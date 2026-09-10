@@ -153,6 +153,32 @@ Charles,16,xxCL16xx
 A blank template (`roster_template.csv`) is included in the release zip, and can also be saved from
 **Help → Setup / Configuration → Save a blank template CSV…**.
 
+### Assigning sessions to a round
+
+A recorded session doesn't belong to a season until you say so. Open **Seasons → a season** and
+double-click a round: that opens the round's weekend on the **Sessions** page, which is where
+assigning happens.
+
+- **A round with nothing in it yet** says so and offers **Assign sessions…**. That lists your
+  stored sessions, starting with the ones recorded at this round's track — tick *Show sessions from
+  all tracks* if what you want isn't there. Pick one and press **Assign**.
+- **Then the app offers the rest of that weekend.** Sessions recorded in the same race weekend as
+  the one you just assigned are listed, and saying yes puts the whole weekend in the round. Saying
+  no changes nothing, and you can still assign them one at a time. So a normal weekend is one pick
+  and one confirmation.
+- **A session you drove twice is never filled in for you.** Nothing in the recording says which
+  attempt counts — only the time you recorded them tells them apart — so the app leaves that one to
+  you and says it has. Both attempts appear on the page; assign the one you mean.
+- **Once a round has sessions**, each one carries **Unassign** beside its name. Sessions from that
+  weekend you haven't assigned are shown too, marked *not assigned*, with an **Assign** button.
+- **A session that's in the wrong round** shows the round it's in, and **Move here** puts it in
+  this one instead. A session belongs to one round at a time, so moving it takes it out of the
+  other round. The easiest way to re-file a whole weekend is to open the round it should be in and
+  assign one of its sessions — the rest are then offered in one step.
+
+A session assigned to a round can't be deleted until it's unassigned; the app says so rather than
+quietly dropping its result from your standings.
+
 ### Changing a season's calendar
 
 Picked the wrong tracks, or the wrong order? Open the season and click **Edit calendar**. You can

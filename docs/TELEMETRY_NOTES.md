@@ -229,6 +229,64 @@ weekend" but **"there is no season identifier — the game reports the weekend's
 in 8 of 8 observed weekends. Grouping online sessions by `season_link_identifier` is grouping them
 by weekend, and nothing more.
 
+### What EA's specification says about these fields — and what it does not (checked 2026-09-10)
+
+Every UDP specification from F1 2021 to the F1 25 2026 Season Pack says exactly this, verbatim:
+
+    uint32  m_seasonLinkIdentifier;   // Identifier for season - persists across saves
+    uint32  m_weekendLinkIdentifier;  // Identifier for weekend - persists across saves
+    uint32  m_sessionLinkIdentifier;  // Identifier for session - persists across saves
+
+plus one line in F1 2021's "What has changed since last year?": *"Added identifiers into the
+session packet so data sets can be linked."* That is the whole of the official record. What it
+does give us is **"persists across saves"**: a career's ids survive saving and reloading the game.
+
+What it does **not** say — so this app has it from measurement alone, or not at all:
+
+- **nothing about online versus offline.** That the season field holds the weekend's own id in
+  Online Custom and `game_mode` 4 is the measurement above, not EA's wording.
+- **nothing about a season boundary.** That a new career season gets a new id is a reasonable
+  reading of "Identifier for season", but it is not stated, and no capture here crosses one.
+- **nothing about how the values are built.** The `+10` slot stride above, and the `+100` weekend
+  stride below, appear nowhere in it.
+
+It is also demonstrably **incomplete for exactly these modes**: the 2026 Season Pack's game-mode
+appendix does not list the `78` that Driver Career '26 actually reports, and the code for My Team
+on 2026 cars is in neither the appendix nor any capture here.
+
+Nothing outside the spec fills the gap. GitHub code search finds the field in about 30
+repositories covering F1 2021–2026 — all parsers, type definitions or copies of the spec, and the
+ones opened repeat EA's comment verbatim; none documents how the value behaves. EA's forum threads
+refuse automated fetches (HTTP 403), so a staff answer posted there, if one exists, was not read.
+
+### Hypothesis: a career's weekend id counts its rounds (one career, 2026-09-10)
+
+In the one career captured here, `(weekend_link_id - season_link_id) / 100` is the weekend's
+0-based position in the season, and it matches both the round each weekend was assigned to by hand
+and the calendar's track at that round — 5 of 5:
+
+| `weekend_link_id` | `(weekend - season) / 100` | track | assigned by hand | calendar round `index + 1` holds |
+|---|---|---|---|---|
+| 3602001884 | 0 | Melbourne | round 1 | Melbourne |
+| 3602001984 | 1 | Shanghai | round 2 | Shanghai |
+| 3602002084 | 2 | Suzuka | round 3 | Suzuka |
+| 3602002184 | 3 | Sakhir (Bahrain) | round 4 | Sakhir (Bahrain) |
+| 3602002284 | 4 | Jeddah | round 5 | Jeddah |
+
+It is the slot index's encoding (`(session - weekend) / 10`) one level up. But it rests on **one
+career, one season, five weekends driven in order**, so it is a hypothesis and not a finding. If it
+holds, it names a career session's round without going through the track — and DECISIONS →
+Storage's "no identifier carries a round number" is wrong for careers. What would settle it
+(PRIORITIES → E1e):
+
+- **a skipped weekend** — simulate one mid-season, drive the next: does the index still equal the
+  calendar round, or does it count weekends *driven*?
+- **My Team on 2026 cars** — which `game_mode` it reports, and whether its ids behave the same.
+  One My Team career driven *drive a session, skip a weekend, drive a session* answers both.
+- **a season boundary** — not needed first. A carried-over id would put the index past the
+  calendar's end, so a rule that requires the index and the track to agree refuses the write; it
+  can simply be recorded when the first new-season capture arrives.
+
 ### The weekend id is a reliable grouping in every mode
 
 All **13 weekends have exactly one `track_id`**, and all 7 round assignments made by hand in this

@@ -14,11 +14,13 @@ from PySide6.QtWidgets import QMessageBox
 from ...pipeline import delete_session
 
 
-def _season_phrase(season) -> str:
+def season_phrase(season) -> str:
     """'Season 1' / 'Season 1 (“Wednesday League”)' - enough to go and find it.
 
     Deliberately not ``ui.seasons.labels.season_title``: ``components/`` must not depend on a
-    surface package, and a refusal only needs to *identify* the season, not title it.
+    surface package, and naming a season only needs to *identify* it, not title it. Shared rather
+    than private since the weekend page's assignment markers need a season for the same reason a
+    refusal does - one phrase so the two cannot drift.
     """
     if season is None:
         return "another season"
@@ -53,7 +55,7 @@ def confirm_and_delete(parent, session_uid: int, session_store, season_store,
             parent,
             "Session is assigned",
             f"This session is assigned to round {outcome.round_number} of "
-            f"{_season_phrase(season)}, so it was not deleted.\n\n"
+            f"{season_phrase(season)}, so it was not deleted.\n\n"
             "Unassign it from that round first, then delete it. Deleting it here would leave "
             "the round pointing at a session that no longer exists, and quietly drop its "
             "result from the standings.",

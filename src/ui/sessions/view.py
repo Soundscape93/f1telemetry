@@ -5,13 +5,13 @@ and wires their navigation signals to page switches. Pages never reference each 
 hop goes through a signal on this container. Session uids travel through the signals as ``str``
 because they are uint64 and an ``int`` signal would overflow.
 
-Four signals leave the surface entirely, and all four do so because the window owns what they need.
-``sessions_changed`` says "stored session data changed", so the other surfaces can drop what they
-derived from it - the same contract ``SeasonsView`` already has, joined rather than reinvented.
+Three signals leave the surface entirely, and all three do so because the window owns what they
+need. ``sessions_changed`` says "stored session data changed", so the other surfaces can drop what
+they derived from it - the same contract ``SeasonsView`` already has, joined rather than reinvented.
 ``restore_requested`` asks for a job, not a page: re-reading a capture is minutes of work on a
 worker thread, and the window owns workers (E1/E2 plan -> Restore orchestration). ``season_requested``
-and ``assign_requested`` come off the weekend page and land on the *Seasons* surface, which no page
-here may reference.
+comes off the weekend page's back button and lands on the *Seasons* surface, which no page here may
+reference.
 """
 from __future__ import annotations
 
@@ -33,9 +33,6 @@ class SessionsView(QWidget):
     lap_requested = Signal(str, int)        # session uid (str, uint64-safe), lap_number
     restore_requested = Signal(str, str)    # session uid (str, uint64-safe), content_hash ("" = pick)
     season_requested = Signal(int)          # the weekend page's back-button - a Seasons page
-    # TEMPORARY: assignment is still written only by the round-centric weekend page, so the
-    # weekend page here hops back to it (PRIORITIES -> E1d, branch 4 removes both ends).
-    assign_requested = Signal(int, int)        # season_id, round_number
 
     def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
                  event_store=None, parent=None):
@@ -69,9 +66,8 @@ class SessionsView(QWidget):
         # Not navigation within this surface: opening a lap's telemetry means leaving Sessions
         # entirely, which only the window can do (pages never reference sibling surfaces)
         self._detail.lap_requested.connect(self.lap_requested)
-        # The same rule, and the same reason, for the two hops back to Seasons.
+        # The same rule, and the same reason, for the hop back to Seasons.
         self._weekend.season_requested.connect(self.season_requested)
-        self._weekend.assign_requested.connect(self.assign_requested)
         # Same rule, different reason: the deleted page confirms and chooses the capture on the GUI
         # thread, then hands the work up. Pages don't own workers - the window does.
         self._deleted.restore_requested.connect(self.restore_requested)
