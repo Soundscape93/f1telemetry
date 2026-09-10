@@ -223,12 +223,10 @@ class MainWindow(QMainWindow):
         # Same rule, the other direction: a lap row on the Session detail page opens the lap's
         # telemetry, which lives on a diffrent surface. Only the window owns both.
         self._sessions_view.lap_requested.connect(self._show_lap)
-        # The same rule for the three hops between Seasons and Sessions: activating a round
-        # opens that weekend on the Sessions surface (E1d), and the weekend page there comes back
-        # for the season, or for the round-centric page that still writes the assignments.
+        # The same rule for the two hops between Seasons and Sessions: activating a round opens
+        # that weekend on the Sessions surface (E1d), and its back button returns to the season.
         self._seasons_view.weekend_requested.connect(self._show_weekend)
         self._sessions_view.season_requested.connect(self._show_season)
-        self._sessions_view.assign_requested.connect(self._show_round_assignments)
         # And a job rather than a page: the deleted-sessions manager asks, the window runs it.
         self._sessions_view.restore_requested.connect(self._on_restore_requested)
         self._stack.addWidget(self._laps_view)
@@ -414,17 +412,6 @@ class MainWindow(QMainWindow):
         """Switch to the Seasons surface and open one season, from the Sessions weekend page."""
         self._sidebar.setCurrentRow(_SECTIONS.index("Seasons"))
         self._seasons_view.show_season(season_id)
-
-    def _show_round_assignments(self, season_id: int, round_number: int) -> None:
-        """Hop back to the round-centric weekend page to assign captures. **Temporary.**
-
-        That page is still the only writer of ``season_assignments``, so the Sessions weekend
-        page carries a button that lands here rather than growing an assignment UI that the
-        session-centric assignment branch would immediately replace. That branch deletes this
-        method and the button together (PRIORITIES -> E1d).
-        """
-        self._sidebar.setCurrentRow(_SECTIONS.index("Seasons"))
-        self._seasons_view.show_season(season_id, round_number)
 
     # --- restoring a deleted session --------------------------------------------------------
 

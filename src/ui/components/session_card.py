@@ -76,11 +76,16 @@ class SessionCard(QFrame):
     toggled = Signal(bool)     # fold/unfold, so the page can remember
 
     def __init__(self, session, *, title: str, label: str,
-                 name_of=lambda entry: entry.driver_name,
+                 name_of=lambda entry: entry.driver_name, note: str = "",
                  actions: Sequence[CardAction] = (), expanded: bool = False,
                  parent=None) -> None:
         """Build the card. ``label`` is the slot label the summary row's "Session" field shows,
-        which is not always the "title" - the plain overview's title also carries the track."""
+        which is not always the "title" - the plain overview's title also carries the track.
+        
+        ``note`` is a muted aside beside the title, for something true of this card *on this page*
+        rather than of the session: the weekend page marks the rows it has not assigned to the
+        round it is showing. Empty on the plain overview, where every card means the same thing.
+        """
         super().__init__(parent)
         vbox = QVBoxLayout(self)
         vbox.setContentsMargins(0, 0, 0, 0)
@@ -102,6 +107,9 @@ class SessionCard(QFrame):
         self._toggle.setToolTip("Click to fold, double-click to open the session")
         self._toggle.double_clicked.connect(self.activated.emit)
         header.addWidget(self._toggle)
+
+        if note:
+            header.addWidget(_muted(note))
 
         for action in actions:
             button = QToolButton()

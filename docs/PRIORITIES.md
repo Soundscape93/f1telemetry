@@ -482,7 +482,7 @@ the unit tests are its only cover.
 | 1 | `feature/league-names-in-sessions` | **E1c** — saved roster file only, no seeding — **done 2026-09-03** |
 | 2 | `fix/weekend-slots-second-attempt` | **A8** — a slot keeps every attempt |
 | 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing — **done 2026-09-06** |
-| 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal |
+| 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal — **done 2026-09-07** |
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes |
 | 6 | `feature/share-session-results` | **E19** — one session |
 | 7 | `feature/share-weekend-results` | **E19** — a whole weekend |
@@ -505,6 +505,18 @@ assigned session in weekend order with league names (1, 3); it shows Pending and
 it shows **every** attempt at a slot rather than one (2); it is the writer of `season_assignments`,
 covering assign, unassign and move, and `SeasonsView` no longer routes to the old page (4); and no
 caller of `seasons/weekend_page` remains, with the suite green.
+
+**Four of the five are now true — branch 4 closed #4 on 2026-09-07.** Assign, unassign and move all
+live on the weekend-filtered page, the automatic proposal landed with them, and the scaffold is gone
+from all four sites. What branch 5 inherits is exactly the fifth: `seasons/weekend_page.py` and
+`SeasonsView._show_weekend` are **unreachable but still in the tree**, as planned, and the branch
+that deletes them is the one that checks no caller remains. `SeasonsView.show_season` already lost
+its `round_number` argument, so nothing outside that file can route to the page at all.
+
+**The scaffold is gone, as scheduled (2026-09-07).** All four sites went together — the button and
+its `assign_requested` signal on `ui/sessions/weekend_page.py`, the re-emit in `ui/sessions/view.py`,
+`MainWindow._show_round_assignments` and its connect, and `SeasonsView.show_season`'s `round_number`.
+No test referenced any of them, which is what made it a clean removal rather than a rewrite.
 
 **One deliberate scaffold, in branch 3 only.** Branch 3 re-routes the calendar's double-click to
 the new page while assignment still lives on the old one, so the new page carries a temporary
@@ -535,6 +547,50 @@ and returns a bare fallback slot for `15062953857885398583`. A Practice 2's labe
 on slot resolution, so that fallback is invisible — it would not be if the duplicate were a race on
 a sprint weekend, where the fallback loses `is_sprint_race` / `is_grand_prix` and the Grand Prix
 would read as a Sprint (invariant #5).
+
+**E1e — Automatic assignment for career sessions.** *Proposed 2026-09-10, after branch 4 shipped
+the proposal.* For Driver Career / My Team, assign later sessions automatically once the user has
+put one of the career's sessions in a season by hand — closer to how F1Laps treats an offline
+career. **Assessed as a good design and a separate branch**, not a tail on branch 4: it reverses
+DECISIONS → Storage's "proposed, never written" for one scoped case, which needs its own decision
+entry and review, and it lives in the pipeline rather than in the UI. It blocks none of branches
+5–7.
+
+**No new table.** "This career id belongs to this season" is already derivable from
+`season_assignments` joined to `sessions` on `season_link_id` — it is what
+`assignment._career_season` computes today. One source of truth, no migration and no re-ingest;
+unassigning everything drops the link, and a second season claiming the same id makes it
+ambiguous, which stops the automation for that id on its own.
+
+**It runs after ingest, for sessions stored for the first time by a fresh recording or an import —
+never inside `ingest_capture`, and never on a page reload.** `ingest_capture` is shared with
+`reingest_all` and restore, so a `PIPELINE_VERSION` bump would re-assign sessions the user had
+unassigned on purpose — the resurrection problem tombstones solved for deletes. A reload would make
+looking at a page a write. **Every automatic write is reported** once the recording stops, which is
+the answer to the "invisible" objection that made the branch-4 proposal a proposal.
+
+**A write needs all of:** a measured career `game_mode` (an allow-list — `78` only, today); an app
+season in Driver Career or My Team mode; exactly one season holding a session with that career id;
+the round from the track (unique by construction, since a career calendar cannot repeat one)
+**agreeing** with the round from the weekend-id index (TELEMETRY_NOTES → *Hypothesis: a career's
+weekend id counts its rounds*); a round that is empty or already holds this weekend; a slot with one
+attempt; and a session stored for the first time. Anything short of that falls back to today's
+proposal, picker and *suggested* marks. One case the branch must decide explicitly: an attempt
+arriving in a *later* capture than the one already assigned at its slot — assign neither, unassign
+nothing, and report it.
+
+**What it waits on — checked against EA's specification first (2026-09-10).** The spec says only
+"Identifier for season - persists across saves" (TELEMETRY_NOTES → *What EA's specification says
+about these fields*): nothing about offline modes, nothing about a season boundary, nothing about
+the stride. So two quick in-game measurements stay necessary, and one My Team career driven *drive
+a session, skip a weekend, drive a session* covers both: **My Team on 2026 cars** (its `game_mode`
+is unknown, and without it the allow-list cannot recognise a My Team session at all) and **a
+skipped weekend** (does the index still equal the calendar round?). **A season boundary does not
+need measuring first** — a carried-over id would put the index past the calendar's end, so
+requiring index and track to agree refuses the write; it can be recorded when the first
+new-season capture arrives. If the measurements have to wait, the conservative version needs none
+of them: after ingest, *propose* with the same guards — one confirmation per recording, and no
+decision reversed.
 
 **E19 — Share a result to the league chat.** *New 2026-09-01, requested alongside the Seasons
 rework.* Today a result reaches the league WhatsApp group as a hand-taken screenshot. The
@@ -635,7 +691,8 @@ costs users a second one.
 | B5 | Reconstructed-race points: accept / edit / store (Option 3) | ROADMAP → Storage & analysis |
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **in progress** — **branch 1 of v0.11.0**; saved roster file only, no seeding (DECISIONS → UI); the E1d note in P2 |
-| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **in progress** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
+| E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **done 2026-09-07** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
+| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **proposed 2026-09-10** — follow-up to branch 4, outside v0.11.0's seven branches; waits on one quick in-game measurement session (My Team '26, one skipped weekend); the E1e note in P2 |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
