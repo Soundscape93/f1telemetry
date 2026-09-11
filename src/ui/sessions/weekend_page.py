@@ -218,8 +218,8 @@ class WeekendPage(QWidget):
         """Every assigned session uid mapped to the round it sits in, across all seasons.
 
         One query per season rather than one per row: a card has to know not just *whether* a
-        session is assigned but *where*, and ``assigned_uids`` only answers the first half while
-        ``assignment_for`` per card is a query per card. Note the pair order coming back from
+        session is assigned, but *where*, down to the round. ``assigned_seasons`` drops the round,
+        and ``assignment_for`` per card is a query per card. Note the pair oder coming back from
         ``assignments_for_season`` is ``(round_number, session_uid)``, which reads backwards.
         """
         placements: dict[int, tuple[int, int]] = {}

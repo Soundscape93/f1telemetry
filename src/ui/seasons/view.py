@@ -29,7 +29,7 @@ from .overview_page import OverviewPage
 
 
 class SeasonsView(QWidget):
-    """Browse / create / inspect seasons and drill into weekends, all in one widget."""
+    """Browse / create / inspect seasons and edit their calendars, all in one widget."""
 
     # Navigation, but off this surface: a round opens the Sessions surface filtered to its
     # weekend, and only the window can switch surfaces (E1d).
