@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
         """Switch to the Sessions surface and open one round's weekend, from a season's calendar.
 
         E1d's routing: a round opens the Sessions overview filtered to that weekend. Both halves
-        are needed for the same reason they are in :meth:`_show_lap` - ``SessionsView.show_weekend`` 
+        are needed for the same reason they are in :meth:`_show_lap` - ``SessionsView.show_weekend``
         only moves that surface's *own* stack, so without the sidebar row changing the window stays
         on Seasons.
         """

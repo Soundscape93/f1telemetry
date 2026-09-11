@@ -1,8 +1,8 @@
 """Titled section panels - the framed box every page's content sits in.
 
-Shared because two surfaces build the same thing: the session detail page's four boxes, and the
+Shared because two pages build the same thing: the session detail page's four boxes, and the
 weekend-filtered overview's race classifications. Sharing by *builder* is how this repo already
-does it (``build_classification_table``, called by three unrelated pages), and it is what keeps a
+does it (``build_classification_table``, which the same two pages call), and it is what keeps a
 second caller from growing a second definition of what a titled box looks like.
 """
 from __future__ import annotations

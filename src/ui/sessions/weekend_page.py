@@ -1,10 +1,10 @@
 """The weekend-filtered sessions overview - one round's weekend, in running order.
 
-Where a season's calendar lands (E1d): double-clicking a round opens *this*, not the round-centric
-weekend page, because the Sessions surface is where sessions belong. Same spine as the plain
-overview - ``weekend_view`` decides the rows, ``components.session_card`` renders them - and only
-the chrome differs: a round header instead of a heading, no deleted-sessions button and no filter
-(the weekend *is* the filter), and cards open on their summary line rather than folded shut.
+Where a season's calendar lands (E1d): double-clicking a round opens *this*, because the Sessions
+surface is where sessions belong. Same spine as the plain overview - ``weekend_view`` decides the
+rows, ``components.session_card`` renders them - and only the chrome differs: a round header
+instead of a heading, no deleted-sessions button and no filter (the weekend *is* the filter), and
+cards open on their summary line rather than folded shut.
 
 **The full classifications are the weekend's races', not every card's.** A table per session was
 height without an answer - a nine-session sprint weekend opened as nine full grids, and what a
@@ -13,11 +13,11 @@ beneath the cards in the half-width boxes the session detail page reads in. Whic
 one is ``weekend_view.race_rows``, not a rule this page keeps.
 
 **It shows the weekend's stored sessions, not the round's assigned ones**, and the two are
-deliberately not the same list. The round-centric page renders ``rounds_with_results``, so an
-attempt nobody assigned is invisible there; filtering stored sessions by ``weekend_link_id`` shows
-every attempt at every slot, which is what a weekend actually held. In this database that is one
-visible row: weekend `3602002284` stores eight sessions and has seven assigned, the odd one out
-being the first of Practice 2's two attempts.
+deliberately not the same list. The round's assigned sessions (``rounds_with_results``) leave out
+an attempt nobody assigned; filtering stored sessions by ``weekend_link_id`` shows every attempt at
+every slot, which is what a weekend actually held. In this database that is one visible row:
+weekend `3602002284` stores eight sessions and has seven assigned, the odd one out being the first
+of Practice 2's two attempts.
 
 **So a card has to say which of the two it is.** Only the rows that are *not* in this round carry a
 note - "not assigned", or the round they are in - because the ordinary row is the assigned one and
@@ -25,8 +25,8 @@ marking 52 of this database's 64 rows would be noise. The action beside it says 
 second way: Unassign, Assign, or Move here.
 
 **This page is the writer of ``season_assignments``** (E1b): assign, unassign and move all happen
-here, and the round-centric page is no longer reached from anywhere. A write is followed by the
-automatic proposal - the rest of the weekend the assigned session belongs to, offered once and
+here, and nowhere else since the round-centric page was retired (v0.11.0). A write is followed by
+the automatic proposal - the rest of the weekend the assigned session belongs to, offered once and
 declinable (DECISIONS -> Storage). What may be proposed is ``assignment``, a Qt-free rule module
 with its own tests; this page only asks the question and performs the writes.
 
@@ -39,7 +39,7 @@ rather than a weekend precisely so it works when there is nothing to draw.
 
 **Names resolve through ``SessionRosters``**, which gates on ``ROSTER_SEASON_MODES`` - LEAGUE
 *and* GRAND_PRIX. This database's only real league is a GRAND_PRIX season, so this page names it
-where the round-centric page it replaces shows raw captured names (DECISIONS -> UI, E1c).
+where the round-centric page it replaced showed raw captured names (DECISIONS -> UI, E1c).
 """
 from __future__ import annotations
 
@@ -102,12 +102,12 @@ class WeekendPage(QWidget):
         self._season_id: int | None = None
         self._round_number: int | None = None
 
-        # Read once per paint and used by the card markers, the way the round-centric page keeps
-        # its ``_assigned_uids``. Not a cache: ``reload`` rebuilds both every time.
+        # Read once per paint and used by the card markers. Not a cache: ``reload`` rebuilds both
+        # every time.
         self._placed: dict[int, tuple[int, int]] = {}  # session_uid -> (season_id, round_number)
         self._seasons_by_id: dict[int, Season] = {}
 
-        # Cards open by default here, unlike the plain overview: this page replaces one that
+        # Cards open by default here, unlike the plain overview: this page replaced one that
         # showed every classification table outright, and a weekend is a handful of sessions
         # rather than the whole store. So the page remembers what was *closed*.
         self._collapsed: set[str] = set()
@@ -219,7 +219,7 @@ class WeekendPage(QWidget):
 
         One query per season rather than one per row: a card has to know not just *whether* a
         session is assigned, but *where*, down to the round. ``assigned_seasons`` drops the round,
-        and ``assignment_for`` per card is a query per card. Note the pair oder coming back from
+        and ``assignment_for`` per card is a query per card. Note the pair order coming back from
         ``assignments_for_season`` is ``(round_number, session_uid)``, which reads backwards.
         """
         placements: dict[int, tuple[int, int]] = {}
