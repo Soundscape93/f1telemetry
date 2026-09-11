@@ -38,7 +38,7 @@ from pathlib import Path
 
 
 class Align(Enum):
-    """Where a column's cell sit - numbers right and names left, the way the page's tables read."""
+    """Where a column's cells sit - numbers right and names left, the way the page's tables read."""
 
     LEFT = "left"
     CENTER = "center"
@@ -70,7 +70,7 @@ class IconKind(Enum):
 class Icon:
     """A picture in a cell, by reference.
     
-    One the renderer cannot resolve - a nationality with no bundled flag - is left out, excactly as
+    One the renderer cannot resolve - a nationality with no bundled flag - is left out, exactly as
     the page leaves the flag out of its cell.
     """
 
@@ -117,7 +117,7 @@ class Table:
     title: str = ""
     note: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for index, row in enumerate(self.rows):
             if len(row) != len(self.columns):
                 raise ValueError(
@@ -177,9 +177,9 @@ def _cells(block: Block) -> tuple[Cell, ...]:
     return block.lines
 
 
-# --- file names ------–-------------------------------------------------------------------------------
+# --- file names ------------------------------------------------------------------------------------
 
-# What Windows refuses in a file name, plus the control range. Replaced by a separater rather than
+# What Windows refuses in a file name, plus the control range. Replaced by a separator rather than
 # dropped, so "Sakhir/Bahrain" cannot run its two words together.
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _SEPARATORS = re.compile(r"[\s_]+")
