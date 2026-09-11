@@ -1,20 +1,19 @@
 """The seasons surface - a thin container coordinating the four seasons pages.
 
-`SeasonsView` owns a `QStackedWidget` of page widgets (overview, create, detail, weekend) and
-wires their navigation signals to page switches. Each page owns its own widgets, route state, and
-data operations; this coordinator only decides which page is visible.
+`SeasonsView` owns a `QStackedWidget` of page widgets (overview, create, detail, edit calendar)
+and wires their navigation signals to page switches. Each page owns its own widgets, route state,
+and data operations; this coordinator only decides which page is visible.
 
 Navigation stays inside this widget, and inside the one application window, with one exception in
-each direction. Activating a round no longer opens the weekend page here: `weekend_requested` is
-re-emitted for the window, which routes it to the *Sessions* surface's weekend-filtered overview
-(E1d - the Sessions surface is where sessions belong). And `show_season` is how the window brings
-navigation the other way, back from there - a season, never a round, since the Sessions surface now
-owns round assignment too.
+each direction. Activating a round opens no page here: `weekend_requested` is re-emitted for the
+window, which routes it to the *Sessions* surface's weekend-filtered overview (E1d - the Sessions
+surface is where sessions belong). And `show_season` is how the window brings navigation the other
+way, back from there - a season, never a round, since the Sessions surface now owns round
+assignment too.
 
-The round-centric `weekend` page below is **no longer reachable**. Nothing routes to it as of the
-session-centric assignment branch, and the retirement branch deletes it; it is left in place for
-exactly one branch rather than removed here, where the check that no caller remains belongs
-(PRIORITIES -> E1d).
+Nothing on this surface deletes a stored session - the round-centric weekend page that did was
+retired in v0.11.0 (PRIORITIES -> E1d) - so every signal it emits is navigation. Telling the other
+surfaces that stored sessions changed is ``SessionsView.sessions_changed``'s job alone.
 """
 
 from __future__ import annotations
@@ -27,22 +26,16 @@ from .create_page import CreatePage
 from .detail_page import DetailPage
 from .edit_calendar_page import EditCalendarPage
 from .overview_page import OverviewPage
-from .weekend_page import WeekendPage
 
 
 class SeasonsView(QWidget):
     """Browse / create / inspect seasons and drill into weekends, all in one widget."""
 
-    # Not a navigation signal: it says "stored session data changed", so the window can tell the
-    # other surfaces to drop what they derived from it. Re-emitted from the weekend page, which
-    # owns the only delete action that removes stored sessions.
-    sessions_changed = Signal()
     # Navigation, but off this surface: a round opens the Sessions surface filtered to its
     # weekend, and only the window can switch surfaces (E1d).
     weekend_requested = Signal(int, int)  # season_id, round_number
 
-    def __init__(self, season_store, session_store, lap_store=None,
-                 event_store=None, parent=None) -> None:
+    def __init__(self, season_store, session_store, parent=None) -> None:
         """Initialize the seasons view and wire page navigation signals."""
         super().__init__(parent)
         self._season_rosters = SeasonRosterFiles()
@@ -52,8 +45,6 @@ class SeasonsView(QWidget):
         self._overview = OverviewPage(season_store)
         self._create = CreatePage(season_store)
         self._detail = DetailPage(season_store, session_store, self._season_rosters)
-        self._weekend = WeekendPage(season_store, session_store, self._season_rosters,
-                                     lap_store=lap_store, event_store=event_store)
         self._edit_calendar = EditCalendarPage(season_store)
 
         self._overview.create_requested.connect(self._show_create)
@@ -61,20 +52,15 @@ class SeasonsView(QWidget):
         self._create.season_requested.connect(self._show_detail)
         self._create.cancelled.connect(self._show_overview)
         self._detail.overview_requested.connect(self._show_overview)
-        self._weekend.detail_requested.connect(self._show_detail)
-        self._weekend.overview_requested.connect(self._show_overview)
         # Straight back out to the window: the calendar's round opens the Sessions surface's
         # weekend-filtered overview, which is now also where the round's sessions are assigned.
-        # Nothing reaches the page below any more - see the docstring.
         self._detail.weekend_requested.connect(self.weekend_requested)
-        self._weekend.sessions_changed.connect(self.sessions_changed)
         self._detail.edit_calendar_requested.connect(self._show_edit_calendar)
         self._edit_calendar.saved.connect(self._show_detail)
         self._edit_calendar.cancelled.connect(self._show_detail)
 
         self._stack = QStackedWidget()
-        for page in (self._overview, self._create, self._detail, self._weekend,
-                     self._edit_calendar):
+        for page in (self._overview, self._create, self._detail, self._edit_calendar):
             self._stack.addWidget(page)
 
         layout = QVBoxLayout(self)
@@ -114,9 +100,7 @@ class SeasonsView(QWidget):
     def refresh(self) -> None:
         """Re-query whatever page is showing."""
         page = self._stack.currentWidget()
-        if page is self._weekend:
-            self._weekend.reload()
-        elif page is self._detail:
+        if page is self._detail:
             self._detail.reload()
         elif page is self._overview:
             self._overview.reload()
@@ -141,11 +125,6 @@ class SeasonsView(QWidget):
         """Switch to the detail page for a season."""
         self._stack.setCurrentWidget(self._detail)
         self._detail.load(season_id)
-
-    def _show_weekend(self, season_id: int, round_number: int) -> None:
-        """Switch to the weekend page for a given season/round."""
-        self._stack.setCurrentWidget(self._weekend)
-        self._weekend.load(season_id, round_number)
 
     def _show_edit_calendar(self, season_id: int) -> None:
         """Switch to the calendar editor for a season."""
