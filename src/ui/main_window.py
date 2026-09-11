@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
         # canonical track-map cache has to go the same way it does after an ingest. Only the
         # Sessions surface deletes sessions, and its pages can't reach the laps view themselves -
         # pages never reference siblings (PRIORITIES -> A1).
-        self._seasons_view.sessions_changed.connect(self._laps_view.invalidate_caches)
+        self._sessions_view.sessions_changed.connect(self._laps_view.invalidate_caches)
         # Same rule, the other direction: a lap row on the Session detail page opens the lap's
         # telemetry, which lives on a different surface. Only the window owns both.
         self._sessions_view.lap_requested.connect(self._show_lap)
