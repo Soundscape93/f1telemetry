@@ -175,24 +175,12 @@ class SeasonStore:
             )
             return None if row is None else (row.season_id, row.round_number)
 
-    def assigned_uids(self) -> set[int]:
-        """Every session uid placed in a round, across **all** seasons.
-        
-        The capture picker needs this rather than on season's assignments: a session assigned
-        to another round - or another season entirely - must still be assigned when it turns
-        up in a diffrent round's candidate list. That it did not is the bug this fixes.
-        """
-        with self._Session() as db:
-            return {int(uid) for uid in
-                    db.scalars(select(SeasonAssignmentRow.session_uid)).all()}
-
     def assigned_seasons(self) -> dict[int, int]:
         """Every assigned session uid mapped to the season it is placed in - one query.
 
         The bulk form of :meth:`assignment_for`, and the round number is dropped on purpose: the
         Sessions surface asks "whose roster names this session?" for a whole list at once, and
-        calling ``assignment_for`` per card would be one query per row. ``assigned_uids`` cannot
-        answer it either - it says which uids are placed, never whose they are.
+        calling ``assignment_for`` per card would be one query per row.
 
         A session has at most one assignment (``assign_session`` moves rather than duplicates), so
         the uid keys cannot collide.
@@ -202,7 +190,7 @@ class SeasonStore:
                 select(SeasonAssignmentRow.session_uid, SeasonAssignmentRow.season_id)
             ).all()
             return {int(uid): season_id for uid, season_id in rows}
-                        
+    
     # --- combined read -----------------------------------------------------------------
 
     def rounds_with_results(self, season_id: int, session_store) -> list[RoundResults]:

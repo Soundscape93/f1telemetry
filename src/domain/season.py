@@ -256,9 +256,10 @@ def slot_for_session(
     """Resolve one session's slot within its weekend, given the pool of known sessions.
 
     ``siblings`` is any collection that includes the session's weekend-mates (e.g. the whole
-    store); it's filtered to the matching ``weekend_link_id``. Lets an isolated view - the
-    capture picker - label a Sprint Race correctly. Falls back to a bare slot if the session's
-    weekend can't be reconstructed.
+    store); it's filtered to the matching ``weekend_link_id``. Lets a view that shows a session
+    outside its weekend - the session detail page, the plain Sessions overview, a Laps card -
+    label a Sprint Race correctly. Falls back to a bare slot if the session's weekend can't be
+    reconstructed.
 
     The slot returned is the *position*, so it carries every attempt at it and not only the one
     asked about; callers want it for ``is_sprint_race`` / ``is_grand_prix``, which belong to the

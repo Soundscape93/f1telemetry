@@ -1,19 +1,28 @@
-"""The sessions surface - a thin container coordinating the overview, detail and deleted pages.
+"""The sessions surface - a thin container over the overview, weekend, detail and deleted pages.
 
 Mirrors ``ui/laps/view.py`` and ``ui/seasons/view.py``: owns a ``QStackedWidget`` of the pages
 and wires their navigation signals to page switches. Pages never reference each other - every
 hop goes through a signal on this container. Session uids travel through the signals as ``str``
 because they are uint64 and an ``int`` signal would overflow.
 
-Three signals leave the surface entirely, and all three do so because the window owns what they
+**Session detail goes back to the page that opened it** - the plain overview, or the weekend a
+season's calendar opened. The detail page only asks to go back (``back_requested``); this container
+remembers which page asked for the session and returns there, re-queried. One level, not a history:
+the surface is never deeper than that, and leaving it still resets it on the next visit, so a stale
+opener is never replayed.
+
+Four signals leave the surface entirely, and all four do so because the window owns what they
 need. ``sessions_changed`` says "stored session data changed", so the other surfaces can drop what
-they derived from it - the same contract ``SeasonsView`` already has, joined rather than reinvented.
-``restore_requested`` asks for a job, not a page: re-reading a capture is minutes of work on a
-worker thread, and the window owns workers (E1/E2 plan -> Restore orchestration). ``season_requested``
-comes off the weekend page's back button and lands on the *Seasons* surface, which no page here may
-reference.
+they derived from it - and every page that deletes a session is on this surface, so it is the only
+signal of its kind the window receives. ``lap_requested`` opens a lap's telemetry, which lives on
+the Laps surface. ``restore_requested`` asks for a job, not a page: re-reading a capture is minutes
+of work on a worker thread, and the window owns workers (E1/E2 plan -> Restore orchestration).
+``season_requested`` comes off the weekend page's back button and lands on the *Seasons* surface,
+which no page here may reference.
 """
 from __future__ import annotations
+
+from functools import partial
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
@@ -54,12 +63,15 @@ class SessionsView(QWidget):
         self._weekend = WeekendPage(session_store, season_store, 
                                      lap_store=lap_store, event_store=event_store, 
                                      rosters=self._rosters)
+        # Where Session detail's back button returns: the page that opened it. Every way into
+        # detail sets it - ``_show_detail`` requires the page - so a stale one is never read.
+        self._detail_origin: QWidget = self._overview
 
-        self._overview.session_requested.connect(self._show_detail)
+        self._overview.session_requested.connect(partial(self._show_detail, origin=self._overview))
         self._overview.deleted_requested.connect(self._show_deleted)
-        self._detail.overview_requested.connect(self._show_overview)
+        self._detail.back_requested.connect(self._leave_detail)
         self._deleted.overview_requested.connect(self._show_overview)
-        self._weekend.session_requested.connect(self._show_detail)
+        self._weekend.session_requested.connect(partial(self._show_detail, origin=self._weekend))
         self._overview.sessions_changed.connect(self.sessions_changed)
         self._detail.sessions_changed.connect(self.sessions_changed)
         self._weekend.sessions_changed.connect(self.sessions_changed)
@@ -118,9 +130,21 @@ class SessionsView(QWidget):
         self._stack.setCurrentWidget(self._overview)
         self._overview.reload()
 
-    def _show_detail(self, session_uid: str) -> None:
+    def _show_detail(self, session_uid: str, origin: QWidget) -> None:
+        self._detail_origin = origin
         self._stack.setCurrentWidget(self._detail)
         self._detail.load(session_uid)
+
+    def _leave_detail(self) -> None:
+        """Leave Session detail for the page that opened it, re-queried.
+
+        The back button, a delete and a session that vanished underneath the page all come here.
+        The weekend page still holds its own season, round and fold state, so going back to it
+        needs nothing else remembered.
+        """
+        origin = self._detail_origin
+        self._stack.setCurrentWidget(origin)
+        origin.reload()
 
     def _show_deleted(self) -> None:
         self._stack.setCurrentWidget(self._deleted)
@@ -129,4 +153,3 @@ class SessionsView(QWidget):
     def _show_weekend(self, season_id: int, round_number: int) -> None:
         self._stack.setCurrentWidget(self._weekend)
         self._weekend.load(season_id, round_number)
-

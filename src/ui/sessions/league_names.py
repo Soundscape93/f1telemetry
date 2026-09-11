@@ -2,8 +2,8 @@
 unit-testable the way ``race_control`` and ``lap_context`` are.
 
 The Sessions surface shows the *captured* name, so a league member who raced with online-name
-sharing turned off reads as ``Player``. The weekend page has always resolved that through a roster;
-this gives Sessions the same answer without giving it the weekend page's cost.
+sharing turned off reads as ``Player``. The round-centric weekend page, retired in v0.11.0,
+resolved that through a roster; this gives Sessions the same answer without that page's cost.
 
 **It decides the roster, not the name.** ``components.display_name_fn`` is already the one name
 resolver in the app - the captured alias wins whenever it is not generic, and the roster is only a

@@ -211,7 +211,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 |---|---|---|---|
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
-| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export | `minor` | no — and **must not cause one** |
+| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export, and — tentatively — **E1e** | `minor` | no — and **must not cause one** |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
 and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
@@ -285,7 +285,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
-| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **in progress** — the whole of **v0.11.0**; planned 2026-09-01 as **seven branches**, order forced (see the note below); E1d itself is branch 5 | **`E1_E2_PLAN.md`**; the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **done 2026-09-11** — **branch 5 of v0.11.0**: the round-centric page is deleted with no caller left, and Session detail now goes back to the page that opened it. Planned 2026-09-01 as the whole of v0.11.0 in **seven branches**, order forced (see the note below); v0.11.0 continues with **E19** (branches 6–7) and, tentatively, **E1e** (branch 8) | **`E1_E2_PLAN.md`**; the note below |
 | A8 | `weekend_slots` silently drops a re-driven session's second attempt | **in progress** — **branch 2 of v0.11.0**; found 2026-09-01 while measuring the link identifiers, reproduced against the live database | the note below; DECISIONS → UI |
 | E19 | Share / export a session's result to the league chat | **in progress** — **branches 6 and 7 of v0.11.0**; new 2026-09-01; PNG the app renders itself, format prototyped before it was chosen | DECISIONS → UI; the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
@@ -483,9 +483,10 @@ the unit tests are its only cover.
 | 2 | `fix/weekend-slots-second-attempt` | **A8** — a slot keeps every attempt |
 | 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing — **done 2026-09-06** |
 | 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal — **done 2026-09-07** |
-| 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes |
+| 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes — **done 2026-09-11** |
 | 6 | `feature/share-session-results` | **E19** — one session |
 | 7 | `feature/share-weekend-results` | **E19** — a whole weekend |
+| 8 | *tentative — named when it is planned* | **E1e** — added 2026-09-11; only if both in-game measurements are in before release, v0.12.0 otherwise (the E1e note below) |
 
 **Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
 (the bulk uid → season read), `ui/sessions/league_names.py` (`SessionRosters`, Qt-free) and the
@@ -512,6 +513,24 @@ from all four sites. What branch 5 inherits is exactly the fifth: `seasons/weeke
 `SeasonsView._show_weekend` are **unreachable but still in the tree**, as planned, and the branch
 that deletes them is the one that checks no caller remains. `SeasonsView.show_season` already lost
 its `round_number` argument, so nothing outside that file can route to the page at all.
+
+**All five are true — branch 5 closed the fifth on 2026-09-11.** `ui/seasons/weekend_page.py` is
+deleted, and "no caller remains" was checked by **import resolution rather than grep**: every
+import in `src/` and `test/`, relative ones included, was resolved to its module, and none lands on
+the old page, where `staging` had exactly one importer (`seasons/view.py`). What existed only to
+serve the page went with it — `SeasonsView`'s `_weekend`, `_show_weekend`, `sessions_changed` and
+its `lap_store` / `event_store`, and `SeasonStore.assigned_uids()`, whose only caller was the
+picker (DECISIONS → UI) — and its present-tense mentions across `src/` were reworded. Suite
+**949 / 942 / 7 skipped**, from 950 / 943 / 7: the one test removed was `assigned_uids`'s.
+
+**The suite cannot see this branch break, and it proved it.** It never builds `MainWindow`, so the
+real window was also driven offscreen against a copy of the database — 26 checks, six of which
+fail on `staging`. And one intermediate commit kept the old `SeasonsView.sessions_changed` connect
+while dropping its replacement: the suite passed it at 950 OK, and the window would not start.
+
+**Found on the way and fixed in the same branch:** opened from the weekend-filtered page, Session
+detail's back button dropped the user on the full Sessions list. It now goes back to the page that
+opened it — one level, not a history (DECISIONS → UI).
 
 **The scaffold is gone, as scheduled (2026-09-07).** All four sites went together — the button and
 its `assign_requested` signal on `ui/sessions/weekend_page.py`, the re-emit in `ui/sessions/view.py`,
@@ -555,6 +574,11 @@ career. **Assessed as a good design and a separate branch**, not a tail on branc
 DECISIONS → Storage's "proposed, never written" for one scoped case, which needs its own decision
 entry and review, and it lives in the pipeline rather than in the UI. It blocks none of branches
 5–7.
+
+**Scheduled 2026-09-11 as a tentative branch 8 of v0.11.0:** the last v0.11.0 item if both in-game
+measurements below (My Team on 2026 cars; a skipped weekend) are in before the release, v0.12.0
+otherwise. Like the rest of v0.11.0 it **must not cause a re-ingest** — and by design it needs
+none: no new table, no migration (next paragraph).
 
 **No new table.** "This career id belongs to this season" is already derivable from
 `season_assignments` joined to `sessions` on `season_link_id` — it is what
@@ -692,7 +716,7 @@ costs users a second one.
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **in progress** — **branch 1 of v0.11.0**; saved roster file only, no seeding (DECISIONS → UI); the E1d note in P2 |
 | E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **done 2026-09-07** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
-| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **proposed 2026-09-10** — follow-up to branch 4, outside v0.11.0's seven branches; waits on one quick in-game measurement session (My Team '26, one skipped weekend); the E1e note in P2 |
+| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **proposed 2026-09-10; tentative branch 8 of v0.11.0 (2026-09-11)** — the last v0.11.0 item if both in-game measurements (My Team on 2026 cars; a skipped weekend) are in before release, v0.12.0 otherwise; must not cause a re-ingest; the E1e note in P2 |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |

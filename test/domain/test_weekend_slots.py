@@ -117,7 +117,7 @@ class SprintWeekendTest(unittest.TestCase):
         self.assertEqual(gp.session_link_id, _WEEKEND_LINK + 10 * 8)
 
     def test_slot_for_session_labels_the_sprint_in_isolation(self):
-        """The capture picker resolves a lone sprint capture via its weekend-mates."""
+        """A lone sprint capture resolves via its weekend-mates, as the detail page needs."""
         sessions = sprint_weekend(include_gp=True)
         sprint = next(s for s in sessions if s.session_link_id == _WEEKEND_LINK + 10 * 4)
         slot = slot_for_session(sprint, sessions)

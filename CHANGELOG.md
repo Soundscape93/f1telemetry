@@ -38,7 +38,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   a round in a season's calendar used to open a page of its own; it now opens the sessions list
   filtered to that weekend, in the order the weekend actually ran — P1, P2, P3, qualifying, the
   race — each showing the same summary line the sessions list gives you (winner, fastest lap,
-  weather), and double-clicking one opens the session itself. The **full classifications sit
+  weather), and double-clicking one opens the session itself, whose **← Sessions** button brings
+  you back to that weekend rather than to the full list. The **full classifications sit
   underneath, one per race**: a sprint weekend shows the Sprint Race beside the Grand Prix, and a
   normal weekend shows the race on its own. A session the game expected but you never recorded still has its place
   in the list, marked **Skipped** if you drove past it or *not captured yet* if it is still to come,
