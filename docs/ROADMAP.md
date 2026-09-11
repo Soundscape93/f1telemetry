@@ -126,11 +126,13 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   circuit outline, and two stacked charts — tyre life and observed lap time, per *run*, on a shared
   stint-relative axis, each run labelled with its **corrected average pace** (the laps into and out
   of the pits and a race's standing start are left out of the mean, because they are the stop and
-  the start rather than the run). Deleting a session is here too, through the same guard the weekend
-  picker uses, and `Deleted sessions (N)` opens the manager below. Still likely to gain a
-  *session-centric* assignment path (complement to the round-centric one in the weekend view). The
-  per-session detail renders its classification via `ui/components/classification_table.py` (the
-  same builder the weekend view uses).
+  the start rather than the run). Deleting a session is here too, through the shared guard
+  (`components.session_actions.confirm_and_delete`), and `Deleted sessions (N)` opens the manager
+  below. **Session-centric assignment shipped in v0.11.0** (E1b): a season's round opens the
+  weekend-filtered overview, which assigns, unassigns and moves sessions, and the round-centric
+  weekend page is retired (E1d). The per-session detail renders its classification via
+  `ui/components/classification_table.py` — the same builder the weekend-filtered overview uses for
+  its races.
 
   *Known limitation of the charts:* a run boundary is read from the tyres where it can be (wear
   reset, compound change, age reset) and otherwise inferred from the **fuel load**, since a lap
@@ -140,13 +142,14 @@ mechanics they demonstrated are documented in PACKAGING → Versioning & dev rel
   **E17**, which needs a `PIPELINE_VERSION` bump and a re-ingest. A second limitation, deliberate:
   the pace axis is a fixed 8-second window, so in a **mixed dry/wet session** an intermediate or wet
   run can sit entirely on the clipped top edge (Shanghai P1 does). Widening it automatically would
-  undo what the fixed window is for, so an opt-in expansion is banked rather than built. *Groundwork:* `SessionStore.delete(uid)` exists and is wired to a right-click
-  "Delete from database…" on the weekend capture picker (unassigned captures only — an assigned
-  session must be unassigned first, which drops it back into the picker). Delete removes the
-  stored results only; the `captures/` recording is kept, so a re-ingest recreates the session.
-  This action moves to (or is shared with) the Sessions surface when it lands. The picker shows
-  a "Recorded" column stamped from the capture's real packet time (see DECISIONS → `recorded_at`),
-  so repeated attempts of one session are separable by time — the keeper is the latest.
+  undo what the fixed window is for, so an opt-in expansion is banked rather than built. *Groundwork (history):* `SessionStore.delete(uid)` was first wired to a right-click
+  "Delete from database…" on the weekend capture picker (unassigned captures only). Delete removes
+  the stored results only; the `captures/` recording is kept, and a tombstone keeps a re-ingest
+  from bringing the session back — Restore is the deliberate way to. The action moved to the
+  Sessions surface with E1, and the picker went with the round-centric page in v0.11.0. The
+  "Recorded" column it introduced, stamped from the capture's real packet time (see DECISIONS →
+  `recorded_at`), is still what tells repeated attempts of one session apart — and the app never
+  picks which attempt counts (A8).
 - **Deleted-sessions manager** — **shipped** (E2, E1 branches 3-4), on the Sessions surface: a
   table of every tombstoned session (session / track / recorded / deleted / the capture that holds
   it) with two actions, as row buttons and as a right-click.

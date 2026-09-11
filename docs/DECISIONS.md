@@ -1520,6 +1520,51 @@ what would trigger revisiting it.
     "name a season" for the markers. Same reason `_box` became `panels.panel_box` in branch 3: a
     second hand-rolled version is the drift this work exists to prevent, and `components/` is
     already where a phrase lives that must not import a surface package.
+- **The round-centric weekend page is retired, and the weekend page stays on the Sessions surface**
+  *(E1d, branch 5, 2026-09-11, v0.11.0)*. `ui/seasons/weekend_page.py` is deleted, with everything
+  that existed only to serve it: `SeasonsView`'s page, `_show_weekend` and `refresh()` branch, its
+  `sessions_changed` (the page was the only emitter), and the `lap_store` / `event_store` it took
+  only to build the page.
+  - **"No caller remains" was checked by import resolution, not grep.** Every import in `src/` and
+    `test/`, relative ones included, was resolved to its module, and none lands on the old page;
+    `staging` had exactly one importer, `seasons/view.py`. A grep cannot settle it here: two
+    packages have a `weekend_page` module, so `from .weekend_page import WeekendPage` means a
+    different file depending on where it is written.
+  - **The Seasons surface now deletes nothing, and every signal it emits is navigation.** Every
+    page that deletes a session is a Sessions page, all three through `confirm_and_delete` (core
+    invariant #4), so `SessionsView.sessions_changed` is the only signal that clears the Laps
+    track-map cache.
+  - **Dead store API goes with its caller.** `SeasonStore.assigned_uids()` existed for the capture
+    picker, and its docstring said so. `assigned_seasons()` answers a superset in one query, the
+    weekend page reads placements per season because it needs the round, and E1e derives a
+    career's season from placements and `season_link_id`, not from a bare uid set. Keeping it would
+    have left a method whose stated reason is false; re-adding it is a four-line query — the same
+    call as `SessionCard`'s unused `detail` in branch 3. Its test's "spans every season" property
+    is already asserted for `assigned_seasons`.
+  - **The page and its rules stay on the Sessions surface** *(decided 2026-09-10)*. With the old
+    page gone, `ui/sessions/weekend_page.py`, `weekend_view.py`, `assignment.py` and
+    `assign_dialog.py` could have moved to `ui/seasons/`. They did not, for three reasons.
+    `weekend_view` also serves the plain Sessions overview (`overview_rows`), so moving it would
+    make Sessions import from Seasons. The page's cards open and delete *sessions* through
+    `SessionsView`, and "open this session" is free inside that surface and a cross-surface signal
+    outside it. And moving the new page onto the old page's path would have made the retirement
+    show up in git as an edit rather than a deletion.
+  - **Session detail goes back to the page that opened it**, rather than always to the plain
+    Sessions overview. Opened from the weekend-filtered page, the back button used to drop the
+    user on the full list. `SessionsView` now remembers the opener (`_detail_origin`), set through
+    a required argument of `_show_detail` so no way into detail can forget to say where it came
+    from, and the detail page's `overview_requested` became `back_requested`: the page no longer
+    knows where back lands, and pages never reference each other. The button, a delete and a
+    session vanishing underneath the page all go to the opener. The weekend page keeps its own
+    season, round and fold state, so returning to it is a `reload()` and needs nothing else
+    remembered.
+    - **One level, not a history.** The surface is never deeper than overview-or-weekend →
+      detail, and leaving it still resets it on the next visit, so a stale opener is never
+      replayed and the pending-weekend stash is untouched. Inferring the opener from whichever page
+      was showing was rejected as implicit: a later way into detail would silently inherit it.
+    - **The button still reads "← Sessions".** Both destinations are Sessions pages, and a label
+      naming the opener would mean telling the page where it came from — the thing the container
+      keeps from it.
 - **Pending and Skipped slot rows are the filtered overview's job, and they live in the rules
   module** *(decided 2026-09-01, v0.11.0)*. A filtered list of *stored* sessions cannot express a
   session that does not exist, so routing Seasons into Sessions would have silently dropped the one
@@ -1560,6 +1605,8 @@ what would trigger revisiting it.
     that league raw captured names today, while the season detail page beside it resolves them.
     E1c uses `ROSTER_SEASON_MODES`, which incidentally means the Sessions surface will read
     *better* than the weekend page it is due to replace, rather than merely catching up.
+    *(Settled 2026-09-11 by deletion: the round-centric page went in branch 5, so
+    `ROSTER_SEASON_MODES` is the only roster-mode test left.)*
 - **Share exports a PNG the app renders itself, not a screenshot of its own widgets** *(E19,
   decided 2026-09-01)*. The output is pasted into a league WhatsApp chat, replacing hand-taken
   screenshots.
