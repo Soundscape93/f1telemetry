@@ -92,7 +92,7 @@ def document_html(document: ShareDocument, icons: Container[Icon] = ()) -> str:
     Qt-free: it only builds a string. ``icons`` are the icons the caller holds an image for; any
     other is left out of its cell, so the default draws none.
     """
-    parts = [f'<html><body style="color:{_INK}; font-size:{_BODY_PX}px',
+    parts = [f'<html><body style="color:{_INK}; font-size:{_BODY_PX}px">',
              _paragraph(_escape(document.title),
                         f"font-size:{_TITLE_PX}px; font-weight:{_STRONG_WEIGHT}; margin:0")]
     if document.meta:
@@ -104,7 +104,7 @@ def document_html(document: ShareDocument, icons: Container[Icon] = ()) -> str:
                                 f"font-size:{_SMALL_PX}px; color:{_MUTED}; margin-top:24px",
                                 align="right"))
     parts.append("</body></html>")
-    return "\n".join(parts)
+    return "".join(parts)
 
 
 def render_document(document: ShareDocument) -> QImage:

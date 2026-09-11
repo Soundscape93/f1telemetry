@@ -8,6 +8,7 @@ icons appear.
 """
 import re
 import unittest
+from html.parser import HTMLParser
 
 from f1telemetry.src.ui.components.share_document import (
     Align,
@@ -42,13 +43,40 @@ def _cells(html: str) -> list[str]:
     return re.findall(r"<td[^>]*>(.*?)</td>", html)
 
 
+class _Paragraphs(HTMLParser):
+    """Every paragraph's style and text as a parser reads the markup - not as a pattern finds it.
+
+    A tag left unclosed turns the next tag into part of its attribute: the paragraph after it is
+    still in the string, so a substring test passes, but a parser - and Qt - never sees it open.
+    """
+
+    def __init__(self, html: str):
+        super().__init__()
+        self.paragraphs: list[tuple[str, str]] = []
+        self._open: list[str] | None = None
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "p":
+            self._open = [dict(attrs).get("style", ""), ""]
+
+    def handle_data(self, data):
+        if self._open is not None:
+            self._open[1] += data
+
+    def handle_endtag(self, tag):
+        if tag == "p" and self._open is not None:
+            self.paragraphs.append((self._open[0], self._open[1]))
+            self._open = None
+
+
 class ThemeTests(unittest.TestCase):
     """Nothing in the markup is left for the app's theme to decide."""
 
     def test_the_body_states_its_own_text_colour(self):
         """What a plain cell falls back to - and in a dark-themed app, the palette's text colour
         would otherwise be near-white on white paper."""
-        self.assertIn('<body style="color:#1f2328;', _html())
+        self.assertIn('<body style="color:#1f2328; font-size:17px">', _html())
 
     def test_each_tone_is_written_as_its_colour(self):
         tones = {Tone.MUTED: "#59636e", Tone.FASTEST: "#0969da", Tone.GAIN: "#1a7f37",
@@ -181,6 +209,15 @@ class LayoutTests(unittest.TestCase):
         self.assertIn('<p align="right" style="font-size:13px; color:#59636e; margin-top:24px">'
                       "f1telemetry v0.11.0</p>", html)
 
+    def test_the_markup_parses_into_the_paragraphs_it_was_built_from(self):
+        """Read by a parser, so a tag left unclosed - which swallows the next paragraph's own style
+        and drew the title at body size - fails here and not only on screen."""
+        self.assertEqual(
+            [("font-size:32px; font-weight:600; margin:0", "Shanghai — Sprint Race"),
+             ("color:#59636e; margin-top:6px; margin-bottom:0", "Season 1 · Round 2"),
+             ("font-size:13px; color:#59636e; margin-top:24px", "f1telemetry v0.11.0")],
+            _Paragraphs(_html(meta="Season 1 · Round 2", footer="f1telemetry v0.11.0")).paragraphs)
+
     def test_an_absent_meta_line_or_footer_leaves_no_empty_paragraph(self):
         self.assertEqual(1, _html().count("<p"))            # the title alone
 
@@ -192,7 +229,6 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(1 + 6 + 1 + 4, html.count("<tr"))
         self.assertEqual(6, html.count("<img"))             # a flag in every driver's cell...
         self.assertEqual(5, len(set(re.findall(r'<img src="([^"]+)"', html))))   # ...two share one
-
 
 if __name__ == "__main__":
     unittest.main()
