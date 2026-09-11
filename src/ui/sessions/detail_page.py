@@ -115,11 +115,11 @@ _FUEL_CAVEAT = ("Observed lap times, not tyre performance: the car sheds roughly
 class DetailPage(QWidget):
     """One captured session: what it was, where it came from, and how it finished."""
 
-    overview_requested = Signal()
+    back_requested = Signal()           # to whichever page opened this one - the container knows
     sessions_changed = Signal()
     lap_requested = Signal(str, int)  # session_uid (str, uint64-safe), lap_number
 
-    def __init__(self, session_store, season_store, capture_store=None, lap_store=None, 
+    def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
                  event_store=None, rosters=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
@@ -137,7 +137,7 @@ class DetailPage(QWidget):
 
         header = QHBoxLayout()
         back = QPushButton("← Sessions")
-        back.clicked.connect(self.overview_requested.emit)
+        back.clicked.connect(self.back_requested.emit)
         self._title = QLabel()
         apply_heading(self._title, size_px=20)
         header.addWidget(back)
@@ -180,14 +180,14 @@ class DetailPage(QWidget):
         self.reload()
 
     def reload(self) -> None:
-        """Re-query the session and rebuild; leave for the overview if it has vanished."""
+        """Re-query the session and rebuild; go back if it has vanished."""
         clear_layout(self._body)
         # Re-read the assignments and roster files for this paint: assigning a session on the
         # Seasons surface, or hand-editing a roster JSON, has to show up without a restart.
         self._rosters.invalidate()
         session, slot = self._current()
         if session is None:
-            self.overview_requested.emit()      # deleted underneath us, or a re-ingest dropped it
+            self.back_requested.emit()      # deleted underneath us, or a re-ingest dropped it
             return
 
         label = slot_label(slot.session_type, slot.is_sprint_race)
@@ -203,8 +203,8 @@ class DetailPage(QWidget):
         # which shares its session_type with the Grand Prix (core invariant #5).
         analysis = analyse_session(laps, standing_start=is_race(slot.session_type))
 
-        # Read once for the page: the classification0s grid badges and the Race control box are
-        # two readings of the same rows, and two queries could not disagree bt would still be two.
+        # Read once for the page: the classification's grid badges and the Race control box are
+        # two readings of the same rows, and two queries could not disagree but would still be two.
         penalties = self._stored_penalties(session)
 
         # The passes are read once too, and only the details grid reads them: the Race control box
@@ -578,7 +578,7 @@ class DetailPage(QWidget):
                                   lap_store=self._laps, event_store=self._events):
             return
         self.sessions_changed.emit()
-        self.overview_requested.emit()
+        self.back_requested.emit()
 
 
 def _row(left: QWidget, right: QWidget, max_height: int | None = None) -> QWidget:
