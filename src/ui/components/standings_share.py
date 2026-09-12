@@ -137,7 +137,7 @@ def _constructor_table(constructors) -> Table:
 def _through(rounds, through: int | None) -> tuple:
     """The rounds the standings are taken over: everything, or everything up to and including N."""
     if through is None:
-        return rounds
+        return tuple(rounds)
     return tuple(round for round in rounds if round.round_number <= through)
 
 
