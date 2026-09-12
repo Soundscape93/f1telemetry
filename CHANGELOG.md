@@ -47,6 +47,21 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   at a session appears, including ones you have not assigned to the round, so a session you drove
   twice shows both — told apart by the time you recorded them. Rounds you have not assigned anything
   to yet say so, and point you at the **Assign sessions…** button.
+- **A session's result can now be shared as an image, straight into the league chat.** Open a
+  session and use **Share ▾** beside **Delete...**: **Copy image** puts a PNG on the clipboard to
+  paste into WhatsApp or Discord with no file involved, and **Save image…** writes it to disk if
+  you'd rather keep it. The image is drawn by the app rather than screenshotted, so it carries the
+  **whole** Race control list — the box on the page is height-capped and scrolls, so a screenshot
+  cut off the penalties the message exists to carry — and it looks the same whoever opens it: a
+  fixed light layout 1080 pixels wide, regardless of whether you run Windows in light or dark mode.
+  It holds the session's own facts (fastest lap, race distance, weather, track and air temperature),
+  the full final classification and every penalty with what it was for, and it names the season and
+  round the session is assigned to. Two things the page shows by alternating a cell get a **column
+  of their own**, because a still image cannot alternate: a race's penalties (**PEN**) and a
+  qualifying session's **GRID PENALTY**, each appearing only when someone actually has one. A
+  reconstructed classification says so in as many words, since its only sign on the page — muted
+  points — is easy to miss in a photo. Saving twice never overwrites: the second offers `-2`, and
+  files go to a new `exports` folder beside your captures and logs.
 - **League members are now named on the Sessions surface, not just on a season's weekend page.**
   If your league raced with online-name sharing switched off, the game captures every one of you as
   `Player` — so the sessions list and a session's own page could only ever show `Player`. They now
@@ -70,7 +85,14 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
 
 **Re-ingest needed: no**
 
-**Known issues:** None
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
 
 ## v0.10.0 — 2026-09-01
 

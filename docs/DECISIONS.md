@@ -1620,6 +1620,14 @@ what would trigger revisiting it.
     database (Shanghai, 22 drivers, 11 penalty rows): `QTextDocument` → `QImage` → PNG gives
     1080 × 1290 px at 168 KB. 1080 px keeps text legible after WhatsApp re-encodes a photo, and
     1:1.19 is a near-square that reads on a phone rather than a tall strip.
+    - **Re-measured on the shipped renderer (2026-09-12): that session is 1080 × 1547 at 269 KB.**
+      The prototype pre-dated the header facts block, the `PEN` and position-change columns and the
+      22 px tyre icons, so it under-measured. Across all 64 sessions in this database the shipped
+      renderer produces 1080 px wide, median height 1158, **none over 1600**, largest 269 KB.
+      **Confirmed through WhatsApp** (Android, sent and read on a phone): 1080 × 1551 arrived
+      1080 × 1551 at 338 KB, 1080 × 1386 arrived unchanged at 295 KB — so nothing was re-scaled.
+      The 1600 px standard-quality cap is neither confirmed nor ruled out by that, since both were
+      already under it; it stays the height budget because staying under it costs nothing.
   - **No new dependency, and no packaging change.** `QTextDocument`, `QImage` and `QPdfWriter` are
     all in `QtGui`; the bundle excludes `QtPdf`/`QtPdfWidgets`, which are the *reader* modules and
     are not needed. Verified working with those exclusions in place.
@@ -1632,6 +1640,72 @@ what would trigger revisiting it.
     unreadable, and one file per session is what a league admin posts anyway — one message each.
   - **Every string the export decides is Qt-free and unit-tested** (`share_document.py`), with a
     thin painter over it (`share_image.py`), the same split as `race_control.py`.
+  - **Scope changed 2026-09-11, before any code: branch 7 is a weekend *plus the standings as of
+    that round*, and the season page gains standings on their own.** A weekend result without the
+    table it moved is half the message. That is not an addition to branch 7 so much as a constraint
+    on branch 6: a share model shaped around a classification would have to be reopened for a
+    standings table, on the branch least able to afford it.
+    - **So branch 6 builds the shared machinery and proves it on one session.** The document model,
+      the renderer and the delivery are **surface-neutral** — they name no session, no weekend and
+      no season — and branch 7 reuses them unchanged. `share_document.py` and `share_image.py` live
+      in `components/`, not in `sessions/`, precisely because branch 7's standings builder is a
+      Seasons-side caller and `components/` must not import a surface package.
+    - **Proved, not asserted:** `test_share_document.py` builds a standings-shaped document out of
+      real `StandingRow` / `ConstructorRow` objects and renders it, so the model is known to carry
+      standings **without shipping a standings export** in branch 6. The same fixture is shared with
+      `test_share_image.py`.
+    - The **per-session builder** (`sessions/session_share.py`) is the surface-specific half, and
+      is the only part branch 7 replaces rather than reuses.
+  - **`QTextDocument`, not hand-rolled `QPainter` calls.** The decision that matters: with a
+    `QPainter` the layout is a sequence of side effects that only a rendered image can be asked
+    about, so the suite could assert nothing without a `QApplication`. With `QTextDocument` the
+    renderer's every decision is first a **string** (`document_html`, Qt-free), which the Qt-free
+    suite asserts directly, and only then pixels. Column widths, wrapping and pagination come free.
+  - **The image is not a copy of the page, and where it differs it differs deliberately.** The page
+    flips a penalised finisher's TIME cell to its penalty badge and back, and a qualifying car's GAP
+    cell to its grid penalty; a still image cannot flip, so each becomes a column — `PEN`,
+    `GRID PENALTY` — added **only when some row fills it**, so an ordinary session is not widened by
+    an empty column. The position-change triangle takes its own narrow column, because a cell has
+    one colour and the triangle's is not the position's. A **reconstructed** classification says so
+    under its title: the page's only sign of it is points muted to `~8`, which does not survive being
+    photographed. And the header facts are the **session's** (fastest lap, distance, weather,
+    temperatures), never the details grid's player-centric ones — a league result is not about
+    whoever exported it. Whatever was never captured is left out rather than printed as
+    "Not captured", which is noise in a chat.
+    - **That the rest agrees with the page is measured, not assumed.** The builder was cross-checked
+      cell by cell against `build_classification_table` over **all 64 sessions — 6,837 cells, 0
+      differences** (and 336 differences against a deliberately broken builder, so the check can
+      fail). 17 builder mutations and 7 renderer mutations were all caught.
+  - **Four rules the renderer had to learn, each paid for offscreen:**
+    - **A fixed light palette, applied twice.** Explicit colours in the HTML *and* a fixed
+      `QPalette` on the `QAbstractTextDocumentLayout.PaintContext`. Either alone leaves the app's
+      theme leaking into the file; with both, a dark application renders a byte-identical PNG.
+    - **Only resolved icons are emitted.** An `<img>` whose resource is missing paints Qt's
+      broken-image placeholder — measured as 335 ink pixels against 69 for the real flag — so an
+      icon that cannot be resolved is dropped rather than referenced.
+    - **An empty last cell swallows the next block's top margin**, closing the gap under a table.
+      Filling it with `&nbsp;` restores it (measured: 24.0 px against 24.0 px).
+    - **A full-width table lays out 0–2 px past the text width** — its column widths round to whole
+      pixels — so widening on `layout > WIDTH` produced 1081/1082 px images. The guard widens only
+      past `WIDTH - _MARGIN`, where an overshoot lands in the margin rather than off the image.
+  - **The suite stays Qt-free, and that is a constraint rather than a preference.** `test_crash`
+    asserts behaviour that only exists with **no** `QApplication` in the process, and unittest runs
+    every module in one process — so a single test that constructs one would break it. Everything
+    Qt-facing here (the renderer, `ShareControl`, the page wiring) is therefore covered by
+    **offscreen harnesses outside the repo**, not by the suite.
+    - **A lesson worth keeping from branch 6:** a regression that dropped the closing `">` of the
+      HTML `<body>` tag — rendering every title at body size and every image 20 px short — passed
+      the suite, because the assertions were substring-based. The fix was to assert the **whole**
+      opening tag and to add a parser-based test (`HTMLParser`) that fails on malformed markup.
+      Substring assertions about generated markup are worth distrusting.
+  - **`flags.flag_path()` was extracted rather than the SVG path re-derived.** The renderer needs a
+    file path where the app needs a `QIcon`; `flag_icon` now calls it, and its output is
+    byte-identical for all 89 icons.
+  - **Failure is said out loud, success is not.** A copy only counts as done when the clipboard
+    hands the image back — on Windows another program can hold the clipboard open, and the copy then
+    fails silently while the clipboard keeps its **previous** content, quite possibly an older image.
+    Success is a muted note beside the button that clears itself; failure is a message box, because
+    a result that never reached the chat is the failure that matters.
 
 ## Localization
 

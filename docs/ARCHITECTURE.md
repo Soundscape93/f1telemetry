@@ -189,7 +189,7 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   unstamped rather than crashing start-up.
 - Stores are context managers (dispose the engine on exit).
 - **Filesystem paths** — all *writable* data (DB, `captures/`, `lap_traces/`, `rosters/`, `logs/`,
-  `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
+  `exports/`, `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
   the single path authority: `data_root()` is the CWD in dev (unchanged) and a per-user dir when
   frozen, with `F1TELEMETRY_DATA_DIR` overriding both; `resource_path()` is `_MEIPASS`-aware. The
   app entry points (`MainWindow`, `IngestWorker`, `SeasonRosterFiles`) route through it; callers
@@ -255,6 +255,23 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `toggled` and the page remembers, because the two pages remember opposite things (which cards
   were opened vs which were closed). Shared as a widget rather than a base class — see
   DECISIONS → UI.
+  **The share/export trio (E19)** is the `car_status.py` / `car_status_graphic.py` split again, and
+  lives here rather than under a surface because branch 7's standings export is a Seasons-side
+  caller and `components/` must not import a surface package. `share_document.py` (**Qt-free**) is
+  the document *model* every export builds — `ShareDocument(title, name, meta, blocks, footer)` over
+  `Table` (columns with alignment and wrapping, per-cell `Tone` and `strong`, icons by reference
+  rather than by pixmap), `Facts` and `Notes` — plus the file-name convention `file_stem(*parts)`
+  and `unique_path(folder, stem)`, which yields `stem`, `stem-2`, … so a save never silently
+  overwrites and a whole weekend can land in one folder. It is deliberately general enough for a
+  standings table, which its tests assert from real `StandingRow` / `ConstructorRow` objects.
+  `share_image.py` renders one: `document_html(document, icons)` is **Qt-free**, so the renderer's
+  every decision is a string the suite can assert before it is ever pixels, and `render_document`
+  paints it to a 1080 px `QImage` under a **fixed light palette** — set both in the HTML and on the
+  `PaintContext`, so the app's theme never reaches the file. `share_control.py` is the delivery:
+  `copy_image` (verified by reading the clipboard back), `save_image` (a `QSaveFile` write into
+  `paths.exports_dir()`) and `ShareControl`, a "Share ▾" tool button that asks a **callable** for
+  its document when clicked, so a page hosting it keeps no state and a later export adds a menu
+  entry rather than a second control. See DECISIONS → UI.
   `panels.py` holds `panel_box(title, content, fill=, scroll=)` — the titled, lightly framed
   section every page's content sits in. It was the session detail page's private `_box` until the
   weekend page needed the same half-width classification boxes; promoting it rather than copying
@@ -367,6 +384,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   round from a track match against that season's calendar — or `None` where they say nothing) and
   `picker_rows` (the picker's rows: suggestions first, then the unassigned, then whole weekends
   newest first). Every rule is asserted without a `QApplication` (DECISIONS → Storage).
+  **`session_share.py`** (Qt-free) turns one session into a `components.share_document`
+  `ShareDocument` — the surface-specific half of E19, and the only part branch 7 replaces rather
+  than reuses. It arranges the page's own helpers and re-derives nothing: `slot_label` for the
+  title, `race_control`'s rows and note for the penalties, and the `formatting` helper
+  `build_classification_table` calls for each cell. Where a still image cannot do what the page
+  does by alternating a cell, it says so in the open instead — `PEN` and `GRID PENALTY` become
+  columns, present only when a row fills one. Every string it decides is unit-tested, and the whole
+  table was cross-checked cell by cell against the page's own over every session in the database.
   **`assign_dialog.py`** (`AssignDialog`) is the picker behind "Assign sessions…", and the only
   way into a round with no weekend: it lists stored *sessions* rather than a weekend, defaults to
   the round's own track with a checkbox for the rest, and keeps a session assigned elsewhere listed
@@ -384,7 +409,14 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `tyre_stints.stint_average_ms`'s exclusions and the pace tooltips are then the same judgement
   rather than three that have to agree. Stored lap context (E17) is believed where present, and the
   older fuel / stint-shape inference is the fallback for laps ingested before it —
-  `Lap.has_lap_context` is the only test. `deleted_page.py` is the deleted-sessions manager (E2): a table over
+  `Lap.has_lap_context` is the only test. It is also E19's first caller: the source row carries a
+  `components.ShareControl` beside **Delete...**, handed `_share_document` — the page owns no image
+  and no file, only a callable that re-reads the session and builds `session_share.session_document`
+  from the same helpers `reload` paints with. `_placement` is the one thing the store alone cannot
+  supply, naming the season and round the image's meta line carries. Driver names deliberately come
+  from the roster cache **as the last paint left it** rather than from a fresh read, so the image
+  and the table above it can never name a driver differently.
+  `deleted_page.py` is the deleted-sessions manager (E2): a table over
   `SessionStore.deleted_sessions()`, with Restore and Forget as row buttons and as a context menu.
   It reads `pipeline.restorable_captures` for both its capture column and its chooser — the same
   list `restore_session` resolves through, so what it offers and what the restore accepts cannot

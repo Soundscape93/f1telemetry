@@ -287,7 +287,8 @@ re-run under WAL on 2026-08-05 and passes.
 | E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **done 2026-09-11** — **branch 5 of v0.11.0**: the round-centric page is deleted with no caller left, and Session detail now goes back to the page that opened it. Planned 2026-09-01 as the whole of v0.11.0 in **seven branches**, order forced (see the note below); v0.11.0 continues with **E19** (branches 6–7) and, tentatively, **E1e** (branch 8) | **`E1_E2_PLAN.md`**; the note below |
 | A8 | `weekend_slots` silently drops a re-driven session's second attempt | **in progress** — **branch 2 of v0.11.0**; found 2026-09-01 while measuring the link identifiers, reproduced against the live database | the note below; DECISIONS → UI |
-| E19 | Share / export a session's result to the league chat | **in progress** — **branches 6 and 7 of v0.11.0**; new 2026-09-01; PNG the app renders itself, format prototyped before it was chosen | DECISIONS → UI; the note below |
+| E19 | Share / export a session's result to the league chat | **in progress** — **branch 6 done 2026-09-12** (the shared model, renderer and delivery, plus Session detail's **Share ▾**); **branch 7** is the weekend **and the standings as of that round**. New 2026-09-01; PNG the app renders itself, format prototyped before it was chosen, scope changed 2026-09-11 | DECISIONS → UI; the note below |
+| E20 | Season page restructure — calendar \| results matrix \| standings, with the detail area below | **proposed 2026-09-11**, not scheduled — surfaced by E19's scope change: sharing standings needs them readable on the season page first. **After branch 7**, its own release (v0.12.0 or later) | the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
@@ -484,8 +485,8 @@ the unit tests are its only cover.
 | 3 | `feature/weekend-filtered-sessions` | the rules module, the shared card, the new page, the routing — **done 2026-09-06** |
 | 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal — **done 2026-09-07** |
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes — **done 2026-09-11** |
-| 6 | `feature/share-session-results` | **E19** — one session |
-| 7 | `feature/share-weekend-results` | **E19** — a whole weekend |
+| 6 | `feature/share-session-results` | **E19** — the shared document model, renderer and delivery, proved on **one session** — **done 2026-09-12** |
+| 7 | `feature/share-weekend-results` | **E19** — a whole weekend **plus the standings as of that round**, and standings on their own from the season page; reuses branch 6's machinery unchanged |
 | 8 | *tentative — named when it is planned* | **E1e** — added 2026-09-11; only if both in-game measurements are in before release, v0.12.0 otherwise (the E1e note below) |
 
 **Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
@@ -629,6 +630,33 @@ per-session PNGs in one folder, not a new renderer.
 with no new dependency and no packaging change. A screenshot of the app's own widgets was rejected
 on a measurement, not a preference — the Race control box is height-capped and scrolls, so a
 capture cuts off the very penalty list the export exists to carry. Full reasoning in DECISIONS → UI.
+
+**The scope changed 2026-09-11, before any code was written, and it changed branch 6 rather than
+branch 7.** A weekend result is half a message without the standings it moved, so branch 7 became
+*the weekend **and** the standings as of that round*, with standings alone shareable from the season
+page. Had branch 6 shaped its model around a classification, branch 7 would have had to reopen it.
+So **branch 6 built the shared half and proved it on one session**: a surface-neutral document
+model, renderer and delivery in `components/` — naming no session, weekend or season — with only the
+per-session builder (`sessions/session_share.py`) specific to a surface. That the model carries
+standings is **tested without shipping a standings export**, from real `StandingRow` /
+`ConstructorRow` objects.
+
+**Branch 6 shipped 2026-09-12.** `Share ▾` on Session detail: **Copy image** (the real path — it
+pastes straight into the chat) and **Save image…** into a new `paths.exports_dir()`. Measured on
+the shipped renderer: that Shanghai session is **1080 × 1547 at 269 KB**, all 64 sessions in this
+database come out 1080 px wide with a median height of 1158 and **none over 1600**, and a dark
+application renders a byte-identical file. The builder was cross-checked against the page's own
+`build_classification_table` **cell by cell over all 64 sessions — 6,837 cells, 0 differences**.
+Confirmed end to end through WhatsApp on Android: sent at 1080 × 1551, arrived unchanged.
+
+**E20 — the season page restructure. *Proposed 2026-09-11, not scheduled.*** Surfaced by E19's
+scope change rather than asked for on its own: sharing a season's standings means they have to be
+readable on the season page first, and today that page does not lead with them. The proposal is
+**calendar | results matrix | standings** across the top with the detail area beneath, so the three
+things a league checks are one glance rather than three navigations. **It is a restructure of a
+working page, so it does not ride along with a feature branch** — it comes after branch 7 and takes
+its own release (v0.12.0 or later). Nothing about E19 depends on it: branch 7 shares the standings
+the app already computes, whatever the page around them looks like.
 
 **Fuel-corrected lap time — an Analytics (E3) item, banked 2026-08-24.** Found while specifying
 E1's stint-relative lap-time chart. That chart shows *observed* lap time by stint, which conflates

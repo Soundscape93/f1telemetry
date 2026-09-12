@@ -59,6 +59,7 @@ from ..components import (
     tidy_table,
 )
 from ..components.flags import flag_icon
+from ..components.share_document import ShareDocument
 from ..components.tyres import tyre_pixmap
 from ..formatting import (
     NOT_CAPTURED,
@@ -574,7 +575,7 @@ class DetailPage(QWidget):
             return f"{metas[0].file_name}  (archive not found)"
         return ", ".join(found)
 
-    def _share_document(self) -> str:
+    def _share_document(self) -> ShareDocument | None:
         """This session as a ``ShareDocument``, or None if it has gone (E19).
 
         Built on the click, from the same helpers ``reload`` builds the page from, so the image
