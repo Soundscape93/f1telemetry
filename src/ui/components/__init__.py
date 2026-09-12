@@ -14,6 +14,7 @@ from .panels import panel_box
 from .session_actions import confirm_and_delete, season_phrase
 from .session_card import CardAction, SessionCard
 from .setup_panel import build_setup_table
+from .share_control import ShareControl
 from .slider_row import SetupSliderRow, SliderMarkerBar
 from .tables import (
     build_kv_table,
@@ -40,6 +41,7 @@ __all__ = [
     "CardAction",
     "SessionCard",
     "build_setup_table",
+    "ShareControl",
     "SetupSliderRow",
     "SliderMarkerBar",
     "build_kv_table",
