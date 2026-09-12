@@ -15,6 +15,10 @@ The classification table is ``components.build_classification_table``, the same 
 weekend page uses - this page must never grow a second one. A lap row emits upward rather than
 reaching for the Laps surface itself: pages never reference siblings, so the hop to a lap's
 telemetry goes through ``SessionsView`` to ``MainWindow`` (PRIORITIES -> A1).
+
+Share (E19) is the same shape: the page owns no image and no file, it hands ``ShareControl`` a
+callable that builds ``session_share.session_document`` out of what is stored at that moment. The
+image is therefore the page's own result read a second time, not a copy of the widgets on screen.
 """
 from __future__ import annotations
 
@@ -38,6 +42,7 @@ from ...domain.season import slot_for_session
 from ...pipeline import resolve_capture_path
 from ...protocol.reference import track_name
 from ..components import (
+    ShareControl,
     WeatherIcon,
     TrackMap,
     build_classification_table,
@@ -49,6 +54,7 @@ from ..components import (
     fit_columns,
     fit_table_height,
     panel_box,
+    season_phrase,
     session_weather,
     tidy_table,
 )
@@ -88,6 +94,7 @@ from ..season_roster import SeasonRosterFiles
 from .lap_context import analyse_session
 from .league_names import SessionRosters
 from .race_control import grid_penalty_places, summarise_penalties
+from .session_share import session_document
 from .stint_charts import StintCharts
 
 _MID_ROW_MAX_H = 500            # the Laps / Race control row is capped; those two boxes scroll inside it
@@ -160,6 +167,10 @@ class DetailPage(QWidget):
         self._source.setStyleSheet(MUTED_TEXT_QSS)
         source_row.addWidget(self._source)
         source_row.addStretch(1)
+        # Beside Delete..., not in the header: the header says which session this is, this row is
+        # what can be done with it. Built once and never rebuilt - it asks the page for a document
+        # when it is clicked, so a reload has nothing to tell it (E19).
+        source_row.addWidget(ShareControl(self._share_document))
         delete = QPushButton("Delete...")
         delete.clicked.connect(self._on_delete)
         source_row.addWidget(delete)
@@ -562,6 +573,37 @@ class DetailPage(QWidget):
         if not found:
             return f"{metas[0].file_name}  (archive not found)"
         return ", ".join(found)
+
+    def _share_document(self) -> str:
+        """This session as a ``ShareDocument``, or None if it has gone (E19).
+
+        Built on the click, from the same helpers ``reload`` builds the page from, so the image
+        cannot disagree with the table above it about a name, a penalty or the weekend slot. The
+        names deliberately come from the roster cache as the last paint left it rather than from a
+        fresh read (``league_names`` keeps it per-paint): re-reading here could name a driver one
+        way in the image and another on the screen it was shared from.
+
+        None leaves ``ShareControl`` silent: a session deleted under an open page is the page's
+        problem, and ``reload`` is where it is already handled.
+        """
+        session, slot = self._current()
+        if session is None:
+            return None
+        name_of = display_name_fn(self._rosters.roster_for_session(session.session_uid))
+        return session_document(session, slot, self._stored_penalties(session), name_of,
+                                self._placement(session))
+
+    def _placement(self, session) -> tuple[str, int] | None:
+        """``(season, round)`` for the image's meta line, or None while the session is unassigned.
+
+        The season is named as ``season_phrase`` names it everywhere else, so a result pasted into
+        the chat identifies its season the way the app's own refusals and markers do.
+        """
+        assignment = self._seasons.assignment_for(int(session.session_uid))
+        if assignment is None:
+            return None
+        season_id, round_number = assignment
+        return season_phrase(self._seasons.get_season(season_id)), round_number
 
     # --- actions ---------------------------------------------------------------------------------
     def _open_lap(self, table: QTableWidget, row: int, column: int) -> None:
