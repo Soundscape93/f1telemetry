@@ -96,9 +96,10 @@ class ShareControl(QWidget):
         button = QToolButton()
         button.setText("Share ▾")
         button.setToolTip("Copy this image to the clipboard, or save it as a PNG.")
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         # No stylesheet - it would freeze the button's text colour at apply time (A4b). The same
         # minimum size off the natural hint as the Laps page's "Compare ▾".
-        button.setMinimumHeight(button.sizeHint().width() + 12, button.sizeHint().height() + 4)
+        button.setMinimumSize(button.sizeHint().width() + 12, button.sizeHint().height() + 4)
         menu = QMenu(button)
         menu.addAction("Copy image").triggered.connect(self._copy)
         menu.addAction("Save image…").triggered.connect(self._save)
@@ -152,10 +153,22 @@ class ShareControl(QWidget):
 
 
 def _ask_save_path(parent: QWidget, suggested: Path) -> Path | None:
-    """The save dialog for one PNG, opened on ``suggested``.
-    
+    """The save dialog, run - on its own so an offscreen check can stand in for the person."""
+    dialog = _save_dialog(parent, suggested)
+    try:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        chosen = dialog.selectedFiles()
+        return Path(chosen[0]) if chosen else None
+    finally:
+        dialog.deleteLater()                # parented for modality, so it would outlive the save
+
+
+def _save_dialog(parent: QWidget, suggested: Path) -> QFileDialog:
+    """A save dialog for one PNG, opened on ``suggested``.
+
     Qt's overwrite confirmation is left on: the suggestion is always free, so the only way onto an
-    existing file is to pick, and then the dialog asks.
+    existing file is to pick it, and then the dialog asks.
     """
     dialog = QFileDialog(parent, "Save image", str(suggested.parent), _PNG_FILTER)
     dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
