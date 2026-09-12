@@ -179,6 +179,34 @@ assigning happens.
 A session assigned to a round can't be deleted until it's unassigned; the app says so rather than
 quietly dropping its result from your standings.
 
+### Sharing a session's results
+
+Open a session and use **Share ▾**, beside **Delete...**:
+
+- **Copy image** puts the result on your clipboard as a picture. Paste it straight into WhatsApp,
+  Discord or wherever your league talks — no file is created. This is the quick way.
+- **Save image…** writes the same picture to a PNG file if you'd rather keep it or send it later.
+
+The picture is **drawn by the app**, not screenshotted, which matters in three ways. It carries the
+**whole** Race control list, where a screenshot would cut it off — the box on the page scrolls. It
+looks the same for everyone, on a fixed light background, whether you run Windows in light or dark
+mode. And it is sized to survive being sent: 1080 pixels wide, so it is still readable after a chat
+app re-compresses it.
+
+It contains the session's own facts (fastest lap, race distance, weather, track and air
+temperature), the full final classification, and every penalty with what it was for — plus the
+season and round, if you have assigned the session to one.
+
+Two things read slightly differently from the page, on purpose. The page alternates a cell between
+a driver's finishing time and the penalty they took; a picture can't alternate, so penalties get a
+**PEN** column of their own (and qualifying gets **GRID PENALTY**), shown only when someone
+actually has one. And a **reconstructed** result — one rebuilt because the final classification
+never arrived — says so in words under the title, rather than only by showing its points in grey.
+
+**Saving never overwrites anything.** The name offered is always one that's free: share the same
+session twice and the second is offered as `…-2.png`. To replace a file you have to pick it
+yourself, and then you're asked first.
+
 ### Changing a season's calendar
 
 Picked the wrong tracks, or the wrong order? Open the season and click **Edit calendar**. You can
@@ -198,7 +226,7 @@ wrong, delete the season and create it again.
 
 ## 6. Where your data lives
 
-Your database, captures, lap traces, rosters and logs are stored under:
+Your database, captures, lap traces, rosters, logs and shared images are stored under:
 
 ```
 %LOCALAPPDATA%\f1telemetry
@@ -209,6 +237,9 @@ Back up this folder to preserve your seasons and captures. The exact path is sho
 This folder is **hidden in Explorer by default** — you don't need to go looking for it. Use
 **Help → Open data folder**, **Open captures folder** or **Open logs folder** and the app opens
 Explorer there for you.
+
+Images from **Share → Save image…** go to an `exports` folder here, created the first time you use
+that button. Nothing else reads it, so it is safe to empty whenever you like.
 
 **Please don't hand-edit `f1league.db`** with DB Browser for SQLite or similar tools. It's easy to
 break the app's data that way, and it makes bug reports much harder to diagnose. You don't need to:
@@ -298,8 +329,13 @@ what happened. Don't send a hand-edited database — see section 6.
 
 ## Known issues
 
-- **Switching the Windows light/dark theme while the app is open** leaves some text the wrong
-  colour. Restart the app to refresh the theme.
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- **Dashboard, Analytics and Bug report** pages are placeholders.
+- The build is **unsigned**: SmartScreen shows "Windows protected your PC" → **More info → Run
+  anyway**.
 
 ## Licence & notices
 

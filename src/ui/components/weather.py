@@ -18,7 +18,7 @@ from PySide6.QtGui import QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from ...protocol.enums import Weather
-from ..formatting import weather_label
+from ..formatting import MIXED_WEATHER_LABEL, weather_label
 
 # A session that ran both dry and wet. NOT a Weather member: the game reports one condition per
 # Session packet and the assembler keeps only the last, so nothing selects this today. Filling it
@@ -55,7 +55,7 @@ class WeatherIcon(QWidget):
         super().__init__(parent)
         self._weather = weather
         self.setFixedSize(size_px, size_px)
-        self.setToolTip("Mixed dry / wet" if weather == MIXED else weather_label(weather))
+        self.setToolTip(MIXED_WEATHER_LABEL if weather == MIXED else weather_label(weather))
 
     def paintEvent(self, event):
         painter = QPainter(self)

@@ -72,6 +72,11 @@ _WEATHER_LABELS = {
     Weather.STORM: "Storm"
 }
 
+# A session that ran both dry and wet (``SessionResult.is_mixed_weather``). No ``Weather`` member
+# means it, so ``weather_label`` cannot say it; the weather icon's tooltip and the share image both
+# do, and say it with this one string.
+MIXED_WEATHER_LABEL = "Mixed dry / wet"
+
 
 def is_race(session_type: SessionType) -> bool:
     """Whether the session type uses the race result layout (time/gap) vs a best-lap layout."""

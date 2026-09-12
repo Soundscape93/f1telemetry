@@ -105,6 +105,15 @@ def logs_dir() -> Path:
     return _ensure_subdir("logs")
 
 
+def exports_dir() -> Path:
+    """Directory the Share action saves images into unless the user picks another (E19).
+    
+    Per-user data like ``rosters/`` and ``logs/`` never :func:`app_dir`, which is for files shipped
+    *with* the app. Created when a save first asks for it, not at startup.
+    """
+    return _ensure_subdir("exports")
+
+
 def config_path() -> Path:
     """Path to the (future) user config file. The file is not created here."""
     return data_root() / "config.json"
