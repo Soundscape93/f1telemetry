@@ -12,10 +12,12 @@ the standings are wanted from the season page as well as from the weekend page. 
 not import from ``sessions/`` and this package must not import a surface, so the model, the
 renderer and the delivery live here, and only the builders live with their data.
 
-**Three kinds of block cover every target so far.** A classification, a race-control list and a
-standings table are all a ``Table``; a session's header facts are ``Facts``; the race-control box's
-two states that have no rows are ``Notes``. A new kind of block is a renderer change, so none is
-added before a document needs one.
+**Three kinds of block cover every target so far, and a fourth arranges them.** A classification,
+a race-control list and a standings table are all a ``Table``; a session's header facts are
+``Facts``; the race-control box's two states that have no rows are ``Notes``. ``SideBySide`` sets
+blocks next to each other rather than one under the next - added for the standings, whose two
+tables have four columns and three and were mostly white space at full width. A new kind of block
+is a renderer change, so none is added before a document needs one.
 
 **A cell carries meaning, not colour.** Emphasis is two independent axes, because that is how the
 session page already uses it: ``tone`` is colour (the fastest lap, places gained or lost, an
@@ -140,7 +142,22 @@ class Notes:
     title: str = ""
 
 
-Block = Facts | Table | Notes
+@dataclass(frozen=True)
+class SideBySide:
+    """Blocks read left to right, each in an equal share of the width, their tops level.
+
+    For blocks too narrow to fill the width alone - a standings image's two tables. Refused when
+    empty, as a malformed ``Table`` is: a builder that meant to lay something out has lost it.
+    """
+
+    blocks: tuple[Facts | Table | Notes, ...]
+
+    def __post_init__(self) -> None:
+        if not self.blocks:
+            raise ValueError("side by side needs at least one block")
+
+
+Block = Facts | Table | Notes | SideBySide
 
 
 @dataclass(frozen=True)
@@ -169,7 +186,9 @@ class ShareDocument:
 
 
 def _cells(block: Block) -> tuple[Cell, ...]:
-    """Every cell in one block, whatever its kind."""
+    """Every cell in one block, whatever its kind - including every block set side by side."""
+    if isinstance(block, SideBySide):
+        return tuple(cell for inner in block.blocks for cell in _cells(inner))
     if isinstance(block, Table):
         return tuple(cell for row in block.rows for cell in row)
     if isinstance(block, Facts):

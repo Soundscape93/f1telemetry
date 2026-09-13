@@ -2,6 +2,11 @@
 
 Roster-aware for LEAGUE seasons: loads-or-seeds the season roster read-only and offers explicit
 Create/Import buttons. Double-clicking a calendar round asks the container to open its weekend.
+
+Share (E19) copies or saves the standings as an image. The page owns no image and no file: it hands
+``ShareControl`` a callable that builds ``components.standings_share.standings_document`` from what
+is stored at the click, and paints its own table through the same ``driver_standings`` rule, so the
+table and the image cannot disagree about who leads.
 """
 
 from __future__ import annotations
@@ -20,16 +25,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...analysis.standings import (
-    constructor_standings_for_rounds,
-    league_standings_for_rounds,
-    standings_for_rounds,
-)
+from ...analysis.standings import constructor_standings_for_rounds
 from ...domain.roster import LeagueRoster
 from ...domain.season import ROSTER_SEASON_MODES, grand_prix_session
 from ...protocol.reference import team_display_name, track_name
-from ..components import cell, display_name_fn, fit_table_height, tidy_table
+from ..components import (
+    ShareControl,
+    cell,
+    display_name_fn,
+    fit_table_height,
+    season_phrase,
+    tidy_table
+)
 from ..components.flags import flag_icon
+from ..components.share_document import ShareDocument
+from ..components.standings_share import driver_standings, standings_document
 from ..formatting import race_winner_summary
 from ..style import MUTED_TEXT_QSS, apply_bold, apply_heading
 from .labels import season_title
@@ -74,9 +84,19 @@ class DetailPage(QWidget):
 
         st_caption = QLabel("Player Standings")
         apply_bold(st_caption)
+        # Share sits at the end of the standings' own caption row, over the column it shares rather
+        # than beside the page title. Hidden by ``load`` while there is nothing ranked to share.
+        self._share = ShareControl(self._share_document, subject="standings")
+        st_row = QHBoxLayout()
+        st_row.setContentsMargins(0, 0, 0, 0)
+        st_row.addWidget(st_caption)
+        st_row.addStretch(1)
+        st_row.addWidget(self._share)
+        st_host = QWidget()
+        st_host.setLayout(st_row)
 
         header.addWidget(title_host, 3)
-        header.addWidget(st_caption, 2)
+        header.addWidget(st_host, 2)
         outer.addLayout(header)
 
         body = QHBoxLayout()
@@ -200,11 +220,7 @@ class DetailPage(QWidget):
             self._calendar_table.setItem(i, 2, cell(_round_result_summary(round, name_of)))
         fit_table_height(self._calendar_table)
 
-        rows = (
-            league_standings_for_rounds(rounds, roster)
-            if roster is not None
-            else standings_for_rounds(rounds)
-        )
+        rows = driver_standings(rounds, roster)
 
         self._standings_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
@@ -229,6 +245,30 @@ class DetailPage(QWidget):
         fit_table_height(self._constructor_table)
         self._constructor_table.setVisible(bool(constructor_rows))
         self._constructor_empty.setVisible(not constructor_rows)
+        # Nothing ranked is nothing to share - the two notes above say why.
+        self._share.setVisible(bool(rows or constructor_rows))
+
+    def _share_document(self) -> ShareDocument | None:
+        """The standings as a ``ShareDocument``, or None if the season has gone (E19).
+
+        Re-read on the click rather than kept from the last ``load``, so the image is of what is
+        stored when it is taken. That hydrates the season's sessions again - about 30 ms on the
+        largest season here, which is nothing once per click; E1c's objection was to doing it per
+        row while painting a list. The roster is read again too, through the same
+        ``_league_roster_for_detail`` call ``load`` paints the table with: unlike Session detail,
+        this page keeps no roster between paints, so there is no cached one to stay faithful to.
+
+        None leaves ``ShareControl`` silent: a season deleted under an open page is ``load``'s to
+        deal with, and it already does.
+        """
+        if self._season_id is None:
+            return None
+        season = self._seasons.get_season(self._season_id)
+        if season is None:
+            return None
+        rounds = self._seasons.rounds_with_results(self._season_id, self._sessions)
+        roster = self._league_roster_for_detail(season, rounds)
+        return standings_document(season, rounds, season_phrase(season), roster)
 
     def _league_roster_for_detail(self, season, rounds) -> LeagueRoster | None:
         """Return a roster for roster-aware seasons and update the roster status panel.

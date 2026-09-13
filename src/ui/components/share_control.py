@@ -19,10 +19,20 @@ clipboard open, the copy then fails without a word, and the clipboard still hold
 image is of what is stored at that moment and the page hosting it keeps no state for it. It is the
 Laps page's "Compare ▾" button again - a tool button with an instant-popup menu and no stylesheet
 (core invariant #11, A4b) - and a later export adds a menu entry rather than a second control.
+
+**What it is called is the page's word, not this module's.** ``subject`` names the thing being
+shared, so one control says "Copy image" on a session and "Copy standings" on a season; nothing here
+knows which surface it is on, and nothing here builds a document.
+
+**A set of documents is a folder, not a longer image.** ``folder_fn`` adds the third entry, and it
+asks for a *folder* rather than a file name: what gets written is a new subfolder of its own inside
+the one chosen, named the same free-name way a file is, so an export can never land among an earlier
+export's files. The first write that fails stops the rest and says which file it stopped on, because
+a folder quietly one image short is the failure nobody notices.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QIODevice, QSaveFile, QTimer
@@ -78,12 +88,53 @@ def save_image(parent: QWidget, image: QImage, stem: str) -> Path | None:
     return path
 
 
+def save_documents(parent: QWidget, documents: Sequence[ShareDocument],
+                   folder_stem: str) -> Path | None:
+    """Ask where to put ``documents`` and write one PNG per document into a folder of their own.
+
+    The chooser opens on the exports folder and picks the *parent*: what is written is a fresh
+    subfolder inside it, on a name nothing has taken (``unique_path`` again, without a suffix).
+    Returns that folder, or None when the user cancelled or a write failed - a failure is said, in a
+    message box naming the file it stopped on and how much of the set had already been written.
+    """
+    chosen = _ask_folder(parent, paths.exports_dir())
+    if chosen is None:
+        return None
+    folder = unique_path(chosen, folder_stem, suffix="")
+    try:
+        folder.mkdir(parents=True)
+    except OSError as error:
+        QMessageBox.warning(parent, "Images not saved",
+                            f"The folder couldn't be created at\n{folder}\n\n{error}\n\n"
+                            "Choose another folder and try again.")
+        return None
+    for written, document in enumerate(documents):
+        path = folder / f"{document.name}.png"
+        problem = _write_png(render_document(document), path)
+        if problem is not None:
+            QMessageBox.warning(parent, "Images not saved",
+                                f"{written} of {len(documents)} images were written to\n{folder}"
+                                f"\n\n{path.name} couldn't be:\n{problem}\n\n"
+                                "Choose another folder and try again.")
+            return None
+    return folder
+
+
 class ShareControl(QWidget):
     """"Share" - copy or save a result as an image - and a note saying what happened."""
 
-    def __init__(self, document_fn: Callable[[], ShareDocument | None], parent=None) -> None:
+    def __init__(self, document_fn: Callable[[], ShareDocument | None], parent=None, *,
+                 subject: str = "image", folder_fn: Callable[[], tuple | None] | None = None,
+                 folder_subject: str = "all images") -> None:
+        """``subject`` is what the menu calls one document - "image", "standings".
+
+        ``folder_fn`` makes the control a folder export as well: it returns ``(stem, documents)``,
+        a plain pair rather than a type of its own, so this module stays clear of the surface
+        packages that build one. ``folder_subject`` is what that third entry calls the set.
+        """
         super().__init__(parent)
         self._document_fn = document_fn
+        self._folder_fn = folder_fn
 
         self._status = QLabel()
         # MUTED_TEXT_QSS states its colour outright - the one stylesheet invariant #11 allows.
@@ -95,14 +146,18 @@ class ShareControl(QWidget):
 
         button = QToolButton()
         button.setText("Share ▾")
-        button.setToolTip("Copy this image to the clipboard, or save it as a PNG.")
+        button.setToolTip(f"Copy the {subject} to the clipboard, or save one PNG or a folder of "
+                          "them." if folder_fn is not None else
+                          f"Copy the {subject} to the clipboard, or save as a PNG.")
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         # No stylesheet - it would freeze the button's text colour at apply time (A4b). The same
         # minimum size off the natural hint as the Laps page's "Compare ▾".
         button.setMinimumSize(button.sizeHint().width() + 12, button.sizeHint().height() + 4)
         menu = QMenu(button)
-        menu.addAction("Copy image").triggered.connect(self._copy)
-        menu.addAction("Save image…").triggered.connect(self._save)
+        menu.addAction(f"Copy {subject}").triggered.connect(self._copy)
+        menu.addAction(f"Save {subject}…").triggered.connect(self._save)
+        if folder_fn is not None:
+            menu.addAction(f"Save {folder_subject}…").triggered.connect(self._save_folder)
         button.setMenu(menu)
 
         layout = QHBoxLayout(self)
@@ -130,6 +185,18 @@ class ShareControl(QWidget):
         if path is not None:
             self._show_status(f"Saved {path.name}", tooltip=str(path))
 
+    def _save_folder(self) -> None:
+        """The whole set, as a folder of PNGs. Absent from the menu unless a page asked for it."""
+        export = self._folder_fn()
+        if export is None:
+            return
+        stem, documents = export
+        folder = save_documents(self, documents, stem)
+        if folder is not None:
+            # The count, not the name: the folder's own name is long and already in the tooltip.
+            self._show_status(f"Saved {len(documents)} image" + ("" if len(documents) == 1 else "s"),
+                              tooltip=str(folder))
+
     def _rendered(self) -> tuple[ShareDocument, QImage] | None:
         """The document as it stands now, and its image - or None if there is nothing to share.
 
@@ -154,14 +221,7 @@ class ShareControl(QWidget):
 
 def _ask_save_path(parent: QWidget, suggested: Path) -> Path | None:
     """The save dialog, run - on its own so an offscreen check can stand in for the person."""
-    dialog = _save_dialog(parent, suggested)
-    try:
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        chosen = dialog.selectedFiles()
-        return Path(chosen[0]) if chosen else None
-    finally:
-        dialog.deleteLater()                # parented for modality, so it would outlive the save
+    return _chosen_path(_save_dialog(parent, suggested))
 
 
 def _save_dialog(parent: QWidget, suggested: Path) -> QFileDialog:
@@ -175,6 +235,29 @@ def _save_dialog(parent: QWidget, suggested: Path) -> QFileDialog:
     dialog.setDefaultSuffix("png")
     dialog.selectFile(suggested.name)
     return dialog
+
+
+def _ask_folder(parent: QWidget, start: Path) -> Path | None:
+    """The folder chooser, run - on its own so an offscreen check can stand in for the person.
+
+    It picks the folder the export goes *into*, so no overwrite confirmation belongs here: the
+    export makes a subfolder of its own, and choosing one that exists is choosing where, not what.
+    """
+    dialog = QFileDialog(parent, "Save images in", str(start))
+    dialog.setFileMode(QFileDialog.FileMode.Directory)
+    dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+    return _chosen_path(dialog)
+
+
+def _chosen_path(dialog: QFileDialog) -> Path | None:
+    """Run ``dialog`` and hand back what was picked, or None if it was cancelled."""
+    try:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        chosen = dialog.selectedFiles()
+        return Path(chosen[0]) if chosen else None
+    finally:
+        dialog.deleteLater()  # parented for modality, so it would outlive the save
 
 
 def _write_png(image: QImage, path: Path) -> str | None:

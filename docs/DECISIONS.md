@@ -1485,7 +1485,8 @@ what would trigger revisiting it.
   - **The new page never calls `rounds_with_results`**, for the reason E1c was deferred over: it
     hydrates every session in the season. The round's number and track come off `season.rounds`,
     its uids off `assignments_for_season`, and the weekend's sessions out of the single
-    `list_sessions` the rows need anyway.
+    `list_sessions` the rows need anyway. *(Still true of `reload` after branch 7: the page's
+    **Share ▾** calls it once per click, for the standings as of the round.)*
 - **The weekend-filtered overview is the writer of `season_assignments`** *(E1b, shipped
   2026-09-07, v0.11.0)*. Assign, unassign and move all happen there, the round-centric page is
   reached from nowhere, and branch 3's "Assign captures…" scaffold is gone from all four of its
@@ -1588,7 +1589,10 @@ what would trigger revisiting it.
   37 in this database. That is not something to run on the GUI thread while painting a list, and it
   was the stated reason E1c was deferred out of E1 in the first place. So the Sessions surface
   resolves a session's season through `season_assignments` and loads that season's **saved** roster
-  JSON (`SeasonRosterFiles.load`), which touches no sessions at all.
+  JSON (`SeasonRosterFiles.load`), which touches no sessions at all. *(Measured 2026-09-13, on
+  branch 7: the call costs about 32 ms on this database's largest season, 36 sessions — too much to
+  pay per row while painting, as decided here, and nothing once per click, which is where E19's
+  standings export pays it.)*
   - **What this costs, knowingly:** a LEAGUE season whose roster file the user never created reads
     exactly as it does today — the entry's own captured name, so a member captured as `"Player"`
     stays `"Player"`. It degrades to the current behaviour rather than to something worse, and the
@@ -1649,13 +1653,18 @@ what would trigger revisiting it.
       the renderer and the delivery are **surface-neutral** — they name no session, no weekend and
       no season — and branch 7 reuses them unchanged. `share_document.py` and `share_image.py` live
       in `components/`, not in `sessions/`, precisely because branch 7's standings builder is a
-      Seasons-side caller and `components/` must not import a surface package.
+      Seasons-side caller and `components/` must not import a surface package. *(Corrected
+      2026-09-13: branch 7 extended all three rather than reusing them unchanged — `ShareControl`
+      gained a folder export, and the model and renderer one block, `SideBySide`. See the branch 7
+      notes below.)*
     - **Proved, not asserted:** `test_share_document.py` builds a standings-shaped document out of
       real `StandingRow` / `ConstructorRow` objects and renders it, so the model is known to carry
       standings **without shipping a standings export** in branch 6. The same fixture is shared with
       `test_share_image.py`.
     - The **per-session builder** (`sessions/session_share.py`) is the surface-specific half, and
-      is the only part branch 7 replaces rather than reuses.
+      is the only part branch 7 replaces rather than reuses. *(Corrected 2026-09-13: branch 7
+      replaced nothing — `sessions/weekend_share.py` calls `session_document` once per session,
+      and the standings got a builder of their own.)*
   - **`QTextDocument`, not hand-rolled `QPainter` calls.** The decision that matters: with a
     `QPainter` the layout is a sequence of side effects that only a rendered image can be asked
     about, so the suite could assert nothing without a `QApplication`. With `QTextDocument` the
@@ -1706,6 +1715,60 @@ what would trigger revisiting it.
     fails silently while the clipboard keeps its **previous** content, quite possibly an older image.
     Success is a muted note beside the button that clears itself; failure is a message box, because
     a result that never reached the chat is the failure that matters.
+  - **Branch 7 (shipped 2026-09-13): the standings, and a whole weekend.** The season page shares
+    its standings; a round's weekend page shares the standings *as of that round* and the whole
+    weekend as a folder.
+    - **`rounds_with_results` on a click is fine, and that was measured.** A Share click re-reads
+      the season — about 32 ms on the largest season here (36 sessions), with rendering the image
+      adding 5. E1c's objection was paying that per row while painting a list; once per click is
+      not that. `WeekendPage.reload` still never calls it.
+    - **One standings rule, in `components/standings_share.py`.** `driver_standings` is the only
+      place that chooses the roster-grouped league table over the by-name one (core invariant #7),
+      and the season page now paints its own table through it, so the table and the image cannot
+      disagree — swapping the page's inline copy for it changed no row on any season. It lives in
+      `components/` because both surfaces call it and Seasons must not import Sessions. The season
+      name is handed in already formatted, because `components.season_phrase` sits beside a
+      `QMessageBox` and would put Qt into a module the suite loads.
+    - **"As of round N" is a slice, not a second computation.** The builder takes the whole
+      calendar and drops the rounds after N, so its meta line (`3 of 24 rounds counted`) counts
+      against the season's length. The title names the round's track, and a race the standings had
+      to skip — a reconstructed classification awards no points — is noted under the table.
+    - **A weekend is a fresh folder of the per-session images** (`sessions/weekend_share.py`),
+      which reuses `session_document` unchanged and decides only the names. Files are **numbered
+      by running position, not by clock time**, because the two disagree on real weekends: the
+      career season's Suzuka round spans two days, and Jeddah stores two Practice 2 attempts
+      (`02_1159_Practice-2`, `03_1207_Practice-2`), neither called the real one (core invariant #5).
+      It exports what the page shows, the unassigned attempt included, with the standings last.
+      `WeekendExport` is a `NamedTuple`, so `ShareControl` takes a plain pair without importing a
+      surface.
+    - **`ShareControl` gained a folder export rather than a second control.** `subject` is the
+      menu's word ("Copy image" / "Copy standings"), and `folder_fn` adds "Save weekend…", which
+      asks for a *parent* folder and writes a new `unique_path(…, suffix="")` subfolder, so it can
+      never write among an earlier export's files. The first failed write stops the rest and names
+      the file: a folder quietly one image short is the failure nobody notices.
+    - **`SideBySide` — the one addition the model and renderer needed.** The standings' two tables
+      have four columns and three; stacked at full width they were mostly white space. Side by side,
+      the tallest standings image went from **1519 to 1083 px** across all 100 of them (every
+      season, whole and as of each round), and **all 64 session images stayed byte-identical**.
+      Two alternatives were rejected: folding both into one eight-column `Table` (the stripes run
+      under the constructors' empty rows, and one header row cannot carry both titles), and drawing
+      an icon and its text in two inner cells to keep a flag beside a wrapped name (that changes
+      every session image).
+      - **Accepted instead:** at half width a 31-character name in wide capitals wraps, and its flag
+        then sits on a line of its own. Nothing is cut and the width holds, and every name stored
+        here fits on one line.
+      - **A fifth renderer rule:** Qt drops the top margin of a table cell's first paragraph, so the
+        side-by-side row carries the 28 px gap its headings would otherwise lose.
+    - **Accepted costs, chosen not discovered:** the weekend page's `_standings_roster` repeats the
+      season page's roster choice (the mode gate, load-or-seed, the warning and its fallback), since
+      sharing it means moving roster handling off the season page; and **Save weekend…** renders and
+      writes on the GUI thread — about half a second for ten images, after the folder is chosen.
+    - **Mutation-tested step by step: 70 of 71 mutations caught.** The survivor switches off Qt's
+      overwrite confirmation in the save dialog, which only a person choosing an existing file can
+      exercise.
+    - **A harness lesson:** PySide6 swallows an exception raised inside a slot, so a check that
+      triggers a menu action cannot see one — a mutation removing a guard passed that way. Checks
+      that something "does not raise" call the slot directly.
 
 ## Localization
 

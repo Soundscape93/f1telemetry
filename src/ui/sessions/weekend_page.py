@@ -40,6 +40,13 @@ rather than a weekend precisely so it works when there is nothing to draw.
 **Names resolve through ``SessionRosters``**, which gates on ``ROSTER_SEASON_MODES`` - LEAGUE
 *and* GRAND_PRIX. This database's only real league is a GRAND_PRIX season, so this page names it
 where the round-centric page it replaced showed raw captured names (DECISIONS -> UI, E1c).
+
+**Share exports the weekend the page shows** (E19). "Copy standings" and "Save standings…" are the
+championship as of this round; "Save weekend…" is a folder holding an image per session card, in
+the order the cards run, with those standings last (``weekend_share``). Both are built on the click
+from what is stored then. The session images name drivers through the ``SessionRosters`` the cards
+were painted with, as Session detail's Share does; the standings rank them with the season page's
+roster, loaded or seeded from captures, because ``SessionRosters`` only ever loads a saved file.
 """
 from __future__ import annotations
 
@@ -59,11 +66,13 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from ...domain.season import Season
+from ...domain.roster import LeagueRoster
+from ...domain.season import ROSTER_SEASON_MODES, Season
 from ...protocol.reference import track_name
 from ..components import (
     CardAction,
     SessionCard,
+    ShareControl,
     build_classification_table,
     clear_layout,
     confirm_and_delete,
@@ -71,12 +80,15 @@ from ..components import (
     panel_box,
     season_phrase,
 )
+from ..components.share_document import ShareDocument
+from ..components.standings_share import standings_document
 from ..formatting import recorded_label
 from ..season_roster import SeasonRosterFiles
 from ..style import MUTED_TEXT_QSS, apply_heading
 from .assign_dialog import AssignDialog
 from .assignment import weekend_proposal
 from .league_names import SessionRosters
+from .weekend_share import WeekendExport, weekend_documents
 from .weekend_view import SessionRow, SlotRow, race_rows, weekend_of, weekend_rows
 
 
@@ -98,7 +110,10 @@ class WeekendPage(QWidget):
         self._seasons = season_store
         self._lap_store = lap_store
         self._event_store = event_store         # deleting a session takes its penalties + passes too
-        self._rosters = rosters or SessionRosters(season_store, SeasonRosterFiles())
+        # The standings' roster is the season page's: loaded, or seeded from captures when no file
+        # exists yet. ``SessionRosters`` only ever loads a saved one (1Ec).
+        self._roster_files = SeasonRosterFiles()
+        self._rosters = rosters or SessionRosters(season_store, self._roster_files)
         self._season_id: int | None = None
         self._round_number: int | None = None
 
@@ -123,6 +138,11 @@ class WeekendPage(QWidget):
         apply_heading(self._title, size_px=20)
         header.addWidget(self._title)
         header.addStretch(1)
+        # Before "Assign sessions…": sharing reads the rounds, assigning changes it. Hidden by
+        # ``reload`` while the round has no weekend to share.
+        self._share = ShareControl(self._share_document, subject="standings",
+                                   folder_fn=self._weekend_export, folder_subject="weekend")
+        header.addWidget(self._share)
         # A local, like ``back`` above: nothing outside this method touches it, and an attribute
         # named ``_assign`` would shadow the method of that name.
         assign = QPushButton("Assign sessions…")
@@ -167,6 +187,7 @@ class WeekendPage(QWidget):
         self._rosters.invalidate()
         round = self._round()
         if round is None:
+            self._share.setVisible(False)
             # The season or the round went away underneath us. The season detail page bounces on
             # to the seasons overview if the season is the part that vanished.
             if self._season_id is not None:
@@ -178,11 +199,8 @@ class WeekendPage(QWidget):
         seasons = self._seasons.list_seasons()
         self._seasons_by_id = {season.season_id: season for season in seasons}
         self._placed = self._read_placements(seasons)
-        target = self._target()
-        assigned = {uid for uid, placement in self._placed.items() if placement == target}
-        weekend = weekend_of([s for s in all_sessions if s.session_uid in assigned])
-        rows = ([] if weekend is None else
-                 weekend_rows([s for s in all_sessions if s.weekend_link_id == weekend]))
+        rows = self._weekend_rows(all_sessions, self._placed)
+        self._share.setVisible(bool(rows))
         for row in rows:
             self._body.addWidget(
                 self._card(row) if isinstance(row, SessionRow) else self._slot_row(row))
@@ -207,6 +225,19 @@ class WeekendPage(QWidget):
         season = self._seasons.get_season(self._season_id)
         rounds = season.rounds if season is not None else ()
         return next((r for r in rounds if r.round_number == self._round_number), None)
+
+    def _weekend_rows(self, all_sessions, placed) -> list:
+        """The round's weekend in running order, or no rows while nothing is assigned to it.
+
+        Every stored session of the weekend the round's assigned sessions resolve to, with the
+        uncaptured slots between them - one rule for what ``reload`` paints and what Share exports.
+        """
+        target = self._target()
+        assigned = {uid for uid, placement in placed.items() if placement == target}
+        weekend = weekend_of([s for s in all_sessions if s.session_uid in assigned])
+        if weekend is None:
+            return []
+        return weekend_rows([s for s in all_sessions if s.weekend_link_id == weekend])
 
     def _target(self) -> tuple[int, int] | None:
         """This page's ``(season_id, round_number)``, or None before ``load`` has run."""
@@ -290,6 +321,65 @@ class WeekendPage(QWidget):
             "belongs to one round at a time.",
             partial(self._assign, session_uid))
 
+    # --- share ------------------------------------------------------------------
+    def _share_document(self) -> ShareDocument | None:
+        """The championship as of this round, or None if the round has gone (E19).
+
+        ``standings_share`` takes the whole calendar and slices it at this round itself, so the meta
+        line counts against the season's length - which means ``rounds_with_results``, paid here
+        once per click and still never by ``reload``.
+        """
+        if self._round() is None:
+            return None
+        season = self._seasons.get_season(self._season_id)
+        rounds = self._seasons.rounds_with_results(self._season_id, self._sessions)
+        return standings_document(season, rounds, season_phrase(season),
+                                  self._standings_roster(season, rounds),
+                                  through=self._round_number)
+
+    def _weekend_export(self) -> WeekendExport | None:
+        """This weekend as a folder of images, standings last - or None with nothing to export.
+
+        The rows are resolved on the click the way ``reload`` resolves them, so the folder holds what
+        is stored now, card for card, and a round that has gone resolves none. Drivers are named
+        through ``self._rosters`` as the last paint left it, as Session detail's Share names them:
+        re-reading here could name a driver one way in the folder and another on the page it was
+        saved from.
+        """
+        rows = self._weekend_rows(self._sessions.list_sessions(),
+                                  self._read_placements(self._seasons.list_seasons()))
+        if not rows:
+            return None
+        season = self._seasons.get_season(self._season_id)
+        return weekend_documents(
+            rows, self._round_number, season_phrase(season), self._share_document(),
+            penalties_of=self._stored_penalties,
+            name_of_for=lambda session: display_name_fn(
+                self._rosters.roster_for_session(session.session_uid)))
+
+    def _standings_roster(self, season, rounds) -> LeagueRoster | None:
+        """The roster the season page ranks this season with, or None for a solo career season.
+
+        The same load-or-seed call and the same fallback when a roster file will not load - its
+        warning, then an empty roster - so the standings shared from here are the season page's.
+        """
+        if season.mode not in ROSTER_SEASON_MODES:
+            return None
+        try:
+            return self._roster_files.roster_for(season, rounds, self._seasons.list_seasons)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "League roster", f"Could not load roster:\n\n{exc}")
+            return LeagueRoster()
+
+    def _stored_penalties(self, session) -> tuple:
+        """A session's stored penalties, or none when the page was built without an event store.
+
+        Session detail's rule (``detail_page._stored_penalties``): an empty read is handed on to
+        ``race_control`` to interpret, never taken here to mean a clean session.
+        """
+        if self._event_store is None:
+            return ()
+        return self._event_store.load_penalties(str(session.session_uid))
 
     # --- write the assignments ------------------------------------------------
     def _on_assign(self) -> None:

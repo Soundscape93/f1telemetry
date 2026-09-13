@@ -255,23 +255,30 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `toggled` and the page remembers, because the two pages remember opposite things (which cards
   were opened vs which were closed). Shared as a widget rather than a base class — see
   DECISIONS → UI.
-  **The share/export trio (E19)** is the `car_status.py` / `car_status_graphic.py` split again, and
-  lives here rather than under a surface because branch 7's standings export is a Seasons-side
+  **The share/export modules (E19)** are the `car_status.py` / `car_status_graphic.py` split
+  again, and live here rather than under a surface because the standings export has a Seasons-side
   caller and `components/` must not import a surface package. `share_document.py` (**Qt-free**) is
   the document *model* every export builds — `ShareDocument(title, name, meta, blocks, footer)` over
   `Table` (columns with alignment and wrapping, per-cell `Tone` and `strong`, icons by reference
-  rather than by pixmap), `Facts` and `Notes` — plus the file-name convention `file_stem(*parts)`
-  and `unique_path(folder, stem)`, which yields `stem`, `stem-2`, … so a save never silently
-  overwrites and a whole weekend can land in one folder. It is deliberately general enough for a
-  standings table, which its tests assert from real `StandingRow` / `ConstructorRow` objects.
-  `share_image.py` renders one: `document_html(document, icons)` is **Qt-free**, so the renderer's
-  every decision is a string the suite can assert before it is ever pixels, and `render_document`
-  paints it to a 1080 px `QImage` under a **fixed light palette** — set both in the HTML and on the
-  `PaintContext`, so the app's theme never reaches the file. `share_control.py` is the delivery:
-  `copy_image` (verified by reading the clipboard back), `save_image` (a `QSaveFile` write into
-  `paths.exports_dir()`) and `ShareControl`, a "Share ▾" tool button that asks a **callable** for
-  its document when clicked, so a page hosting it keeps no state and a later export adds a menu
-  entry rather than a second control. See DECISIONS → UI.
+  rather than by pixmap), `Facts`, `Notes`, and `SideBySide`, which sets blocks next to each other
+  (the standings' two narrow tables) — plus the file-name convention `file_stem(*parts)` and
+  `unique_path(folder, stem, suffix)`, which yields `stem`, `stem-2`, … for a file or a folder, so a
+  save never silently overwrites. `share_image.py` renders one: `document_html(document, icons)` is
+  **Qt-free**, so the renderer's every decision is a string the suite can assert before it is ever
+  pixels, and `render_document` paints it to a 1080 px `QImage` under a **fixed light palette** —
+  set both in the HTML and on the `PaintContext`, so the app's theme never reaches the file.
+  `share_control.py` is the delivery: `copy_image` (verified by reading the clipboard back),
+  `save_image` (a `QSaveFile` write into `paths.exports_dir()`), `save_documents` (a set of
+  documents into a fresh subfolder of a chosen folder, stopping at the first failed write) and
+  `ShareControl`, a "Share ▾" tool button that asks a **callable** for its document when clicked,
+  so a page hosting it keeps no state. Its `subject` is the menu's word ("image", "standings"), and
+  a `folder_fn` returning a plain `(stem, documents)` pair adds a folder entry — which is how the
+  weekend page's "Save weekend…" is a menu entry rather than a second control.
+  **`standings_share.py`** (Qt-free) builds a season's standings document, whole or as of a round,
+  for both the season page and the weekend page — here because Seasons must not import Sessions.
+  `driver_standings` is the **one** place that chooses the roster-grouped league table over the
+  by-name one, and the season page paints its own table through it, so the page and the image
+  cannot disagree. See DECISIONS → UI.
   `panels.py` holds `panel_box(title, content, fill=, scroll=)` — the titled, lightly framed
   section every page's content sits in. It was the session detail page's private `_box` until the
   weekend page needed the same half-width classification boxes; promoting it rather than copying
@@ -323,7 +330,8 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   A `_show_*` switches the page first, then calls its `load`/`reload`, so a vanished-target
   fallback signal re-navigates last and wins. Pages: `overview_page.py` (season cards / empty
   state + delete), `create_page.py` (the form + create), `detail_page.py` (calendar + standings +
-  roster panel), `edit_calendar_page.py` (re-author an existing calendar with the same `CalendarPicker` the create
+  roster panel, and a **Share ▾** over the standings that re-reads the season when clicked),
+  `edit_calendar_page.py` (re-author an existing calendar with the same `CalendarPicker` the create
   page uses; names the locked rounds up front and lets `set_calendar` refuse the rest — validation
   at save rather than affordances in the picker, so the rule is testable without a `QApplication`).
   It is **not** in `refresh()`'s if-chain on purpose: an ingest completing mid-edit must not reload
@@ -360,12 +368,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   result is already its card's summary line and a table per session was height without an answer —
   a nine-session sprint weekend opened as nine full grids. It shows the *weekend's stored* sessions rather than
   the *round's assigned* ones, so every attempt at a slot appears; a round with nothing assigned has
-  no weekend and says so. It never calls `rounds_with_results` (E1c's cost).
+  no weekend and says so. `reload` never calls `rounds_with_results` (E1c's cost).
   It is also the **writer of `season_assignments`** (E1b): each card carries **Unassign**,
   **Assign** or **Move here**, only the rows *not* in this round carry a note ("not assigned", or
   the round they are in), and a write is followed by the automatic weekend proposal, confirmed and
   declinable (DECISIONS → Storage). The page asks the questions and performs the writes; what may
   be offered is `assignment.py`'s.
+  Its header carries **Share ▾** before "Assign sessions…": the standings as of the round, and
+  "Save weekend…" — `weekend_share.weekend_documents` over the same `_weekend_rows` that `reload`
+  paints, so the folder holds what the page lists. The session images name drivers through the
+  `SessionRosters` the cards were painted with, the standings use the season page's load-or-seed
+  roster, and only a click pays for `rounds_with_results`.
   **`weekend_view.py`** (Qt-free) is what those two pages share instead of a base class: `overview_rows`
   (store order, slot label per session resolved against the whole pool, the track/label filter),
   `weekend_rows` (one weekend in running order — a row per attempt at every slot, plus a `SlotRow`
@@ -385,13 +398,18 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `picker_rows` (the picker's rows: suggestions first, then the unassigned, then whole weekends
   newest first). Every rule is asserted without a `QApplication` (DECISIONS → Storage).
   **`session_share.py`** (Qt-free) turns one session into a `components.share_document`
-  `ShareDocument` — the surface-specific half of E19, and the only part branch 7 replaces rather
-  than reuses. It arranges the page's own helpers and re-derives nothing: `slot_label` for the
+  `ShareDocument` — the surface-specific half of E19, which a whole weekend reuses unchanged. It
+  arranges the page's own helpers and re-derives nothing: `slot_label` for the
   title, `race_control`'s rows and note for the penalties, and the `formatting` helper
   `build_classification_table` calls for each cell. Where a still image cannot do what the page
   does by alternating a cell, it says so in the open instead — `PEN` and `GRID PENALTY` become
   columns, present only when a row fills one. Every string it decides is unit-tested, and the whole
   table was cross-checked cell by cell against the page's own over every session in the database.
+  **`weekend_share.py`** (Qt-free) is a whole weekend as a folder: `weekend_documents` calls
+  `session_document` once per session row, names each file by its **running position**
+  (`02_1159_Practice-2`) rather than its clock time, appends the round's standings last, and names
+  the folder `date_track_Round-N` from the day the weekend started. It returns a `WeekendExport`,
+  a `NamedTuple` — a plain pair `ShareControl` can take without importing a surface.
   **`assign_dialog.py`** (`AssignDialog`) is the picker behind "Assign sessions…", and the only
   way into a round with no weekend: it lists stored *sessions* rather than a weekend, defaults to
   the round's own track with a checkbox for the rest, and keeps a session assigned elsewhere listed

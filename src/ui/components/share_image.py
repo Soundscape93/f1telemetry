@@ -14,6 +14,13 @@ longer penalty list makes a taller image rather than a cut one - the reason a sc
 page was rejected. The width holds because every column of names may wrap (``Column.wrap``); if a
 layout still came out wider, the image would widen rather than clip.
 
+**Narrow tables share the width rather than stretching across it.** ``SideBySide`` gives each of
+its blocks an equal cell of one row - the standings' tables of four columns and three, which at full
+width were mostly white space. A name still wraps rather than being cut: at half width a
+31-character name in wide capitals breaks onto a second line, and its flag then sits on a line of
+its own above it, while the same length in ordinary lower case still fits. That was accepted rather
+than worked around, since every name stored here fits on one line.
+
 **The type is sized to the worst session in this database.** Shanghai's Sprint Race - 22 drivers
 and 11 penalty rows - comes out 1080 x 1547 with a 17 px body. WhatsApp's standard quality is
 believed to cap a photo's long side at 1600 px; a 22 px body made that session over 2000 px tall, so
@@ -52,11 +59,23 @@ from PySide6.QtGui import (
 from PySide6.QtSvg import QSvgRenderer
 
 from .flags import flag_path
-from .share_document import Block, Cell, Facts, Icon, IconKind, ShareDocument, Table, Tone
+from .share_document import (
+    Block,
+    Cell,
+    Facts,
+    Icon,
+    IconKind,
+    ShareDocument,
+    SideBySide,
+    Table,
+    Tone,
+)
 from .tyres import tyre_pixmap
 
 WIDTH = 1080                   # px fixed; the height follows the content
 _MARGIN = 40                   # px of paper on every side
+_GUTTER = _MARGIN              # px between blocks set side by side
+_SECTION_GAP = 28              # px above a block's heading
 
 # The type scale, in px, sized to the worst session here (see module docstring).
 _TITLE_PX = 32
@@ -144,6 +163,8 @@ def render_document(document: ShareDocument) -> QImage:
 
 # --- markup ---------------------------------------------------------------------------------------
 def _block_html(block: Block, icons: Container[Icon]) -> str:
+    if isinstance(block, SideBySide):
+        return _side_by_side_html(block, icons)
     if isinstance(block, Table):
         return _table_html(block, icons)
     if isinstance(block, Facts):
@@ -151,6 +172,19 @@ def _block_html(block: Block, icons: Container[Icon]) -> str:
     return _heading_html(block.title) + "".join(
         _paragraph(_cell_html(line, icons), "margin-top:0; margin-bottom:6px")
         for line in block.lines)
+
+
+def _side_by_side_html(row: SideBySide, icons: Container[Icon]) -> str:
+    """Each block in an equal, top-aligned cell of one full-width row, with a gutter between them.
+
+    The row carries the gap above it because Qt drops the top margin of a cell's first paragraph:
+    without it, the tables' titles sat flush under the meta line.
+    """
+    share = f"{100 // len(row.blocks)}%"
+    cells = f'<td width="{_GUTTER}">{_EMPTY}</td>'.join(
+        f'<td valign="top" width="{share}">{_block_html(block, icons)}</td>' for block in row.blocks)
+    return (f'<table width="100%" cellspacing="0" cellpadding="0" '
+            f'style="margin-top:{_SECTION_GAP}px"><tr>{cells}</tr></table>')
 
 
 def _table_html(table: Table, icons: Container[Icon]) -> str:
@@ -191,7 +225,7 @@ def _heading_html(title: str, note: str = "") -> str:
     out = ""
     if title:
         out += _paragraph(_escape(title), f"font-size:{_SECTION_PX}px; font-weight:{_STRONG_WEIGHT}; "
-                                         "margin-top:28px; margin-bottom:4px")
+                                         f"margin-top:{_SECTION_GAP}px; margin-bottom:4px")
     if note:
         out += _paragraph(_escape(note), f"color:{_MUTED}; margin-top:0; margin-bottom:8px")
     return out

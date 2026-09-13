@@ -211,7 +211,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 |---|---|---|---|
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
-| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export, and — tentatively — **E1e** | `minor` | no — and **must not cause one** |
+| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export, and — tentatively — **E1e** | `minor` | no — and **must not cause one**; an *optional* re-read corrects one misspelt driver name (2026-09-13) |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
 and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
@@ -287,7 +287,7 @@ re-run under WAL on 2026-08-05 and passes.
 | E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
 | E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **done 2026-09-11** — **branch 5 of v0.11.0**: the round-centric page is deleted with no caller left, and Session detail now goes back to the page that opened it. Planned 2026-09-01 as the whole of v0.11.0 in **seven branches**, order forced (see the note below); v0.11.0 continues with **E19** (branches 6–7) and, tentatively, **E1e** (branch 8) | **`E1_E2_PLAN.md`**; the note below |
 | A8 | `weekend_slots` silently drops a re-driven session's second attempt | **in progress** — **branch 2 of v0.11.0**; found 2026-09-01 while measuring the link identifiers, reproduced against the live database | the note below; DECISIONS → UI |
-| E19 | Share / export a session's result to the league chat | **in progress** — **branch 6 done 2026-09-12** (the shared model, renderer and delivery, plus Session detail's **Share ▾**); **branch 7** is the weekend **and the standings as of that round**. New 2026-09-01; PNG the app renders itself, format prototyped before it was chosen, scope changed 2026-09-11 | DECISIONS → UI; the note below |
+| E19 | Share / export a session's result to the league chat | **done 2026-09-13** — **branch 6** 2026-09-12 (the shared model, renderer and delivery, plus Session detail's **Share ▾**); **branch 7** 2026-09-13 (standings from the season page; a round's standings and its whole weekend from the weekend page). New 2026-09-01; PNG the app renders itself, format prototyped before it was chosen, scope changed 2026-09-11 | DECISIONS → UI; the note below |
 | E20 | Season page restructure — calendar \| results matrix \| standings, with the detail area below | **proposed 2026-09-11**, not scheduled — surfaced by E19's scope change: sharing standings needs them readable on the season page first. **After branch 7**, its own release (v0.12.0 or later) | the note below |
 | E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
@@ -486,7 +486,7 @@ the unit tests are its only cover.
 | 4 | `feature/session-centric-assignment` | **E1b** + the automatic proposal — **done 2026-09-07** |
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes — **done 2026-09-11** |
 | 6 | `feature/share-session-results` | **E19** — the shared document model, renderer and delivery, proved on **one session** — **done 2026-09-12** |
-| 7 | `feature/share-weekend-results` | **E19** — a whole weekend **plus the standings as of that round**, and standings on their own from the season page; reuses branch 6's machinery unchanged |
+| 7 | `feature/share-weekend-results` | **E19** — a whole weekend **plus the standings as of that round**, and standings on their own from the season page; reuses branch 6's machinery, adding one layout block — **done 2026-09-13** |
 | 8 | *tentative — named when it is planned* | **E1e** — added 2026-09-11; only if both in-game measurements are in before release, v0.12.0 otherwise (the E1e note below) |
 
 **Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
@@ -648,6 +648,18 @@ database come out 1080 px wide with a median height of 1158 and **none over 1600
 application renders a byte-identical file. The builder was cross-checked against the page's own
 `build_classification_table` **cell by cell over all 64 sessions — 6,837 cells, 0 differences**.
 Confirmed end to end through WhatsApp on Android: sent at 1080 × 1551, arrived unchanged.
+
+**Branch 7 shipped 2026-09-13, and E19 is done.** The season page's **Share ▾** shares its
+standings; a round's weekend page shares the standings *as of that round* and, through **Save
+weekend…**, the whole weekend as a fresh folder — one numbered PNG per session in running order,
+standings last (measured: 9 weekend folders, 62 files, tallest 1547 px). The per-session builder
+was reused unchanged; the standings builder (`components/standings_share.py`) is the one place that
+chooses a league table over a by-name one, and the season page now paints through it too. **The
+open question from E1c was measured rather than argued:** `rounds_with_results` on a Share click
+costs about 32 ms on the largest season here, where E1c's objection was paying it per row while
+painting. **The model did need one addition** — `SideBySide`, for the standings' two narrow tables
+— which cut the tallest standings image from 1519 to 1083 px and left all 64 session images
+byte-identical. Full reasoning in DECISIONS → UI.
 
 **E20 — the season page restructure. *Proposed 2026-09-11, not scheduled.*** Surfaced by E19's
 scope change rather than asked for on its own: sharing a season's standings means they have to be
