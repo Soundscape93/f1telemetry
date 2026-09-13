@@ -19,6 +19,7 @@ from f1telemetry.src.ui.components.share_document import (
     IconKind,
     Notes,
     ShareDocument,
+    SideBySide,
     Table,
     Tone,
 )
@@ -222,13 +223,45 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(1, _html().count("<p"))            # the title alone
 
     def test_a_standings_document_renders_both_of_its_tables(self):
-        """The model's third target, through the same markup: a header and a row per standing."""
+        """The model's third target, through the same markup: one row holding both tables, each a
+        header and a row per standing."""
         document = standings_document()
         html = document_html(document, document.icons())
-        self.assertEqual(2, html.count("<table"))
-        self.assertEqual(1 + 6 + 1 + 4, html.count("<tr"))
+        self.assertEqual(1 + 2, html.count("<table"))
+        self.assertEqual(1 + (1 + 6) + (1 + 4), html.count("<tr"))
         self.assertEqual(6, html.count("<img"))             # a flag in every driver's cell...
         self.assertEqual(5, len(set(re.findall(r'<img src="([^"]+)"', html))))   # ...two share one
+
+
+class SideBySideTests(unittest.TestCase):
+    """Blocks next to each other: one full-width row, an equal cell for each."""
+
+    _DRIVERS = Table((Column("DRIVER"),), rows=((Cell("soundscape93"),),), title="Drivers")
+    _TEAMS = Table((Column("TEAM"),), rows=((Cell("Ferrari"),),), title="Constructors")
+
+    def test_each_block_gets_an_equal_top_aligned_cell_with_a_gutter_between(self):
+        html = _html(SideBySide((self._DRIVERS, self._TEAMS)))
+        self.assertEqual(['<td valign="top" width="50%">', '<td width="40">',
+                          '<td valign="top" width="50%">'],
+                         re.findall(r'<td (?:valign="top" )?width="[^"]+">', html))
+
+    def test_three_blocks_share_the_width_in_thirds(self):
+        html = _html(SideBySide((self._DRIVERS, self._TEAMS, Notes((Cell("x"),)))))
+        self.assertEqual(3, html.count('<td valign="top" width="33%">'))
+        self.assertEqual(2, html.count('<td width="40">&nbsp;</td>'))
+
+    def test_the_row_carries_the_gap_its_headings_lose_inside_a_cell(self):
+        """Qt drops the top margin of a cell's first paragraph; without this the tables' titles sat
+        flush under the meta line. The gap is the one a heading has on its own."""
+        self.assertIn("margin-top:28px; margin-bottom:4px", _html(self._DRIVERS))
+        self.assertIn('<table width="100%" cellspacing="0" cellpadding="0" style="margin-top:28px">',
+                      _html(SideBySide((self._DRIVERS, self._TEAMS))))
+
+    def test_a_block_is_drawn_beside_another_exactly_as_it_is_drawn_alone(self):
+        alone = _html(self._DRIVERS)
+        drivers = alone[alone.index('<p style="font-size:22px'):alone.rindex("</table>") + 8]
+        self.assertIn(drivers, _html(SideBySide((self._DRIVERS, self._TEAMS))))
+
 
 if __name__ == "__main__":
     unittest.main()

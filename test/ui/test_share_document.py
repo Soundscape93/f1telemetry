@@ -1,9 +1,8 @@
 """The shareable document and its file names - the surface-neutral half of E19, without Qt.
 
-One session is the only document shipped with this, and the weekend and the standings come next.
-The standings are not exported yet, so the test that matters most here builds a standings-shaped
-document out of the real ``StandingRow`` and ``ConstructorRow``: the proof that the *model*, and
-not only the session builder, can say what the season page shows.
+The test that matters most here builds a standings-shaped document by hand, out of the real
+``StandingRow`` and ``ConstructorRow`` and laid out as ``standings_share`` lays one out: the proof
+that the *model*, and not only a builder, can say what the season page shows.
 
 The standings fixture is this database's own league - Mittwoch League after round 3, as
 ``league_standings_for_rounds`` and ``constructor_standings_for_rounds`` computed it.
@@ -24,6 +23,7 @@ from f1telemetry.src.ui.components.share_document import (
     IconKind,
     Notes,
     ShareDocument,
+    SideBySide,
     Table,
     Tone,
     file_stem,
@@ -49,7 +49,7 @@ _CONSTRUCTORS = (
 
 
 def standings_document(drivers=_DRIVERS, constructors=_CONSTRUCTORS) -> ShareDocument:
-    """A championship as a later export is expected to build it - here only to prove the model can.
+    """A championship as ``standings_share`` lays one out: the two tables side by side.
 
     The columns are the season page's own (``Pos / Driver / No. / Points`` and ``Pos / Team /
     Points``). Shared with ``test_share_image`` so the renderer's markup is asserted on this same
@@ -73,7 +73,7 @@ def standings_document(drivers=_DRIVERS, constructors=_CONSTRUCTORS) -> ShareDoc
         title="Mittwoch League — standings after round 3",
         name=file_stem("Season 1", "Standings after round 3"),
         meta="Season 1 (“Mittwoch League”)  ·  3 of 24 rounds",
-        blocks=(driver_table, constructor_table),
+        blocks=(SideBySide((driver_table, constructor_table)),),
         footer="f1telemetry")
 
 
@@ -127,11 +127,27 @@ class IconTests(unittest.TestCase):
                                            blocks=(Notes((Cell("text"),)),)).icons())
 
 
+class SideBySideTests(unittest.TestCase):
+    """Blocks set next to each other are still the document's blocks."""
+
+    def test_an_empty_row_is_refused(self):
+        """A builder that meant to lay something out has lost it; drawn, it would be a silent gap."""
+        with self.assertRaisesRegex(ValueError, "side by side needs at least one block"):
+            SideBySide(())
+
+    def test_the_icons_inside_it_are_found_in_order_and_once(self):
+        swiss, italian = Icon(IconKind.FLAG, 79), Icon(IconKind.FLAG, 41)
+        document = ShareDocument(title="t", name="n", blocks=(
+            SideBySide((Notes((Cell("a", icon=swiss),)), Notes((Cell("b", icon=italian),)))),
+            Notes((Cell("c", icon=swiss),))))
+        self.assertEqual((swiss, italian), document.icons())
+
+
 class StandingsShapeTests(unittest.TestCase):
     """A standings table, built from the real standings rows, is something the model can say."""
 
     def test_the_driver_table_carries_every_row_with_its_flag(self):
-        drivers = standings_document().blocks[0]
+        drivers = standings_document().blocks[0].blocks[0]
         self.assertEqual(["POS", "DRIVER", "NO.", "POINTS"], [c.header for c in drivers.columns])
         self.assertEqual(
             [("1", "patrickstein12", "2", "65"), ("2", "remoriginal69", "97", "51"),
@@ -142,7 +158,7 @@ class StandingsShapeTests(unittest.TestCase):
 
     def test_the_constructor_table_names_teams_the_way_the_page_does(self):
         """``team_display_name``, so "Ferrari '26" reads "Ferrari" here as it does on screen."""
-        constructors = standings_document().blocks[1]
+        constructors = standings_document().blocks[0].blocks[1]
         self.assertEqual(["POS", "TEAM", "POINTS"], [c.header for c in constructors.columns])
         self.assertEqual(
             [("1", "Red Bull Racing", "116"), ("2", "Ferrari", "94"), ("3", "Cadillac", "25"),
@@ -150,7 +166,7 @@ class StandingsShapeTests(unittest.TestCase):
             [tuple(cell.text for cell in row) for row in constructors.rows])
 
     def test_numbers_sit_right_and_names_may_wrap(self):
-        for table in standings_document().blocks:
+        for table in standings_document().blocks[0].blocks:
             with self.subTest(table=table.title):
                 self.assertEqual(Align.RIGHT, table.columns[0].align)
                 self.assertEqual(Align.RIGHT, table.columns[-1].align)

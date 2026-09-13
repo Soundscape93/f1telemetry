@@ -45,6 +45,7 @@ from .share_document import (
     IconKind,
     Notes,
     ShareDocument,
+    SideBySide,
     Table,
     Tone,
     file_stem,
@@ -103,15 +104,17 @@ def standings_document(season, rounds, season_name: str, roster=None,
 
 # --- the blocks ------------------------------------------------------------------------------------
 def _blocks(drivers, constructors, skipped: str) -> tuple:
-    """The two tables - or, with nothing to rank, one line saying so rather than two empty grids.
+    """The two tables side by side - or, with nothing to rank, one line saying so instead.
 
-    A heading over nothing is a legal table, but an image of two of them says less than a sentence
-    does, and this is a real state: a round whose race has not been driven yet.
+    Side by side because both are narrow, four columns and three: stacked at full width they were
+    mostly white space, and the image came out about 40% taller. A heading over nothing is a legal
+    table, but an image of two of them says less than a sentence does, and this is a real state: a
+    round whose race has not been driven yet.
     """
     if not drivers and not constructors:
         lines = (Cell(_NOTHING_SCORED),) + ((Cell(skipped, Tone.MUTED),) if skipped else ())
         return (Notes(lines, title="Standings"),)
-    return (_driver_table(drivers, skipped), _constructor_table(constructors))
+    return (SideBySide((_driver_table(drivers, skipped), _constructor_table(constructors))),)
 
 
 def _driver_table(drivers, note: str) -> Table:

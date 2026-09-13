@@ -18,7 +18,7 @@ from f1telemetry.src.protocol.enums import (
     SessionType,
     Weather,
 )
-from f1telemetry.src.ui.components.share_document import Align, Notes, Table
+from f1telemetry.src.ui.components.share_document import Align, Notes, SideBySide, Table
 from f1telemetry.src.ui.components.standings_share import driver_standings, standings_document
 from f1telemetry.src.version import __version__
 
@@ -90,6 +90,16 @@ def _texts(table):
     return [tuple(cell.text for cell in row) for row in table.rows]
 
 
+def _drivers(document):
+    """The drivers' table: the first of the two set side by side."""
+    return document.blocks[0].blocks[0]
+
+
+def _constructors(document):
+    """The constructors' table, beside the drivers'."""
+    return document.blocks[0].blocks[1]
+
+
 class TitleTests(unittest.TestCase):
     """What the image calls itself, and what it saves as."""
 
@@ -143,20 +153,20 @@ class SliceTests(unittest.TestCase):
         """Fabibyte leads after two rounds on a tie broken by name, and loses the lead at Suzuka."""
         self.assertEqual([("1", "Fabibyte", "11", "43"), ("2", "soundscape93", "50", "43"),
                           ("3", "Sergio Perez", "11", "27")],
-                         _texts(_document(through=2).blocks[0]))
+                         _texts(_drivers(_document(through=2))))
         self.assertEqual([("1", "soundscape93", "50", "58"), ("2", "Fabibyte", "11", "55"),
                           ("3", "Sergio Perez", "11", "52")],
-                         _texts(_document(through=3).blocks[0]))
+                         _texts(_drivers(_document(through=3))))
 
     def test_the_round_named_is_included_rather_than_stopped_before(self):
         """"After round 1" means round 1 has been run, not that it is still to come."""
         self.assertEqual([("1", "soundscape93", "50", "25"), ("2", "Fabibyte", "11", "18"),
                           ("3", "Sergio Perez", "11", "15")],
-                         _texts(_document(through=1).blocks[0]))
+                         _texts(_drivers(_document(through=1))))
 
     def test_no_round_is_dropped_when_none_is_named(self):
         self.assertEqual(["58", "55", "52"],
-                         [row[-1].text for row in _document().blocks[0].rows])
+                         [row[-1].text for row in _drivers(_document()).rows])
 
 
 class StandingsRuleTests(unittest.TestCase):
@@ -179,27 +189,27 @@ class StandingsRuleTests(unittest.TestCase):
         rows = driver_standings(_ROUNDS, _ROSTER)
         self.assertEqual([(str(row.position), row.driver_name, str(row.race_number),
                            str(row.points)) for row in rows],
-                         _texts(_document().blocks[0]))
+                         _texts(_drivers(_document())))
 
 
 class TableShapeTests(unittest.TestCase):
-    """The two tables are the season page's own, laid out for a still image."""
+    """The two tables are the season page's own, set side by side for a still image."""
 
     def test_the_driver_table_carries_the_page_s_columns(self):
-        drivers = _document().blocks[0]
+        drivers = _drivers(_document())
         self.assertEqual("Drivers", drivers.title)
         self.assertEqual(["POS", "DRIVER", "NO.", "POINTS"], [c.header for c in drivers.columns])
 
     def test_the_constructor_table_names_teams_the_way_the_page_does(self):
         """``team_display_name``, so "Ferrari '26" reads "Ferrari" here as it does on screen."""
-        constructors = _document().blocks[1]
+        constructors = _constructors(_document())
         self.assertEqual("Constructors", constructors.title)
         self.assertEqual(["POS", "TEAM", "POINTS"], [c.header for c in constructors.columns])
         self.assertEqual([("1", "Ferrari", "113"), ("2", "Red Bull Racing", "52")],
                          _texts(constructors))
 
     def test_numbers_sit_right_and_only_names_may_wrap(self):
-        for table in _document().blocks:
+        for table in _document().blocks[0].blocks:
             with self.subTest(table=table.title):
                 self.assertEqual(Align.RIGHT, table.columns[0].align)
                 self.assertEqual(Align.RIGHT, table.columns[-1].align)
@@ -208,7 +218,7 @@ class TableShapeTests(unittest.TestCase):
 
     def test_every_driver_carries_the_flag_the_page_shows_beside_their_name(self):
         self.assertEqual([_SWISS, _ITALIAN, _MEXICAN],
-                         [row[1].icon.key for row in _document().blocks[0].rows])
+                         [row[1].icon.key for row in _drivers(_document()).rows])
 
     def test_one_flag_serves_every_driver_of_a_nationality(self):
         self.assertEqual([_SWISS, _ITALIAN, _MEXICAN],
@@ -216,7 +226,7 @@ class TableShapeTests(unittest.TestCase):
 
     def test_the_total_is_the_one_emphasised_cell_in_a_row(self):
         """It is what the table is read for, and a photo needs an anchor the page does not."""
-        for row in _document().blocks[0].rows:
+        for row in _drivers(_document()).rows:
             self.assertEqual([False, False, False, True], [cell.strong for cell in row])
 
 
@@ -229,17 +239,17 @@ class NotCountedTests(unittest.TestCase):
         rounds = (_ROUNDS[0], self._REBUILT) + _ROUNDS[2:]
         self.assertEqual("One race is missing from these totals: the game sent no final "
                          "classification for it, so it awarded no points.",
-                         _document(rounds=rounds).blocks[0].note)
+                         _drivers(_document(rounds=rounds)).note)
 
     def test_several_are_counted_in_the_same_sentence(self):
         rebuilt = _round(3, _SUZUKA, (_session(_grid(15, 12, 25), reconstructed=True, uid=3),))
         rounds = (_ROUNDS[0], self._REBUILT, rebuilt) + _ROUNDS[3:]
         self.assertEqual("2 races are missing from these totals: the game sent no final "
                          "classification for them, so they awarded no points.",
-                         _document(rounds=rounds).blocks[0].note)
+                         _drivers(_document(rounds=rounds)).note)
 
     def test_a_season_that_counted_everything_says_nothing(self):
-        self.assertEqual("", _document().blocks[0].note)
+        self.assertEqual("", _drivers(_document()).note)
 
     def test_a_skipped_race_is_not_a_counted_round_either(self):
         rounds = (_ROUNDS[0], self._REBUILT) + _ROUNDS[2:]
@@ -249,7 +259,7 @@ class NotCountedTests(unittest.TestCase):
         """The note describes the totals shown, so it is sliced with them."""
         rounds = (_ROUNDS[0], _ROUNDS[1], _round(
             3, _SUZUKA, (_session(_grid(15, 12, 25), reconstructed=True, uid=3),)))
-        self.assertEqual("", _document(rounds=rounds, through=2).blocks[0].note)
+        self.assertEqual("", _drivers(_document(rounds=rounds, through=2)).note)
 
 
 class NothingToRankTests(unittest.TestCase):
@@ -280,8 +290,11 @@ class NothingToRankTests(unittest.TestCase):
         self.assertEqual(2, len(lines))
         self.assertTrue(lines[1].text.startswith("One race is missing from these totals"))
 
-    def test_anything_to_rank_is_two_tables(self):
-        self.assertEqual([Table, Table], [type(block) for block in _document().blocks])
+    def test_anything_to_rank_is_two_tables_side_by_side(self):
+        """Four columns and three: stacked at full width they were mostly white space."""
+        blocks = _document().blocks
+        self.assertEqual([SideBySide], [type(block) for block in blocks])
+        self.assertEqual([Table, Table], [type(block) for block in blocks[0].blocks])
 
 
 if __name__ == "__main__":
