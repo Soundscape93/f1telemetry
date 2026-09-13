@@ -62,6 +62,18 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   reconstructed classification says so in as many words, since its only sign on the page — muted
   points — is easy to miss in a photo. Saving twice never overwrites: the second offers `-2`, and
   files go to a new `exports` folder beside your captures and logs.
+- **Standings and whole race weekends can be shared the same way.** A season's page now has
+  **Share ▾** above its standings: **Copy standings** and **Save standings…** give one picture of
+  the drivers' and the constructors' standings side by side, saying how many rounds have counted so
+  far. A round's weekend has **Share ▾** beside **Assign sessions…**, where the same two give the
+  standings as they stood after that round — *Standings after round 3 (Suzuka)* — and **Save
+  weekend…** saves the whole weekend at once: choose a folder and a new one is created inside it,
+  named like `2026-07-05_Shanghai_Round-2`, holding one picture per session, numbered in the order
+  the weekend ran, with the standings last. A session you drove twice is in it twice, told apart by
+  the time in its name, and saving the same weekend again makes a second folder rather than
+  touching the first. **Share** only appears when there is something to share, and if a race could
+  not be counted because its final classification never arrived, the standings picture says so
+  under the table instead of quietly leaving those points out.
 - **League members are now named on the Sessions surface, not just on a season's weekend page.**
   If your league raced with online-name sharing switched off, the game captures every one of you as
   `Player` — so the sessions list and a session's own page could only ever show `Player`. They now
@@ -82,8 +94,15 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
   one attempt to a round leaves the others alone, so you unassign and delete the ones you don't want
   yourself. The same fix stops a re-driven Sprint Race being mistaken for the Grand Prix on a sprint
   weekend, which would have put the wrong result in a season's Results column.
+- **Andrea-Kimi Antonelli's name is spelled correctly.** It read "Andra-Kimi Antonelli". Sessions
+  read from now on get it right; sessions already stored keep the old spelling until you use
+  **Help → Re-read captures…**. That is optional — skip it if one misspelt driver name doesn't
+  bother you.
 
 **Re-ingest needed: no**
+
+Re-reading your captures is optional this release: all it changes is that one driver's name (see
+**Fixed**).
 
 **Known issues**
 
