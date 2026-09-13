@@ -19,6 +19,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.11.0 — 2026-09-13
+
 ### Added
 - **Sessions are now assigned to a round from the Sessions page, and the app offers to fill in the
   rest of the weekend.** Assigning, unassigning and moving a session all happen where the weekend
