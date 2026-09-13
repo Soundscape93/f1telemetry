@@ -88,7 +88,8 @@ def save_image(parent: QWidget, image: QImage, stem: str) -> Path | None:
     return path
 
 
-def save_documents(parent: QWidget, documents: Sequence[ShareDocument], folder_stem: str) -> Path | None:
+def save_documents(parent: QWidget, documents: Sequence[ShareDocument],
+                   folder_stem: str) -> Path | None:
     """Ask where to put ``documents`` and write one PNG per document into a folder of their own.
 
     The chooser opens on the exports folder and picks the *parent*: what is written is a fresh
@@ -184,8 +185,8 @@ class ShareControl(QWidget):
         if path is not None:
             self._show_status(f"Saved {path.name}", tooltip=str(path))
 
-    def save_folder(self) -> None:
-        """The whole set, as a folder of PNGs. Absendt from the menu unless a page asked for it."""
+    def _save_folder(self) -> None:
+        """The whole set, as a folder of PNGs. Absent from the menu unless a page asked for it."""
         export = self._folder_fn()
         if export is None:
             return
