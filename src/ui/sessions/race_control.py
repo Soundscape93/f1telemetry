@@ -39,6 +39,10 @@ other kind, resolving to a classification entry 48 of 48 times and never naming 
 a reason that carries one reads "... with <driver>" and every other reason is untouched, with no
 type test in between.
 
+**Names come from an injected ``name_of``**, defaulting to the entry's own, so a league session's
+Race control box names the same drivers its classification table does (E1c). This module still knows
+nothing about rosters.
+
 Order is the store's - lap, then frame - and is not re-derived. Replay-recovered rows carry
 ``frame = 0`` and sort first within their lap, which is the only ordering they can offer; 2 of the
 129 rows here are such rows and they need no display special case.
@@ -123,7 +127,8 @@ class PenaltySummary:
         return f"{_HEADING} ({self.total})" if self.rows else _HEADING
 
 
-def summarise_penalties(penalties: Sequence, entries: Sequence = ()) -> PenaltySummary:
+def summarise_penalties(penalties: Sequence, entries: Sequence = (),
+                        name_of=lambda entry: entry.driver_name) -> PenaltySummary:
     """A session's penalties as the box should show them.
 
     ``penalties`` are ``SessionPenalty`` rows in ``EventStore.load_penalties`` order, and
@@ -131,16 +136,21 @@ def summarise_penalties(penalties: Sequence, entries: Sequence = ()) -> PenaltyS
     an AI apart from a human. Both are allowed to be empty, and each emptiness means something
     different: no penalties is one of the three states below, while no entries only costs the rows
     their names.
+
+    ``name_of`` resolves each entry's shown name and defaults to the entry's own - the same
+    injection ``build_classification_table`` and the ``formatting`` helpers already take. It is
+    here so a league session names a driver the same way in this box as in the classification
+    above it (E1c); the resolver is built once per session and applies to both.
     """
     by_index = {entry.vehicle_index: entry for entry in entries}
 
     if penalties:
-        rows = tuple(_row(penalty, by_index) for penalty in penalties)
+        rows = tuple(_row(penalty, by_index, name_of) for penalty in penalties)
         sporting = sum(1 for row in rows if row.is_sporting)
         return PenaltySummary(note=_COUNTED_NOTE.format(count=sporting),
                                 rows=rows, sporting_count=sporting)
 
-    aggregates = _aggregate(entries)
+    aggregates = _aggregate(entries, name_of)
     if aggregates:
         return PenaltySummary(note=_NOT_READ_NOTE, aggregates=aggregates)
     return PenaltySummary(note=_NONE_STORED_NOTE)
@@ -167,10 +177,10 @@ def grid_penalty_places(penalties: Sequence) -> dict[int, int]:
 
 
 # --- one row ---------------------------------------------------------------------------------
-def _row(penalty, by_index: dict) -> PenaltyRow:
+def _row(penalty, by_index: dict, name_of) -> PenaltyRow:
     entry = by_index.get(penalty.vehicle_index)
-    driver = _driver_label(penalty.vehicle_index, entry)
-    other = _other_driver(penalty, by_index)
+    driver = _driver_label(penalty.vehicle_index, entry, name_of)
+    other = _other_driver(penalty, by_index, name_of)
     return PenaltyRow(
         lap_number=penalty.lap_number,
         driver=driver,
@@ -179,12 +189,12 @@ def _row(penalty, by_index: dict) -> PenaltyRow:
         reason=_reason(penalty, other),
         is_sporting=penalty.is_sporting,
         # Unresolved reads as not-human: the bold says "the game called this car human", and an
-        # answer we don't have must not be asserted.
+        # answer we don't have must not be asserted
         is_human=entry is not None and not entry.is_ai,
         tooltip=_tooltip(penalty, driver, other))
 
 
-def _other_driver(penalty, by_index: dict) -> str | None:
+def _other_driver(penalty, by_index: dict, name_of) -> str | None:
     """The other car in the incident, named, or None when the game did not give one.
 
     No infringement test: the packet's own 255 sentinel already decides it, and it decides cleanly
@@ -193,17 +203,19 @@ def _other_driver(penalty, by_index: dict) -> str | None:
     index = penalty.other_vehicle_index
     if index is None:
         return None
-    return _driver_label(index, by_index.get(index))
+    return _driver_label(index, by_index.get(index), name_of)
 
 
-def _driver_label(vehicle_index: int, entry) -> str:
+def _driver_label(vehicle_index: int, entry, name_of) -> str:
     """The car's shown name, or ``Car 14``.
 
     The blank check is not defensive padding: a classification row can carry an empty shown name
     (``domain.roster`` treats "" and "Player" as generic), and an empty cell would read as a
-    rendering fault rather than as a driver the game declined to name.
+    rendering fault rather than as a driver the game declined to name. It still earns its place
+    with a league resolver injected - ``league_display_name`` hands back that same empty name when
+    the roster holds no member for the car.
     """
-    name = (getattr(entry, "driver_name", "") or "").strip() if entry is not None else ""
+    name = (name_of(entry) or "").strip() if entry is not None else ""
     return name or f"Car {vehicle_index}"
 
 
@@ -270,15 +282,16 @@ def _tooltip(penalty, driver: str, other: str | None = None) -> str:
 
 
 # --- the state where only the total survived ------------------------------------------------
-def _aggregate(entries: Sequence) -> tuple[str, ...]:
+def _aggregate(entries: Sequence, name_of) -> tuple[str, ...]:
     """One badge line per driver the classification says was penalised, in finishing order.
 
     ``format_penalty_badge`` is the classification table's own badge, called exactly as that table
-    calls it, so the two surfaces cannot word the same fact differently.
+    calls it, so the two surfaces cannot word the same fact differently. The names come through the
+    same ``name_of`` the rows use, for the same reason.
     """
     lines = []
     for entry in entries:
         badge = format_penalty_badge(entry.num_penalties, entry.penalties_time_s)
         if badge:
-            lines.append(f"{_driver_label(entry.vehicle_index, entry)} {_EM_DASH} {badge}")
+            lines.append(f"{_driver_label(entry.vehicle_index, entry, name_of)} {_EM_DASH} {badge}")
     return tuple(lines)

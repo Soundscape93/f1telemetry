@@ -11,6 +11,7 @@ nationality or a missing asset yields ``None`` so the cell simply shows no flag 
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
@@ -41,6 +42,19 @@ def flag_code(nationality_id: int) -> str | None:
     return _NATIONALITY_FLAG.get(nationality_id)
 
 
+def flag_path(nationality_id: int) -> Path | None:
+    """The bundled SVG for a nationality id, or None if unmapped or the asset is missing.
+    
+    Public for the share image (``share_image``), which draws a flag from its SVG at the image's own
+    size rather than scaling this module's 32×24px pixmap down to it.
+    """
+    code = _NATIONALITY_FLAG.get(nationality_id)
+    if code is None:
+        return None
+    path = _FLAGS_DIR / f"{code}.svg"
+    return path if path.exists() else None
+
+
 @lru_cache(maxsize=None)
 def flag_icon(nationality_id: int) -> QIcon | None:
     """A cached flag ``QIcon`` for a nationality id, or None if unmapped or the asset is missing.
@@ -48,11 +62,8 @@ def flag_icon(nationality_id: int) -> QIcon | None:
     Rendered from SVG to a pixmap so it doesn't depend on the optional Qt SVG *icon-engine*
     plugin (only the always-present ``QtSvg`` module).
     """
-    code = _NATIONALITY_FLAG.get(nationality_id)
-    if code is None:
-        return None
-    path = _FLAGS_DIR / f"{code}.svg"
-    if not path.exists():
+    path = flag_path(nationality_id)
+    if path is None:
         return None
     renderer = QSvgRenderer(str(path))
     if not renderer.isValid():

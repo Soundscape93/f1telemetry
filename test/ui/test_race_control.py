@@ -5,8 +5,10 @@ indices, types, laps and the None/0 split are what the game actually sent - and 
 present because it carries a case the wording has to survive. The comments say which.
 """
 import unittest
+from dataclasses import replace
 
 from f1telemetry.src.domain.models import ClassificationEntry, SessionPenalty
+from f1telemetry.src.domain.roster import LeagueMember, LeagueRoster, league_display_name
 from f1telemetry.src.protocol.enums import ResultReason, ResultStatus
 from f1telemetry.src.ui.sessions.race_control import(
     PenaltySummary,
@@ -328,6 +330,74 @@ class ThreeStatesTests(unittest.TestCase):
         self.assertEqual(
             summarise_penalties((), ()),
             PenaltySummary(note="No penalties are stored for this session."))
+
+
+class LeagueNameTests(unittest.TestCase):
+    """The injected ``name_of`` (E1c), which is how this box and the classification table above it
+    are made to name the same driver the same way.
+
+    The fixture is 11708585... - the Abu Dhabi race of the old league, where nobody had online-name
+    sharing on, so every human in the classification reads "Player" and only the race number tells
+    them apart. The roster is that season's saved file.
+    """
+
+    _ROSTER = LeagueRoster(members=(
+        LeagueMember(name="Roli", race_number=24, online_names=("RoliMei",)),
+        LeagueMember(name="Kevin", race_number=50, online_names=("soundscape93",)),
+    ))
+    _NAME_OF = staticmethod(lambda entry: league_display_name(entry, LeagueNameTests._ROSTER))
+
+    @staticmethod
+    def _player(vehicle_index, race_number, **kwargs):
+        """A human captured under the game's generic name, told apart only by race number."""
+        entry = _entry(vehicle_index, "Player", is_ai=False, **kwargs)
+        return replace(entry, race_number=race_number)
+
+    def test_a_generic_name_resolves_to_the_roster_alias(self):
+        entries = (self._player(3, 24), self._player(4, 50))
+        rows = summarise_penalties((_penalty(3, 5, 4, 1),), entries, self._NAME_OF).rows
+        self.assertEqual(rows[0].driver, "RoliMei")
+
+    def test_a_captured_name_is_never_overwritten_by_the_roster(self):
+        """The precedence the whole feature rests on: telemetry wins, the roster is the fallback.
+        ``rolandmeier8302`` on 24 must not become ``RoliMei`` just because the roster has that
+        number - the league weekends that did share online names have to read as they do today."""
+        entry = replace(_entry(3, "rolandmeier8302", is_ai=False), race_number=24)
+        rows = summarise_penalties((_penalty(3, 5, 4, 1),), (entry,), self._NAME_OF).rows
+        self.assertEqual(rows[0].driver, "rolandmeier8302")
+
+    def test_an_unmatched_generic_name_still_falls_back_to_the_car_number(self):
+        """The roster has no member on 88, so there is no name to resolve to and the ``Car N``
+        fallback has to survive a resolver being injected at all."""
+        entry = replace(_entry(7, "", is_ai=False), race_number=88)
+        rows = summarise_penalties((_penalty(7, 5, 4, 1),), (entry,), self._NAME_OF).rows
+        self.assertEqual(rows[0].driver, "Car 7")
+
+    def test_the_other_car_in_a_collision_is_resolved_too(self):
+        """Otherwise one incident reads with a league name on one side and "Player" on the other."""
+        entries = (self._player(3, 24), self._player(4, 50))
+        rows = summarise_penalties((_penalty(3, 6, 4, 2, other=4),), entries, self._NAME_OF).rows
+        self.assertEqual(rows[0].reason, "Small Collision with soundscape93")
+
+    def test_the_tooltip_carries_the_resolved_name(self):
+        """The tooltip keeps the game's own *wording*; the driver is still who the page says it is."""
+        rows = summarise_penalties((_penalty(3, 5, 4, 1),), (self._player(3, 24),),
+                                   self._NAME_OF).rows
+        self.assertIn("RoliMei", rows[0].tooltip)
+
+    def test_the_aggregate_lines_are_resolved_as_well(self):
+        """The pre-PIPELINE_VERSION-5 state names drivers too, and must not disagree with the rows."""
+        entries = (self._player(3, 24, num_penalties=2, penalties_time_s=10),)
+        summary = summarise_penalties((), entries, self._NAME_OF)
+        self.assertEqual(len(summary.aggregates), 1)
+        self.assertTrue(summary.aggregates[0].startswith("RoliMei "), summary.aggregates[0])
+
+    def test_the_default_leaves_every_name_exactly_as_captured(self):
+        """No roster in play is the non-league path, and it is today's behaviour unchanged."""
+        entries = (self._player(3, 24), self._player(4, 50))
+        rows = summarise_penalties((_penalty(3, 6, 4, 2, other=4),), entries).rows
+        self.assertEqual(rows[0].driver, "Player")
+        self.assertEqual(rows[0].reason, "Small Collision with Player")
 
 
 if __name__ == "__main__":

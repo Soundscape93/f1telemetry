@@ -26,6 +26,15 @@ class DataRootTest(unittest.TestCase):
                 self.assertTrue(paths.db_url().startswith("sqlite:///"))
                 self.assertIn("f1league.db", paths.db_url())
 
+    def test_exports_dir_is_per_user_data_under_the_data_root(self):
+        """Where Share saves by default - beside rosters/ and logs/, never beside the exe."""
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "f1data"
+            with mock.patch.dict(os.environ, {paths._ENV_DATA_DIR: str(target)}):
+                self.assertEqual(paths.exports_dir(), target / "exports")
+                self.assertTrue((target / "exports").is_dir())
+                self.assertNotEqual(paths.exports_dir().parent, paths.app_dir())
+
     def test_dev_data_root_is_cwd(self):
         with TemporaryDirectory() as tmp:
             env_without_override = {k: v for k, v in os.environ.items()

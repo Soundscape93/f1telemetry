@@ -142,7 +142,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   **refuses** an edit that would move, re-point or drop a round holding an assigned session —
   raises `CalendarConflictError`; the rule lives in `domain/calendars`, see DECISIONS),
   `assign_session` / `unassign_session`, `assignments_for_season`,
-  `rounds_with_results(season_id, session_store)`. Tables: `seasons`, `season_rounds`,
+  `rounds_with_results(season_id, session_store)`. Two reverse lookups answer "where does this
+  session live?": `assignment_for(uid)` for one session, and `assigned_seasons()` — every assigned
+  uid mapped to its season id, in **one** query — for a whole list at once, which is what the
+  Sessions surface needs to name a page of cards without a query per card. Tables: `seasons`, `season_rounds`,
   `session_assignments`. **`session_assignments.session_uid` is NOT a FK** to `sessions`, so
   re-ingest never wipes manual placements.
 - **`laps.py`** *(lap-view iteration 1a; read API 1b)* — `LapStore`: persists the player's laps and
@@ -186,7 +189,7 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   unstamped rather than crashing start-up.
 - Stores are context managers (dispose the engine on exit).
 - **Filesystem paths** — all *writable* data (DB, `captures/`, `lap_traces/`, `rosters/`, `logs/`,
-  `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
+  `exports/`, `config.json`) and bundled *read-only* assets (the flag SVGs) resolve through **`src/paths.py`**,
   the single path authority: `data_root()` is the CWD in dev (unchanged) and a per-user dir when
   frozen, with `F1TELEMETRY_DATA_DIR` overriding both; `resource_path()` is `_MEIPASS`-aware. The
   app entry points (`MainWindow`, `IngestWorker`, `SeasonRosterFiles`) route through it; callers
@@ -239,8 +242,49 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   session (race vs best-lap columns); for a **reconstructed** race it renders a muted, display-only
   points estimate (`~25`, GP/sprint table by `is_sprint_race`) in place of official points — plus
   `display_name_fn(roster)`, the roster→name resolver passed
-  as `name_of`. The weekend view composes the table from here today; the future Sessions / Laps
-  surfaces reuse the same builder.
+  as `name_of`. The Sessions surface's detail page and weekend-filtered overview both compose the
+  table from here.
+  `session_card.py` holds `SessionCard` — the one foldable session card **both** Sessions
+  overviews build (title, optional `CardAction` buttons, muted recorded-time / driver-count line,
+  and an unfoldable summary row of session / winner / fastest lap / weather / AI difficulty). What
+  differs per page is passed in: the `title` (the plain overview prefixes the track; the weekend
+  page has it in its header), the `actions`, and whether it opens `expanded`. It carries the
+  summary and nothing heavier: a full classification belongs to the weekend's races rather than to
+  a row, so the weekend page renders those beneath its list instead. It never owns the fold
+  *state*: it emits
+  `toggled` and the page remembers, because the two pages remember opposite things (which cards
+  were opened vs which were closed). Shared as a widget rather than a base class — see
+  DECISIONS → UI.
+  **The share/export modules (E19)** are the `car_status.py` / `car_status_graphic.py` split
+  again, and live here rather than under a surface because the standings export has a Seasons-side
+  caller and `components/` must not import a surface package. `share_document.py` (**Qt-free**) is
+  the document *model* every export builds — `ShareDocument(title, name, meta, blocks, footer)` over
+  `Table` (columns with alignment and wrapping, per-cell `Tone` and `strong`, icons by reference
+  rather than by pixmap), `Facts`, `Notes`, and `SideBySide`, which sets blocks next to each other
+  (the standings' two narrow tables) — plus the file-name convention `file_stem(*parts)` and
+  `unique_path(folder, stem, suffix)`, which yields `stem`, `stem-2`, … for a file or a folder, so a
+  save never silently overwrites. `share_image.py` renders one: `document_html(document, icons)` is
+  **Qt-free**, so the renderer's every decision is a string the suite can assert before it is ever
+  pixels, and `render_document` paints it to a 1080 px `QImage` under a **fixed light palette** —
+  set both in the HTML and on the `PaintContext`, so the app's theme never reaches the file.
+  `share_control.py` is the delivery: `copy_image` (verified by reading the clipboard back),
+  `save_image` (a `QSaveFile` write into `paths.exports_dir()`), `save_documents` (a set of
+  documents into a fresh subfolder of a chosen folder, stopping at the first failed write) and
+  `ShareControl`, a "Share ▾" tool button that asks a **callable** for its document when clicked,
+  so a page hosting it keeps no state. Its `subject` is the menu's word ("image", "standings"), and
+  a `folder_fn` returning a plain `(stem, documents)` pair adds a folder entry — which is how the
+  weekend page's "Save weekend…" is a menu entry rather than a second control.
+  **`standings_share.py`** (Qt-free) builds a season's standings document, whole or as of a round,
+  for both the season page and the weekend page — here because Seasons must not import Sessions.
+  `driver_standings` is the **one** place that chooses the roster-grouped league table over the
+  by-name one, and the season page paints its own table through it, so the page and the image
+  cannot disagree. See DECISIONS → UI.
+  `panels.py` holds `panel_box(title, content, fill=, scroll=)` — the titled, lightly framed
+  section every page's content sits in. It was the session detail page's private `_box` until the
+  weekend page needed the same half-width classification boxes; promoting it rather than copying
+  it is the same sharing-by-builder rule as `build_classification_table`. Its companion `_row`
+  (two equal boxes side by side) stayed on the detail page — the weekend page's race row holds one
+  to three boxes and pads a lone one to half width, which that contract does not cover.
   The lap-detail widgets also live here: `damage_panel.py` (`build_damage_table` over the Qt-free
   `damage_rows`, rendered via `tables.build_kv_table` — a shared key/value table with bold section
   headers), `setup_panel.py` (`build_setup_table` over the Qt-free `setup_fields`, rendered as
@@ -272,38 +316,105 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   The SVG-authored → QGraphicsScene path-item approach from DECISIONS; authoring template in
   `docs/car_template.svg`.
 - **`seasons/`** — the seasons surface, split into a thin container plus one widget per page.
-  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the five pages (overview → create
-  → detail → weekend, plus the calendar editor) and does nothing but wire their **navigation
-  signals** to page switches —
-  each page owns its own widgets, its own route state (e.g. the loaded season/round id), and its
-  own data operations (create, delete, assign, roster create/import). Pages never reference
-  siblings; they emit intent (`season_requested`, `weekend_requested`, `create_requested`,
-  `cancelled`, `overview_requested`, `detail_requested`) and the container decides what shows.
-  One signal is deliberately **not** navigation: `sessions_changed`, emitted by the weekend page
-  when its delete action removes a session's stored results and re-emitted by `SeasonsView` for
-  `MainWindow` to fan out. It exists because other surfaces derive cached state from those rows
-  (the laps surface's canonical track map), and the same no-sibling-references rule means the
-  weekend page cannot invalidate that itself.
+  `view.py` holds `SeasonsView`: it owns a `QStackedWidget` of the four pages (overview → create
+  → detail, plus the calendar editor) and does nothing but wire their **navigation signals** to
+  page switches —
+  each page owns its own widgets, its own route state (e.g. the loaded season id), and its
+  own data operations (create and delete a season, roster create/import, calendar edits). Pages
+  never reference siblings; they emit intent (`season_requested`, `weekend_requested`,
+  `create_requested`, `cancelled`, `overview_requested`, `edit_calendar_requested`, `saved`) and
+  the container decides what shows.
+  **Every signal the surface emits is navigation.** It deletes no session: the round-centric
+  weekend page that did, and the `sessions_changed` it re-emitted, were retired in v0.11.0, so
+  `SessionsView.sessions_changed` is the only signal `MainWindow` fans out to the laps cache.
   A `_show_*` switches the page first, then calls its `load`/`reload`, so a vanished-target
   fallback signal re-navigates last and wins. Pages: `overview_page.py` (season cards / empty
   state + delete), `create_page.py` (the form + create), `detail_page.py` (calendar + standings +
-  LEAGUE roster panel), `weekend_page.py` (round-centric session assignment: a capture picker
-  filtered to the round's track, plus each assigned session's foldable classification),
+  roster panel, and a **Share ▾** over the standings that re-reads the season when clicked),
   `edit_calendar_page.py` (re-author an existing calendar with the same `CalendarPicker` the create
   page uses; names the locked rounds up front and lets `set_calendar` refuse the rest — validation
   at save rather than affordances in the picker, so the rule is testable without a `QApplication`).
   It is **not** in `refresh()`'s if-chain on purpose: an ingest completing mid-edit must not reload
   the page and discard work in progress.
   `labels.py` holds the shared `mode_label` / `format_label` / `season_title` helpers.
-  LEAGUE detail/weekend pages are roster-aware: they load-or-seed the season JSON read-only, offer
-  a "Create roster file" button and CSV import, use `league_standings_for_rounds`, and render
-  names through `display_name_fn` (captured public alias first, roster `online_names` fallback)
-  injected into `race_winner_summary` and the classification tables built via `components/`.
+  **A round opens on the Sessions surface** (E1d): the calendar's double-click leaves as
+  `weekend_requested`, which `SeasonsView` re-emits for `MainWindow`, which switches the sidebar
+  and calls `SessionsView.show_weekend` — the same two halves, for the same reason, as
+  `_show_lap`. `SeasonsView.show_season(season_id)` is the way back, from that page's back button.
+  Both `show_season` and `SessionsView.show_weekend` stash their target for a `showEvent` that has
+  not arrived yet, and **only while the surface is hidden** — the window reveals the surface before
+  calling, so an unconditional stash is never consumed and would hijack the next plain visit.
+  The detail page is roster-aware for `ROSTER_SEASON_MODES` seasons (LEAGUE and GRAND_PRIX): it
+  loads-or-seeds the season JSON read-only, offers a "Create roster file" button and CSV import,
+  uses `league_standings_for_rounds`, and renders names through `display_name_fn` (captured public
+  alias first, roster `online_names` fallback) injected into `race_winner_summary` and the
+  standings. The round-centric weekend page that also did this was retired in v0.11.0; the
+  Sessions surface resolves names through `sessions/league_names.py` instead.
 - **`sessions/`** — the Sessions surface (E1), same thin-container pattern as `seasons/`:
   `view.py` (`SessionsView`) owns a `QStackedWidget` and wires navigation signals; pages never
-  reference siblings. `overview_page.py` lists every stored session as foldable cards, newest
+  reference siblings. **Session detail goes back to the page that opened it** — the plain overview
+  or a weekend: `_show_detail` requires the opener and records it in `_detail_origin`, and the
+  detail page only emits `back_requested`, so its back button, a delete and a session vanishing
+  underneath it all return there, re-queried. One level, not a history, and leaving the surface
+  still resets it on the next visit (DECISIONS → UI). `overview_page.py` lists every stored session as foldable cards, newest
   first, with a track/session filter — one query, no `LapStore` read — and a compact summary line
   (session, winner, fastest lap, weather icon, AI difficulty) plus a shared delete.
+  `weekend_page.py` is the **weekend-filtered** overview a season's calendar opens (E1d): the same
+  spine, different chrome — a round header and an "Assign sessions…" button instead of the heading,
+  no deleted-sessions button and no search box (the weekend *is* the filter), and cards open on
+  their summary line. The **full classifications belong to the races**, not to every card: the
+  Sprint Race and the Grand Prix get one each, side by side in `panel_box`es beneath the cards
+  (one race keeps half the width rather than spanning the page), because every other session's
+  result is already its card's summary line and a table per session was height without an answer —
+  a nine-session sprint weekend opened as nine full grids. It shows the *weekend's stored* sessions rather than
+  the *round's assigned* ones, so every attempt at a slot appears; a round with nothing assigned has
+  no weekend and says so. `reload` never calls `rounds_with_results` (E1c's cost).
+  It is also the **writer of `season_assignments`** (E1b): each card carries **Unassign**,
+  **Assign** or **Move here**, only the rows *not* in this round carry a note ("not assigned", or
+  the round they are in), and a write is followed by the automatic weekend proposal, confirmed and
+  declinable (DECISIONS → Storage). The page asks the questions and performs the writes; what may
+  be offered is `assignment.py`'s.
+  Its header carries **Share ▾** before "Assign sessions…": the standings as of the round, and
+  "Save weekend…" — `weekend_share.weekend_documents` over the same `_weekend_rows` that `reload`
+  paints, so the folder holds what the page lists. The session images name drivers through the
+  `SessionRosters` the cards were painted with, the standings use the season page's load-or-seed
+  roster, and only a click pays for `rounds_with_results`.
+  **`weekend_view.py`** (Qt-free) is what those two pages share instead of a base class: `overview_rows`
+  (store order, slot label per session resolved against the whole pool, the track/label filter),
+  `weekend_rows` (one weekend in running order — a row per attempt at every slot, plus a `SlotRow`
+  for each uncaptured position, **Skipped** before the last captured one and **not captured yet**
+  after it — the rule moved out of `seasons/weekend_page._pending_slot_row`), `race_rows`
+  (which rows earn a full classification — every attempt at each of the weekend's races, and
+  nothing else) and `weekend_of`
+  (which weekend a round's assigned sessions belong to, `None` when it has none). Anything deciding
+  *which* rows a view shows lives here precisely so it is asserted without a `QApplication`
+  (DECISIONS → UI).
+  **`assignment.py`** (Qt-free, no store access) holds everything that decides *what to offer*
+  and nothing that writes: `weekend_proposal` (the rest of a just-assigned session's weekend, in
+  running order — a session filed under another round is offered and marked as a move, and every
+  attempt at a slot recorded more than once is held back and named instead), `suggested_placement`
+  (where a career session's own identifiers say it belongs — the season from `season_link_id`, the
+  round from a track match against that season's calendar — or `None` where they say nothing) and
+  `picker_rows` (the picker's rows: suggestions first, then the unassigned, then whole weekends
+  newest first). Every rule is asserted without a `QApplication` (DECISIONS → Storage).
+  **`session_share.py`** (Qt-free) turns one session into a `components.share_document`
+  `ShareDocument` — the surface-specific half of E19, which a whole weekend reuses unchanged. It
+  arranges the page's own helpers and re-derives nothing: `slot_label` for the
+  title, `race_control`'s rows and note for the penalties, and the `formatting` helper
+  `build_classification_table` calls for each cell. Where a still image cannot do what the page
+  does by alternating a cell, it says so in the open instead — `PEN` and `GRID PENALTY` become
+  columns, present only when a row fills one. Every string it decides is unit-tested, and the whole
+  table was cross-checked cell by cell against the page's own over every session in the database.
+  **`weekend_share.py`** (Qt-free) is a whole weekend as a folder: `weekend_documents` calls
+  `session_document` once per session row, names each file by its **running position**
+  (`02_1159_Practice-2`) rather than its clock time, appends the round's standings last, and names
+  the folder `date_track_Round-N` from the day the weekend started. It returns a `WeekendExport`,
+  a `NamedTuple` — a plain pair `ShareControl` can take without importing a surface.
+  **`assign_dialog.py`** (`AssignDialog`) is the picker behind "Assign sessions…", and the only
+  way into a round with no weekend: it lists stored *sessions* rather than a weekend, defaults to
+  the round's own track with a checkbox for the rest, and keeps a session assigned elsewhere listed
+  and marked, because picking it **moves** it. It renders `picker_rows` and returns a choice; the
+  page performs the write.
   `detail_page.py` is the per-session page: a header (track, slot label, recorded time, weather ·
   laps · uid, and the **source capture** resolved via `CaptureStore.for_session` +
   `resolve_capture_path`), then a 4×2 details grid, the shared
@@ -316,14 +427,35 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   `tyre_stints.stint_average_ms`'s exclusions and the pace tooltips are then the same judgement
   rather than three that have to agree. Stored lap context (E17) is believed where present, and the
   older fuel / stint-shape inference is the fallback for laps ingested before it —
-  `Lap.has_lap_context` is the only test. `deleted_page.py` is the deleted-sessions manager (E2): a table over
+  `Lap.has_lap_context` is the only test. It is also E19's first caller: the source row carries a
+  `components.ShareControl` beside **Delete...**, handed `_share_document` — the page owns no image
+  and no file, only a callable that re-reads the session and builds `session_share.session_document`
+  from the same helpers `reload` paints with. `_placement` is the one thing the store alone cannot
+  supply, naming the season and round the image's meta line carries. Driver names deliberately come
+  from the roster cache **as the last paint left it** rather than from a fresh read, so the image
+  and the table above it can never name a driver differently.
+  `deleted_page.py` is the deleted-sessions manager (E2): a table over
   `SessionStore.deleted_sessions()`, with Restore and Forget as row buttons and as a context menu.
   It reads `pipeline.restorable_captures` for both its capture column and its chooser — the same
   list `restore_session` resolves through, so what it offers and what the restore accepts cannot
   drift — and it **refuses nothing itself**: it confirms, picks the capture when several hold the
   session, then emits `restore_requested(uid, content_hash)` upward. `sessions_changed` is the
-  non-navigation signal, re-emitted for `MainWindow` to fan out exactly as `SeasonsView` does; so is
-  `restore_requested`, which asks for a *job* rather than a page, because the window owns workers.
+  non-navigation signal, re-emitted for `MainWindow` to fan out — the only one of its kind, since
+  every page that deletes a session is on this surface; so is `restore_requested`, which asks for a
+  *job* rather than a page, because the window owns workers.
+  **`league_names.py`** (`SessionRosters`, Qt-free) is why a league session reads with its members'
+  names here rather than the raw capture: it resolves a session's season through
+  `SeasonStore.assigned_seasons()` and loads that season's **saved** roster JSON via
+  `SeasonRosterFiles.load`, and both pages wrap the answer in the existing
+  `components.display_name_fn` — so the captured alias still wins and the roster is only the
+  fallback for a generic `""` / `"Player"`. It decides *which roster*, never how a name reads;
+  `components` is shared and must not import from a surface. Deliberately **not** `roster_for` /
+  `seed`, which need `rounds_with_results` and would hydrate every session in the season while a
+  list is painted (DECISIONS → UI, E1c); the mode test is `ROSTER_SEASON_MODES`, since a 2026
+  league is commonly a GRAND_PRIX season. A missing or unreadable roster file, a solo-mode season
+  and an unassigned session all resolve to `None`, which is today's behaviour unchanged — it never
+  raises, because a message box per card is the worse failure. Cached per paint and cleared by each
+  page's `reload`, so assigning a session on the Seasons surface shows up here without a restart.
   **Two cross-cutting rules live here.** Points are rendered only for race/sprint sessions because
   the stored value is a carried-over championship figure on every other type (DECISIONS → UI);
   and a lap row emits `lap_requested(uid, lap_number)` upward, which `MainWindow` turns into a

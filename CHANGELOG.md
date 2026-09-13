@@ -19,6 +19,102 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.11.0 — 2026-09-13
+
+### Added
+- **Sessions are now assigned to a round from the Sessions page, and the app offers to fill in the
+  rest of the weekend.** Assigning, unassigning and moving a session all happen where the weekend
+  is shown: each session carries **Assign**, **Unassign** or **Move here** beside its name, and the
+  ones that are not in the round you are looking at say so, so an attempt you never assigned is
+  obvious at a glance. A round you have not put anything in yet has a **Assign sessions…** button
+  that lists your stored sessions — this round's track first, with a tick-box for the rest — and
+  says which of them are already in another round, because picking one of those *moves* it rather
+  than copying it.
+  **Assign one session and the app offers the rest of that weekend in one go**, so a whole race
+  weekend is normally one pick and one confirmation. It only ever offers; nothing is assigned until
+  you say yes, and the question spells out what it will do — including naming any round the
+  sessions would be moved out of. **A session you drove twice is never filled in automatically:**
+  nothing in the recording says which attempt counts, so the app says so and leaves that one to
+  you, with both attempts listed side by side to choose from.
+- **Opening a round now shows that whole weekend's sessions, on the Sessions page.** Double-clicking
+  a round in a season's calendar used to open a page of its own; it now opens the sessions list
+  filtered to that weekend, in the order the weekend actually ran — P1, P2, P3, qualifying, the
+  race — each showing the same summary line the sessions list gives you (winner, fastest lap,
+  weather), and double-clicking one opens the session itself, whose **← Sessions** button brings
+  you back to that weekend rather than to the full list. The **full classifications sit
+  underneath, one per race**: a sprint weekend shows the Sprint Race beside the Grand Prix, and a
+  normal weekend shows the race on its own. A session the game expected but you never recorded still has its place
+  in the list, marked **Skipped** if you drove past it or *not captured yet* if it is still to come,
+  so a weekend where you sat out Practice 3 reads as a decision rather than as a gap. Every attempt
+  at a session appears, including ones you have not assigned to the round, so a session you drove
+  twice shows both — told apart by the time you recorded them. Rounds you have not assigned anything
+  to yet say so, and point you at the **Assign sessions…** button.
+- **A session's result can now be shared as an image, straight into the league chat.** Open a
+  session and use **Share ▾** beside **Delete...**: **Copy image** puts a PNG on the clipboard to
+  paste into WhatsApp or Discord with no file involved, and **Save image…** writes it to disk if
+  you'd rather keep it. The image is drawn by the app rather than screenshotted, so it carries the
+  **whole** Race control list — the box on the page is height-capped and scrolls, so a screenshot
+  cut off the penalties the message exists to carry — and it looks the same whoever opens it: a
+  fixed light layout 1080 pixels wide, regardless of whether you run Windows in light or dark mode.
+  It holds the session's own facts (fastest lap, race distance, weather, track and air temperature),
+  the full final classification and every penalty with what it was for, and it names the season and
+  round the session is assigned to. Two things the page shows by alternating a cell get a **column
+  of their own**, because a still image cannot alternate: a race's penalties (**PEN**) and a
+  qualifying session's **GRID PENALTY**, each appearing only when someone actually has one. A
+  reconstructed classification says so in as many words, since its only sign on the page — muted
+  points — is easy to miss in a photo. Saving twice never overwrites: the second offers `-2`, and
+  files go to a new `exports` folder beside your captures and logs.
+- **Standings and whole race weekends can be shared the same way.** A season's page now has
+  **Share ▾** above its standings: **Copy standings** and **Save standings…** give one picture of
+  the drivers' and the constructors' standings side by side, saying how many rounds have counted so
+  far. A round's weekend has **Share ▾** beside **Assign sessions…**, where the same two give the
+  standings as they stood after that round — *Standings after round 3 (Suzuka)* — and **Save
+  weekend…** saves the whole weekend at once: choose a folder and a new one is created inside it,
+  named like `2026-07-05_Shanghai_Round-2`, holding one picture per session, numbered in the order
+  the weekend ran, with the standings last. A session you drove twice is in it twice, told apart by
+  the time in its name, and saving the same weekend again makes a second folder rather than
+  touching the first. **Share** only appears when there is something to share, and if a race could
+  not be counted because its final classification never arrived, the standings picture says so
+  under the table instead of quietly leaving those points out.
+- **League members are now named on the Sessions surface, not just on a season's weekend page.**
+  If your league raced with online-name sharing switched off, the game captures every one of you as
+  `Player` — so the sessions list and a session's own page could only ever show `Player`. They now
+  fall back to the season's saved roster file, the same one the season pages already use, across the
+  session cards (winner and fastest lap), the final classification and the Race control box. The
+  names the game *did* capture are never overwritten: a real online name always wins, and the roster
+  is only ever the fallback for a blank or generic one. A session that isn't assigned to a season,
+  or a season with no roster file saved yet, reads exactly as it did before — and the roster file is
+  the one the season detail page's **Create roster file** button writes.
+
+### Fixed
+- **A session you drove twice no longer disappears from its weekend.** Restarting or re-driving a
+  session — a red flag, a crash on the opening lap, or a session you simply ran again — stores a
+  second recording that the game labels identically to the first. A weekend kept only one of them,
+  and which one it kept was an accident of the order the database happened to return. Every attempt
+  is now kept and listed in the order you recorded them, and the app never decides which one counts:
+  that is a judgement about the session, and nothing in the recording can make it for you. Assigning
+  one attempt to a round leaves the others alone, so you unassign and delete the ones you don't want
+  yourself. The same fix stops a re-driven Sprint Race being mistaken for the Grand Prix on a sprint
+  weekend, which would have put the wrong result in a season's Results column.
+- **Andrea-Kimi Antonelli's name is spelled correctly.** It read "Andra-Kimi Antonelli". Sessions
+  read from now on get it right; sessions already stored keep the old spelling until you use
+  **Help → Re-read captures…**. That is optional — skip it if one misspelt driver name doesn't
+  bother you.
+
+**Re-ingest needed: no**
+
+Re-reading your captures is optional this release: all it changes is that one driver's name (see
+**Fixed**).
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.10.0 — 2026-09-01
 
 ### Added

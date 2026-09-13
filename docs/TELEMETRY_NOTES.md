@@ -176,6 +176,133 @@ each captured session (and mark still-pending ones); rows saved before it was ca
 `session_link_id` order (last race = GP). Note: both Sprint and GP award points, so both stay in
 `RACE_SESSION_TYPES` for standings — the slot distinction is a *display/Results* concern only.
 
+## The three link identifiers — measured across all 33 captures (2026-09-01)
+
+Written down because the whole of v0.11.0's automatic round assignment rests on it, and because
+the answer for online modes is *narrower* than it looks from the session counts alone.
+
+**Method.** Every `SESSION` packet in all 33 captures was read and grouped by `header.session_uid`,
+then cross-referenced against `f1league.db`. That is **72 distinct sessions** — the 56 stored plus
+all 16 tombstoned ones — with every uid accounted for in both directions. Read-only; nothing was
+re-ingested.
+
+### The identifiers never move within a session
+
+`season_link_identifier`, `weekend_link_identifier` and `session_link_identifier` were **identical
+on every Session packet of every one of the 72 sessions**. There is no settling window on these,
+unlike `weekend_structure`, `game_mode` and the temperatures, which do arrive zeroed in the
+opening burst (see *Track / air temperature and time of day*). So one packet is enough, and the
+first packet is as good as the last.
+
+### The slot index is readable straight off the identifier
+
+    index = (session_link_identifier - weekend_link_identifier) / 10
+
+**That index is the session's position in `weekend_structure`, and `weekend_structure[index]`
+equals the session's own `session_type` — 72 of 72 sessions, all three game modes, all 33
+captures** (56 of 56 checked again against the stored rows; no stored row has an empty
+`weekend_structure`). `weekend_link_identifier` is therefore the `session_link_identifier` the
+weekend's *first* slot would have, whether or not that session was ever captured — weekend
+`4046315905` holds only a Race, at `4046315935`, i.e. index 3 of `[Q1, Q2, Q3, Race]`.
+
+This is exact where the type-matching in `_slots_from_structure` is inferential, and it is what
+lets an uncaptured slot be named with certainty rather than guessed at.
+
+### A retry keeps the whole identifier — only the uid changes
+
+A restarted or re-driven session reports **the same season, weekend and session link ids, the same
+`session_type` and the same track** as the attempt it replaces. Only `session_uid` and
+`recorded_at` differ. **10 of the 13 weekends hold at least one slot with 2, 3 or even 4 attempts.**
+Nothing in the telemetry says which attempt is the one that counts — see DECISIONS → UI, where the
+app is required not to guess.
+
+### `season_link_identifier` is only a *season* identifier in the career modes
+
+| `game_mode` | weekends | `season_link == weekend_link` | what the id is worth |
+|---|---|---|---|
+| 78 — Driver Career '26 | 5 | **1 of 5** (the first weekend, whose id the career then keeps) | one id spans the whole career: a real season identifier |
+| 7 — Online Custom / League Racing | 3 | **3 of 3** | equal to the weekend id: carries no season information |
+| 4 | 5 | **5 of 5** | same |
+
+So for the online modes the accurate statement is not "the season identifier changes per race
+weekend" but **"there is no season identifier — the game reports the weekend's id in that field"**,
+in 8 of 8 observed weekends. Grouping online sessions by `season_link_identifier` is grouping them
+by weekend, and nothing more.
+
+### What EA's specification says about these fields — and what it does not (checked 2026-09-10)
+
+Every UDP specification from F1 2021 to the F1 25 2026 Season Pack says exactly this, verbatim:
+
+    uint32  m_seasonLinkIdentifier;   // Identifier for season - persists across saves
+    uint32  m_weekendLinkIdentifier;  // Identifier for weekend - persists across saves
+    uint32  m_sessionLinkIdentifier;  // Identifier for session - persists across saves
+
+plus one line in F1 2021's "What has changed since last year?": *"Added identifiers into the
+session packet so data sets can be linked."* That is the whole of the official record. What it
+does give us is **"persists across saves"**: a career's ids survive saving and reloading the game.
+
+What it does **not** say — so this app has it from measurement alone, or not at all:
+
+- **nothing about online versus offline.** That the season field holds the weekend's own id in
+  Online Custom and `game_mode` 4 is the measurement above, not EA's wording.
+- **nothing about a season boundary.** That a new career season gets a new id is a reasonable
+  reading of "Identifier for season", but it is not stated, and no capture here crosses one.
+- **nothing about how the values are built.** The `+10` slot stride above, and the `+100` weekend
+  stride below, appear nowhere in it.
+
+It is also demonstrably **incomplete for exactly these modes**: the 2026 Season Pack's game-mode
+appendix does not list the `78` that Driver Career '26 actually reports, and the code for My Team
+on 2026 cars is in neither the appendix nor any capture here.
+
+Nothing outside the spec fills the gap. GitHub code search finds the field in about 30
+repositories covering F1 2021–2026 — all parsers, type definitions or copies of the spec, and the
+ones opened repeat EA's comment verbatim; none documents how the value behaves. EA's forum threads
+refuse automated fetches (HTTP 403), so a staff answer posted there, if one exists, was not read.
+
+### Hypothesis: a career's weekend id counts its rounds (one career, 2026-09-10)
+
+In the one career captured here, `(weekend_link_id - season_link_id) / 100` is the weekend's
+0-based position in the season, and it matches both the round each weekend was assigned to by hand
+and the calendar's track at that round — 5 of 5:
+
+| `weekend_link_id` | `(weekend - season) / 100` | track | assigned by hand | calendar round `index + 1` holds |
+|---|---|---|---|---|
+| 3602001884 | 0 | Melbourne | round 1 | Melbourne |
+| 3602001984 | 1 | Shanghai | round 2 | Shanghai |
+| 3602002084 | 2 | Suzuka | round 3 | Suzuka |
+| 3602002184 | 3 | Sakhir (Bahrain) | round 4 | Sakhir (Bahrain) |
+| 3602002284 | 4 | Jeddah | round 5 | Jeddah |
+
+It is the slot index's encoding (`(session - weekend) / 10`) one level up. But it rests on **one
+career, one season, five weekends driven in order**, so it is a hypothesis and not a finding. If it
+holds, it names a career session's round without going through the track — and DECISIONS →
+Storage's "no identifier carries a round number" is wrong for careers. What would settle it
+(PRIORITIES → E1e):
+
+- **a skipped weekend** — simulate one mid-season, drive the next: does the index still equal the
+  calendar round, or does it count weekends *driven*?
+- **My Team on 2026 cars** — which `game_mode` it reports, and whether its ids behave the same.
+  One My Team career driven *drive a session, skip a weekend, drive a session* answers both.
+- **a season boundary** — not needed first. A carried-over id would put the index past the
+  calendar's end, so a rule that requires the index and the track to agree refuses the write; it
+  can simply be recorded when the first new-season capture arrives.
+
+### The weekend id is a reliable grouping in every mode
+
+All **13 weekends have exactly one `track_id`**, and all 7 round assignments made by hand in this
+database contain **exactly one `weekend_link_identifier`** — none mixes two. The app already trusts
+this grouping elsewhere (`domain/season.slot_for_session`, the laps surface's canonical track-map
+cache), so v0.11.0's weekend-level propagation adds no new trust.
+
+### Tombstones perturb none of it
+
+14 of the 16 tombstoned sessions are earlier attempts at a slot whose later attempt survives; the
+other 2 are single-session weekends deleted whole. A deletion removes a row and nothing else: the
+slot index comes from `weekend_structure`, which every surviving sibling still carries, so a
+deleted attempt cannot leave a phantom slot or shift another session's position. The only weekend a
+deletion can erase is one where *every* session was deleted, and then there is nothing left to
+reconstruct it from — correctly.
+
 ## A red flag skips a lap number — the gap is correct
 A red-flagged race leaves a **one-lap hole in the lap numbering**, and it is not a capture bug.
 Confirmed in-game (2026-08-03) and the same for every player, because it is how the game runs a

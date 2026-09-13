@@ -91,7 +91,7 @@ F1-TELEMETRY/                   # VS Code workspace root — NOT the git repo; h
                  meta.py (key/value app state — the PIPELINE_VERSION stamp)
       analysis/  standings.py
       ui/        app.py, main_window.py, help_page.py, season_roster.py, workers.py, formatting.py,
-                 seasons/ (view.py=SeasonsView container + overview/create/detail/weekend
+                 seasons/ (view.py=SeasonsView container + overview/create/detail/edit_calendar
                    _page.py, labels.py) — pages coordinated by navigation signals
                  components/ (tables.py, classification_table.py, slider_row.py,
                    car_status*.py, track_map.py, trace_plot.py, …) — shared widgets
@@ -147,6 +147,11 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
    (16) — so rendering the raw enum name put "Race 2" on every sprint weekend's Grand Prix until
    2026-08-26. `ui/formatting.slot_label` renders **every** non-sprint race type as "Race"; position
    decides which race it is, never the value.
+   **A slot also holds *every* attempt, not one** (v0.11.0): a re-driven session keeps the same
+   link ids, type and track, and only `session_uid` / `recorded_at` differ, so `WeekendSlot.sessions`
+   is a tuple in `recorded_at` order and the app never picks which attempt counts. Keying them by
+   type dropped the second attempt outright and let a re-driven Sprint take the Grand Prix's
+   position. See DECISIONS → UI.
 6. **Traces are indexed by lap DISTANCE, not time.** The header is 29 bytes. The recorder binds
    `0.0.0.0:20777` (set the game's UDP to broadcast).
 7. **Race numbers are unique only among humans**, so league identity never keys on a number
@@ -223,10 +228,13 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   an accept/edit flow is deferred (ROADMAP Option 3, PRIORITIES → B5).
 - **UI:** single-window shell (sidebar + persistent record/stop header + stacked pages). The
   Seasons surface is real — overview, create, per-season detail (calendar + driver & constructor
-  standings), per-season LEAGUE roster CSV import, and a weekend view with round-centric session
-  assignment (its capture picker can also delete an unassigned session's stored results via
-  right-click; the recording on disk is kept). LEAGUE displays prefer captured public online
-  names, falling back to the first
+  standings) and per-season LEAGUE roster CSV import. Activating a round opens the **Sessions**
+  surface's weekend-filtered overview (E1d), which is also the **writer of `season_assignments`**
+  (v0.11.0): assign, unassign and move, plus the automatic weekend proposal, with a session picker
+  as the way into a round that has nothing assigned yet. The round-centric `ui/seasons/weekend_page`
+  was retired in v0.11.0 (branch 5), and Session detail goes back to the page that opened it — the
+  weekend, when a round's weekend opened it. LEAGUE displays prefer captured
+  public online names, falling back to the first
   roster `online_names` alias when captures only say `"Player"`/blank. Reusable widgets (the
   session classification table, table primitives) live in `ui/components/`, ready for the
   upcoming surfaces. The Seasons surface is split into `ui/seasons/` — a thin `SeasonsView`
@@ -234,7 +242,7 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   is live: `create_page.py` embeds the reusable `ui/components/calendar_picker.py`, driven by
   `(mode, format)` rules from `domain/calendars.py` (Career/My-Team = fixed-length subset;
   Grand Prix/League = reorderable sandbox with duplicates). **An existing calendar is editable**
-  (`ui/seasons/edit_calendar_page.py`, the fifth seasons page): a round holding an assigned session
+  (`ui/seasons/edit_calendar_page.py`, the calendar editor page): a round holding an assigned session
   keeps both its `round_number` and its `track_id`, checked positionally and enforced inside
   `SeasonStore.set_calendar` (raises `CalendarConflictError`) so the rule can't be bypassed.
   Calendar only — mode/number/nickname/format stay fixed.
@@ -288,8 +296,8 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   unconditionally from `MainWindow._refresh_current_view()` through `LapsView.invalidate_caches()`,
   so an ingest or re-ingest can no longer leave a stale weekend layout (or a stale "too few laps →
   driven line" answer) on screen until restart. Deleting a session's stored results invalidates it
-  too, via the weekend page's `sessions_changed` signal — the one non-navigation signal leaving the
-  seasons surface.
+  too, via the Sessions surface's `sessions_changed` signal — every page that deletes a session is
+  a Sessions page, and since v0.11.0 the Seasons surface emits nothing but navigation.
   Still deferred: **corner numbers** (future work — no
   telemetry source; needs static per-track metadata, e.g. a snapshot of FastF1/MultiViewer
   `get_circuit_info`; mind the data licensing before broad distribution). Also pending: the Analytics

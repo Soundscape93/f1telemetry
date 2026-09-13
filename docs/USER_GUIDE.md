@@ -153,6 +153,82 @@ Charles,16,xxCL16xx
 A blank template (`roster_template.csv`) is included in the release zip, and can also be saved from
 **Help → Setup / Configuration → Save a blank template CSV…**.
 
+### Assigning sessions to a round
+
+A recorded session doesn't belong to a season until you say so. Open **Seasons → a season** and
+double-click a round: that opens the round's weekend on the **Sessions** page, which is where
+assigning happens.
+
+- **A round with nothing in it yet** says so and offers **Assign sessions…**. That lists your
+  stored sessions, starting with the ones recorded at this round's track — tick *Show sessions from
+  all tracks* if what you want isn't there. Pick one and press **Assign**.
+- **Then the app offers the rest of that weekend.** Sessions recorded in the same race weekend as
+  the one you just assigned are listed, and saying yes puts the whole weekend in the round. Saying
+  no changes nothing, and you can still assign them one at a time. So a normal weekend is one pick
+  and one confirmation.
+- **A session you drove twice is never filled in for you.** Nothing in the recording says which
+  attempt counts — only the time you recorded them tells them apart — so the app leaves that one to
+  you and says it has. Both attempts appear on the page; assign the one you mean.
+- **Once a round has sessions**, each one carries **Unassign** beside its name. Sessions from that
+  weekend you haven't assigned are shown too, marked *not assigned*, with an **Assign** button.
+- **A session that's in the wrong round** shows the round it's in, and **Move here** puts it in
+  this one instead. A session belongs to one round at a time, so moving it takes it out of the
+  other round. The easiest way to re-file a whole weekend is to open the round it should be in and
+  assign one of its sessions — the rest are then offered in one step.
+
+A session assigned to a round can't be deleted until it's unassigned; the app says so rather than
+quietly dropping its result from your standings.
+
+### Sharing results
+
+Open a session and use **Share ▾**, beside **Delete...**:
+
+- **Copy image** puts the result on your clipboard as a picture. Paste it straight into WhatsApp,
+  Discord or wherever your league talks — no file is created. This is the quick way.
+- **Save image…** writes the same picture to a PNG file if you'd rather keep it or send it later.
+
+The picture is **drawn by the app**, not screenshotted, which matters in three ways. It carries the
+**whole** Race control list, where a screenshot would cut it off — the box on the page scrolls. It
+looks the same for everyone, on a fixed light background, whether you run Windows in light or dark
+mode. And it is sized to survive being sent: 1080 pixels wide, so it is still readable after a chat
+app re-compresses it.
+
+It contains the session's own facts (fastest lap, race distance, weather, track and air
+temperature), the full final classification, and every penalty with what it was for — plus the
+season and round, if you have assigned the session to one.
+
+Two things read slightly differently from the page, on purpose. The page alternates a cell between
+a driver's finishing time and the penalty they took; a picture can't alternate, so penalties get a
+**PEN** column of their own (and qualifying gets **GRID PENALTY**), shown only when someone
+actually has one. And a **reconstructed** result — one rebuilt because the final classification
+never arrived — says so in words under the title, rather than only by showing its points in grey.
+
+**Saving never overwrites anything.** The name offered is always one that's free: share the same
+session twice and the second is offered as `…-2.png`. To replace a file you have to pick it
+yourself, and then you're asked first.
+
+**Standings.** Open a season and use **Share ▾** above its standings. **Copy standings** and
+**Save standings…** give one picture with the drivers' and the constructors' standings side by
+side, and a line saying how many of the season's rounds have counted so far. If a race couldn't be
+counted — its final classification never arrived, so it awarded no points — the picture says so
+under the table.
+
+**A whole weekend.** Open a round's weekend (double-click the round in the season's calendar) and
+use **Share ▾** beside **Assign sessions…**:
+
+- **Copy standings** and **Save standings…** give the standings as they stood *after that round*,
+  titled with the round and its track — *Standings after round 3 (Suzuka)*.
+- **Save weekend…** saves every session of the weekend at once. Choose a folder, and a new folder
+  is created inside it, named after the weekend — `2026-07-05_Shanghai_Round-2` — holding one
+  picture per session, numbered in the order the weekend ran (`01_1121_Practice-1.png`, …), with
+  the standings last.
+- A session you drove twice is saved twice, told apart by the time in its name, just as both
+  attempts appear on the page.
+- Saving the same weekend again creates a second folder (`…-2`) and leaves the first one alone.
+
+**Share** only appears when there's something to share: a season with no race results yet, or a
+round with nothing assigned to it, doesn't show it.
+
 ### Changing a season's calendar
 
 Picked the wrong tracks, or the wrong order? Open the season and click **Edit calendar**. You can
@@ -172,7 +248,7 @@ wrong, delete the season and create it again.
 
 ## 6. Where your data lives
 
-Your database, captures, lap traces, rosters and logs are stored under:
+Your database, captures, lap traces, rosters, logs and shared images are stored under:
 
 ```
 %LOCALAPPDATA%\f1telemetry
@@ -183,6 +259,10 @@ Back up this folder to preserve your seasons and captures. The exact path is sho
 This folder is **hidden in Explorer by default** — you don't need to go looking for it. Use
 **Help → Open data folder**, **Open captures folder** or **Open logs folder** and the app opens
 Explorer there for you.
+
+Pictures and weekend folders saved from **Share** go to an `exports` folder here unless you choose
+another, created the first time you save one. Nothing else reads it, so it is safe to empty whenever
+you like.
 
 **Please don't hand-edit `f1league.db`** with DB Browser for SQLite or similar tools. It's easy to
 break the app's data that way, and it makes bug reports much harder to diagnose. You don't need to:
@@ -272,8 +352,13 @@ what happened. Don't send a hand-edited database — see section 6.
 
 ## Known issues
 
-- **Switching the Windows light/dark theme while the app is open** leaves some text the wrong
-  colour. Restart the app to refresh the theme.
+- Recordings made **before v0.4.2 on Windows** may be missing stretches of telemetry, and with them
+  the final classification, if the machine slept mid-session. Nothing can recover that — the data
+  never reached the app — so re-reading those captures won't bring it back. Sessions with a missing
+  classification show a reconstructed result instead.
+- **Dashboard, Analytics and Bug report** pages are placeholders.
+- The build is **unsigned**: SmartScreen shows "Windows protected your PC" → **More info → Run
+  anyway**.
 
 ## Licence & notices
 

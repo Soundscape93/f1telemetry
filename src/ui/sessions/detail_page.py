@@ -15,6 +15,10 @@ The classification table is ``components.build_classification_table``, the same 
 weekend page uses - this page must never grow a second one. A lap row emits upward rather than
 reaching for the Laps surface itself: pages never reference siblings, so the hop to a lap's
 telemetry goes through ``SessionsView`` to ``MainWindow`` (PRIORITIES -> A1).
+
+Share (E19) is the same shape: the page owns no image and no file, it hands ``ShareControl`` a
+callable that builds ``session_share.session_document`` out of what is stored at that moment. The
+image is therefore the page's own result read a second time, not a copy of the widgets on screen.
 """
 from __future__ import annotations
 
@@ -24,7 +28,6 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -39,6 +42,7 @@ from ...domain.season import slot_for_session
 from ...pipeline import resolve_capture_path
 from ...protocol.reference import track_name
 from ..components import (
+    ShareControl,
     WeatherIcon,
     TrackMap,
     build_classification_table,
@@ -46,12 +50,16 @@ from ..components import (
     cell,
     clear_layout,
     confirm_and_delete,
+    display_name_fn,
     fit_columns,
     fit_table_height,
+    panel_box,
+    season_phrase,
     session_weather,
     tidy_table,
 )
 from ..components.flags import flag_icon
+from ..components.share_document import ShareDocument
 from ..components.tyres import tyre_pixmap
 from ..formatting import (
     NOT_CAPTURED,
@@ -83,8 +91,11 @@ from ..style import (
     apply_bold,
     apply_heading
 )
+from ..season_roster import SeasonRosterFiles
 from .lap_context import analyse_session
+from .league_names import SessionRosters
 from .race_control import grid_penalty_places, summarise_penalties
+from .session_share import session_document
 from .stint_charts import StintCharts
 
 _MID_ROW_MAX_H = 500            # the Laps / Race control row is capped; those two boxes scroll inside it
@@ -112,25 +123,29 @@ _FUEL_CAVEAT = ("Observed lap times, not tyre performance: the car sheds roughly
 class DetailPage(QWidget):
     """One captured session: what it was, where it came from, and how it finished."""
 
-    overview_requested = Signal()
+    back_requested = Signal()           # to whichever page opened this one - the container knows
     sessions_changed = Signal()
     lap_requested = Signal(str, int)  # session_uid (str, uint64-safe), lap_number
 
-    def __init__(self, session_store, season_store, capture_store=None, lap_store=None, 
-                 event_store=None, parent=None):
+    def __init__(self, session_store, season_store, capture_store=None, lap_store=None,
+                 event_store=None, rosters=None, parent=None):
         super().__init__(parent)
         self._sessions = session_store
         self._seasons = season_store
         self._captures = capture_store
         self._laps = lap_store
         self._events = event_store
+        # A league member who raced with online-name sharing off captured as "Player"; this resolves
+        # that through the season's saved roster (E1c). Built here when the container did not inject
+        # one, so the names are right by default rather than only when a caller remembers to wire it.
+        self._rosters = rosters or SessionRosters(season_store, SeasonRosterFiles())
         self._session_uid: str | None = None
 
         outer = QVBoxLayout(self)
 
         header = QHBoxLayout()
         back = QPushButton("← Sessions")
-        back.clicked.connect(self.overview_requested.emit)
+        back.clicked.connect(self.back_requested.emit)
         self._title = QLabel()
         apply_heading(self._title, size_px=20)
         header.addWidget(back)
@@ -153,6 +168,10 @@ class DetailPage(QWidget):
         self._source.setStyleSheet(MUTED_TEXT_QSS)
         source_row.addWidget(self._source)
         source_row.addStretch(1)
+        # Beside Delete..., not in the header: the header says which session this is, this row is
+        # what can be done with it. Built once and never rebuilt - it asks the page for a document
+        # when it is clicked, so a reload has nothing to tell it (E19).
+        source_row.addWidget(ShareControl(self._share_document))
         delete = QPushButton("Delete...")
         delete.clicked.connect(self._on_delete)
         source_row.addWidget(delete)
@@ -173,11 +192,14 @@ class DetailPage(QWidget):
         self.reload()
 
     def reload(self) -> None:
-        """Re-query the session and rebuild; leave for the overview if it has vanished."""
+        """Re-query the session and rebuild; go back if it has vanished."""
         clear_layout(self._body)
+        # Re-read the assignments and roster files for this paint: assigning a session on the
+        # Seasons surface, or hand-editing a roster JSON, has to show up without a restart.
+        self._rosters.invalidate()
         session, slot = self._current()
         if session is None:
-            self.overview_requested.emit()      # deleted underneath us, or a re-ingest dropped it
+            self.back_requested.emit()      # deleted underneath us, or a re-ingest dropped it
             return
 
         label = slot_label(slot.session_type, slot.is_sprint_race)
@@ -193,8 +215,8 @@ class DetailPage(QWidget):
         # which shares its session_type with the Grand Prix (core invariant #5).
         analysis = analyse_session(laps, standing_start=is_race(slot.session_type))
 
-        # Read once for the page: the classification0s grid badges and the Race control box are
-        # two readings of the same rows, and two queries could not disagree bt would still be two.
+        # Read once for the page: the classification's grid badges and the Race control box are
+        # two readings of the same rows, and two queries could not disagree but would still be two.
         penalties = self._stored_penalties(session)
 
         # The passes are read once too, and only the details grid reads them: the Race control box
@@ -202,36 +224,44 @@ class DetailPage(QWidget):
         # is what tells "+0 / -0" apart from "not captured".
         overtakes = self._stored_overtakes(session)
 
-        self._body.addWidget(self._top_row(session, slot, label, laps, penalties, overtakes))
-        self._body.addWidget(self._middle_row(session, laps, analysis, penalties))
+        # one resolver for the page, so the Classification and the Race control box cannot name
+        # the same driver differently. Non-generic captured names win, so this is a no-op for a
+        # session whose drivers shared their online names (E1c).
+        name_of = display_name_fn(self._rosters.roster_for_session(session.session_uid))
+
+        self._body.addWidget(self._top_row(session, slot, label, laps, penalties, overtakes, name_of))
+        self._body.addWidget(self._middle_row(session, laps, analysis, penalties, name_of))
         self._body.addWidget(self._charts_row(analysis))
         self._body.addStretch(1)
 
     # --- rows ------------------------------------------------------------------------------------
-    def _top_row(self, session, slot, label: str, laps, penalties=(), overtakes=()) -> QWidget:
+    def _top_row(self, session, slot, label: str, laps, penalties=(), overtakes=(),
+                 name_of=lambda entry: entry.driver_name) -> QWidget:
         """Session details beside the final classification.
 
         Neither box is height-capped. The classification is sized to show every driver and the
         page's own scroll area takes the overflow - capping the row turned a 20-car field into six
         visible rows, which is worse than scrolling the page.
         """
-        details = _box("Session details", 
+        details = panel_box("Session details", 
                        self._details_box(session, slot, label, laps, overtakes))
-        classification = _box(f"Final classification · {label}",
-                                build_classification_table(session, is_sprint_race=slot.is_sprint_race, 
+        classification = panel_box(f"Final classification · {label}",
+                                build_classification_table(session, name_of, 
+                                                           is_sprint_race=slot.is_sprint_race, 
                                                            grid_penalties=grid_penalty_places(penalties)), fill=True)
         return _row(details, classification)
 
-    def _middle_row(self, session, laps, analysis, penalties=()) -> QWidget:
+    def _middle_row(self, session, laps, analysis, penalties=(), 
+                    name_of=lambda entry: entry.driver_name) -> QWidget:
         """The player's laps beside the session's race control, capped.
 
         The Laps table scrolls itself (header pinned); the Race control panel is plain widgets, so
         it takes a scroll area. A race can issue any number of penalties and the box must not be
         able to grow the page (DECISIONS -> UI) - the worst session in this database is eleven
         rows, and the cap is what keeps that a property of the box rather than of the data."""
-        return _row(_box("Laps", self._laps_table(session, laps, analysis)),
-                    _box("Race control", self._race_control_panel(session, penalties), scroll=True),
-                    max_height=_MID_ROW_MAX_H)
+        return _row(panel_box("Laps", self._laps_table(session, laps, analysis)),
+                    panel_box("Race control", self._race_control_panel(session, penalties, name_of),
+                          scroll=True), max_height=_MID_ROW_MAX_H)
 
     def _charts_row(self, analysis) -> QWidget:
         """The stacked pace and tyre-life charts, under the laps.
@@ -244,13 +274,13 @@ class DetailPage(QWidget):
         flying lap in dry qualifying genuinely has no stint to draw.
         """
         if not analysis.stints:
-            return _box("Tyre stints & pace", _muted_label(_NO_STINTS))
+            return panel_box("Tyre stints & pace", _muted_label(_NO_STINTS))
         host = QWidget()
         box = QVBoxLayout(host)
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(StintCharts(analysis))
         box.addWidget(_muted_label(_FUEL_CAVEAT))
-        return _box("Tyre stints & pace", host)
+        return panel_box("Tyre stints & pace", host)
 
     # --- boxes -----------------------------------------------------------------------------------
     def _details_grid(self, session, slot, label: str, laps, overtakes=()) -> QWidget:
@@ -406,7 +436,8 @@ class DetailPage(QWidget):
         table.cellClicked.connect(partial(self._open_lap, table))
         return table
 
-    def _race_control_panel(self, session, penalties=()) -> QWidget:
+    def _race_control_panel(self, session, penalties=(),
+                            name_of=lambda entry: entry.driver_name) -> QWidget:
         """What race control did to this session: its penalties, field-wide.
 
         **The player's passes were weighed for this box and left out** (DECISIONS -> UI, E15
@@ -424,20 +455,25 @@ class DetailPage(QWidget):
         panel = QWidget()
         box = QVBoxLayout(panel)
         box.setContentsMargins(0, 0, 0, 0)
-        box.addWidget(self._penalties_section(session, penalties))
+        box.addWidget(self._penalties_section(session, penalties, name_of))
         box.addStretch(1)
         return panel
 
-    def _penalties_section(self, session, penalties=()) -> QWidget:
+    def _penalties_section(self, session, penalties=(), 
+                           name_of=lambda entry: entry.driver_name) -> QWidget:
         """The session's penalties - every car's, named, in the order they were issued.
 
         Field-wide rather than the player's: what a league reader opens this page for is what
         happened to the whole field, and ``EventStore`` stores it that way. Every text decision -
         the wording, the three states, the driver join - is ``race_control.summarise_penalties``,
         so this only lays out what it returns.
+
+        The rows are the ones ``reload`` already read. They used to be re-read here, which made the
+        page query ``EventStore`` twice for the same session while the comment above the first read
+        said it happened onece.
         """
         entries = session.classification.entries if session.classification else ()
-        summary = summarise_penalties(self._stored_penalties(session), entries)
+        summary = summarise_penalties(penalties, entries, name_of)
 
         host = QWidget()
         box = QVBoxLayout(host)
@@ -539,6 +575,37 @@ class DetailPage(QWidget):
             return f"{metas[0].file_name}  (archive not found)"
         return ", ".join(found)
 
+    def _share_document(self) -> ShareDocument | None:
+        """This session as a ``ShareDocument``, or None if it has gone (E19).
+
+        Built on the click, from the same helpers ``reload`` builds the page from, so the image
+        cannot disagree with the table above it about a name, a penalty or the weekend slot. The
+        names deliberately come from the roster cache as the last paint left it rather than from a
+        fresh read (``league_names`` keeps it per-paint): re-reading here could name a driver one
+        way in the image and another on the screen it was shared from.
+
+        None leaves ``ShareControl`` silent: a session deleted under an open page is the page's
+        problem, and ``reload`` is where it is already handled.
+        """
+        session, slot = self._current()
+        if session is None:
+            return None
+        name_of = display_name_fn(self._rosters.roster_for_session(session.session_uid))
+        return session_document(session, slot, self._stored_penalties(session), name_of,
+                                self._placement(session))
+
+    def _placement(self, session) -> tuple[str, int] | None:
+        """``(season, round)`` for the image's meta line, or None while the session is unassigned.
+
+        The season is named as ``season_phrase`` names it everywhere else, so a result pasted into
+        the chat identifies its season the way the app's own refusals and markers do.
+        """
+        assignment = self._seasons.assignment_for(int(session.session_uid))
+        if assignment is None:
+            return None
+        season_id, round_number = assignment
+        return season_phrase(self._seasons.get_season(season_id)), round_number
+
     # --- actions ---------------------------------------------------------------------------------
     def _open_lap(self, table: QTableWidget, row: int, column: int) -> None:
         """Ask for one lap's telemetry; the container and window make the cross-surface hop."""
@@ -554,45 +621,7 @@ class DetailPage(QWidget):
                                   lap_store=self._laps, event_store=self._events):
             return
         self.sessions_changed.emit()
-        self.overview_requested.emit()
-
-
-def _box(title: str, content: QWidget, fill: bool = False, scroll: bool = False) -> QWidget:
-    """One titled section: a bold heading over its content, inside a light frame.
-
-    A framed ``QLabel`` heading rather than a ``QGroupBox``: a group box draws its title in the
-    *widget's* own font, so sizing the title up would size every child that inherits it. Here only
-    the heading is styled, and ``StyledPanel`` follows the palette with no stylesheet at all.
-
-    ``fill`` pushes the content to the top, leaving empty space below its last row, so the shorter
-    box in a row sits naturally beside a taller one instead of stretching its rows apart.
-
-    ``scroll`` puts the content in a scroll area, for a box inside a height-capped row whose
-    content has no upper bound. It supersedes ``fill``: the scroll area already takes the spare
-    height, so a stretch beside it would have nothing to push against. A *table* does not need
-    this - left unfrozen it scrolls itself and keeps its header row pinned, which a scroll area
-    around the whole table would not.
-    """
-    frame = QFrame()
-    frame.setFrameShape(QFrame.Shape.StyledPanel)
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(10, 8, 10, 10)
-    heading = QLabel(title)
-    apply_heading(heading, size_px=17)
-    layout.addWidget(heading)
-
-    if scroll:
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setFrameShape(QFrame.Shape.NoFrame)
-        area.setWidget(content)
-        layout.addWidget(area, 1)
-        return frame
-
-    layout.addWidget(content)
-    if fill:
-        layout.addStretch(1)
-    return frame
+        self.back_requested.emit()
 
 
 def _row(left: QWidget, right: QWidget, max_height: int | None = None) -> QWidget:

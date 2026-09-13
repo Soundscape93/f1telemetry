@@ -5,8 +5,8 @@ screen reads. Race sessions show position (with a grid-vs-finish change triangle
 (with a nationality flag), team, grid, stops, best lap, time (alternating with a penalty badge),
 and points; non-race sessions show position, driver, team, tyre, best lap, and gap to the
 session's fastest lap.
-The weekend view, and later the Sessions / Laps surfaces, all compose this same table instead
-of rebuilding it.
+The session detail page and the weekend-filtered overview both compose this same table
+instead of rebuilding it.
 
 Names are resolved through an injected ``name_of`` callable so this module never needs to know
 about league rosters: callers pass ``display_name_fn(roster)`` for LEAGUE views and the default
@@ -137,10 +137,11 @@ def build_classification_table(
 
     ``grid_penalties`` maps ``vehicle_index`` to the grid places that car was penalised, from
     ``sessions.race_control.grid_penalty_places`` over the session's stored ``PENA`` rows. It is
-    optional because it needs an ``EventStore`` the caller may not hold - the weekend page does not,
-    and simply shows no grid badges - and because a session ingested before ``PIPELINE_VERSION`` 5
-    has no rows to build it from. Only practice and qualifying read it: every grid penalty in this
-    database is issued there, and a race's TIME cell already alternates with its own badge.
+    optional because it needs an ``EventStore`` the caller may not hold, and because a session
+    ingested before ``PIPELINE_VERSION`` 5 has no rows to build it from. Only practice and
+    qualifying read it: every grid penalty in this database is issued there, and a race's TIME cell
+    already alternates with its own badge - which is why the weekend-filtered overview, whose
+    tables are all races, never passes it.
 
     ``scrollable`` leaves the table's height to its container instead of freezing it to fit every row.
     The default (False) is the sized-to-context behaviour every existing caller relies on;

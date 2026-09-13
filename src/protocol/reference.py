@@ -193,7 +193,7 @@ DRIVER_NAMES: dict[int, str] = {
     162: "Franco Colapinto",
     163: "Taylor Barnard",
     164: "Joshua Dürksen",
-    165: "Andra-Kimi Antonelli",
+    165: "Andrea-Kimi Antonelli",
     166: "Ritomo Miyata",
     167: "Rafael Villagómez",
     168: "Zak O'Sullivan",

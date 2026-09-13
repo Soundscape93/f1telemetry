@@ -204,8 +204,7 @@ class MainWindow(QMainWindow):
     
     def _build_pages(self) -> None:
         """Build the sidebar and the stacked content area with pages for each section."""
-        self._seasons_view = SeasonsView(self._season_store, self._session_store,
-                                          lap_store=self._lap_store, event_store=self._event_store,)
+        self._seasons_view = SeasonsView(self._season_store, self._session_store)
         self._stack.addWidget(_PlaceholderPage(
             "Dashboard", "The recent sessions, laps, and analytics will be shown here."))
         self._stack.addWidget(self._seasons_view)
@@ -215,14 +214,17 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._sessions_view)
         self._laps_view = LapsView(self._session_store, self._lap_store)
         # Deleting a session's stored results changes which laps exist, so the laps surface's
-        # canonical track-map cache has to go the same way it does after an ingest. The weekend
-        # page can't reach the laps view itself - pages never reference siblings (PRIORITIES -> A1).
-        self._seasons_view.sessions_changed.connect(self._laps_view.invalidate_caches)
-        # The same contract from the Sessions surface, which also deletes sessions.
+        # canonical track-map cache has to go the same way it does after an ingest. Only the
+        # Sessions surface deletes sessions, and its pages can't reach the laps view themselves -
+        # pages never reference siblings (PRIORITIES -> A1).
         self._sessions_view.sessions_changed.connect(self._laps_view.invalidate_caches)
         # Same rule, the other direction: a lap row on the Session detail page opens the lap's
-        # telemetry, which lives on a diffrent surface. Only the window owns both.
+        # telemetry, which lives on a different surface. Only the window owns both.
         self._sessions_view.lap_requested.connect(self._show_lap)
+        # The same rule for the two hops between Seasons and Sessions: activating a round opens
+        # that weekend on the Sessions surface (E1d), and its back button returns to the season.
+        self._seasons_view.weekend_requested.connect(self._show_weekend)
+        self._sessions_view.season_requested.connect(self._show_season)
         # And a job rather than a page: the deleted-sessions manager asks, the window runs it.
         self._sessions_view.restore_requested.connect(self._on_restore_requested)
         self._stack.addWidget(self._laps_view)
@@ -393,6 +395,22 @@ class MainWindow(QMainWindow):
         self._sidebar.setCurrentRow(_SECTIONS.index("Laps"))
         self._laps_view.show_lap(session_uid, lap_number)
 
+    def _show_weekend(self, season_id: int, round_number: int) -> None:
+        """Switch to the Sessions surface and open one round's weekend, from a season's calendar.
+
+        E1d's routing: a round opens the Sessions overview filtered to that weekend. Both halves
+        are needed for the same reason they are in :meth:`_show_lap` - ``SessionsView.show_weekend``
+        only moves that surface's *own* stack, so without the sidebar row changing the window stays
+        on Seasons.
+        """
+        self._sidebar.setCurrentRow(_SECTIONS.index("Sessions"))
+        self._sessions_view.show_weekend(season_id, round_number)
+
+    def _show_season(self, season_id: int) -> None:
+        """Switch to the Seasons surface and open one season, from the Sessions weekend page."""
+        self._sidebar.setCurrentRow(_SECTIONS.index("Seasons"))
+        self._seasons_view.show_season(season_id)
+
     # --- restoring a deleted session --------------------------------------------------------
 
     def _on_restore_requested(self, session_uid: str, content_hash: str) -> None:
@@ -447,7 +465,7 @@ class MainWindow(QMainWindow):
         A packaged build can silently lose a lazily-imported dependency or a bundled asset
         (docs/PACKAGING.md "Risks & fallbacks"); the user then meets the fallback with no
         explanation and reports it as a bug in the feature. Logged every launch, dialogued only
-        wehen something is actually degraded: the log line is what a tester report needs, the 
+        when something is actually degraded: the log line is what a tester report needs, the 
         dialog is what stops a silent downgrade going unnoticed.
         """
         from ..capabilities import check_capabilities, degraded, log_capabilities

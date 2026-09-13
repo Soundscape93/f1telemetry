@@ -1,10 +1,10 @@
-"""Shared confirm-and-delete for a stored session, used by every surface that offers it.
+"""Shared confirm-and-delete for a stored session, used by every page that offers it.
 
-The dialogs live here and the write lives in ``pipeline.delete_session``, so the two entry
-points - the weekend page's capture picker and the Sessions surface - cannot drift apart on
-either half: ine confirmation wording, one refusal message, one write path. ``components/`` is
-the neutral home; putting it under ``ui/sessions/`` would make a seasons page import from a
-sibling surface.
+The dialogs live here and the write lives in ``pipeline.delete_session``, so the three entry
+points - the Sessions overview, the weekend-filtered overview and the session detail page - cannot
+drift apart on either half: one confirmation wording, one refusal message, one write path. It came
+to ``components/`` while a Seasons page offered delete too; every caller is on the Sessions
+surface now.
 """
 
 from __future__ import annotations
@@ -14,11 +14,13 @@ from PySide6.QtWidgets import QMessageBox
 from ...pipeline import delete_session
 
 
-def _season_phrase(season) -> str:
+def season_phrase(season) -> str:
     """'Season 1' / 'Season 1 (“Wednesday League”)' - enough to go and find it.
 
     Deliberately not ``ui.seasons.labels.season_title``: ``components/`` must not depend on a
-    surface package, and a refusal only needs to *identify* the season, not title it.
+    surface package, and naming a season only needs to *identify* it, not title it. Shared rather
+    than private since the weekend page's assignment markers need a season for the same reason a
+    refusal does - one phrase so the two cannot drift.
     """
     if season is None:
         return "another season"
@@ -53,7 +55,7 @@ def confirm_and_delete(parent, session_uid: int, session_store, season_store,
             parent,
             "Session is assigned",
             f"This session is assigned to round {outcome.round_number} of "
-            f"{_season_phrase(season)}, so it was not deleted.\n\n"
+            f"{season_phrase(season)}, so it was not deleted.\n\n"
             "Unassign it from that round first, then delete it. Deleting it here would leave "
             "the round pointing at a session that no longer exists, and quietly drop its "
             "result from the standings.",
