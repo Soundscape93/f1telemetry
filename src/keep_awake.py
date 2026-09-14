@@ -41,7 +41,7 @@ _ES_DISPLAY_REQUIRED = 0x00000002    # don't blank the display - screen-off can 
 # battery. (Windows keeps ES_DISPLAY_REQUIRED because screen-off can itself trigger standby there.)
 # PowerDevil enforces a new lock only after a 5 s grace period, so a check made sooner reads as
 # "not honoured". "block", not "block-weak": PowerDevil only mirrors "block", and logind lets a
-# user's own suspend request override their weak lock - PowerDevil runs as that same user.
+# user's own suspend request override their weak lock - PowerDevil runs as that same user. 
 _LOGIND_WHAT = "sleep"
 _LOGIND_WHO = "f1telemetry"
 _LOGIND_WHY = "recording telemetry"
