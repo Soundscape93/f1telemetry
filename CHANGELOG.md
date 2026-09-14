@@ -19,6 +19,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.11.1 — 2026-09-14
+
 ### Fixed
 - **Recording on Linux no longer stops when the computer goes to sleep.** While you drive on the
   console the recording is often the only thing the laptop is doing, and receiving the game's data
