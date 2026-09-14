@@ -388,10 +388,10 @@ asleep.
 **Done (v0.4.2).** `src/keep_awake.py` — a `SetThreadExecutionState` context manager
 (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED`) wrapped around the capture loop in
 `RecorderWorker.run`. It lives on the worker thread because the flags are per-thread and die with
-the thread that set them; it is a no-op off Windows and never fatal. `ES_DISPLAY_REQUIRED` is the
-one judgement call — it keeps the screen lit, costing laptop battery — and is included because
-screen-off can itself trigger standby; drop it if a Windows test shows `ES_SYSTEM_REQUIRED` alone
-suffices.
+the thread that set them; it was a no-op off Windows until v0.11.1 (see *Linux recorder sleeps*
+below) and is never fatal. `ES_DISPLAY_REQUIRED` is the one judgement call — it keeps the screen
+lit, costing laptop battery — and is included because screen-off can itself trigger standby; drop
+it if a Windows test shows `ES_SYSTEM_REQUIRED` alone suffices.
 
 **Ruled out: EcoQoS opt-out.** EcoQoS throttles CPU *speed* for background processes; it neither
 suspends for 22 s nor takes the network stack down. The evidence points at sleep, so this would be
@@ -420,6 +420,62 @@ been tested on a policy-managed device.
 **The "missing middle laps" report (aborted Windows race, laps 1–2 then ~16–18) is almost certainly
 the same root cause and should be considered resolved with it** — worth a spot-check on the next
 long Windows race rather than a dedicated investigation.
+
+### RESOLVED (v0.11.1, lock verified 2026-09-14) — Linux recorder sleeps
+
+`keep_awake()` was a no-op on Linux, on the theory that a Linux lock screen doesn't suspend
+background processes. That part holds — a locked or blanked screen keeps the NIC up and the recorder
+scheduled — but the desktop's **idle suspend** doesn't care that a recording is running: receiving
+UDP resets no idle timer. On Fedora 44 KDE (Plasma 6.7.5) the compiled default is Sleep after 900 s
+without keyboard or mouse input, **on AC too** — `~/.config/powerdevilrc` stores only overrides, so
+an absent `[AC]` key means the default, not "off" — and the journal held three suspends on AC with no
+lid or key event before them. A 14.7-minute weekend recorded with the screen off and lost nothing,
+most likely because it ended before the 15-minute mark.
+
+**Two silent failures, two fixes.**
+
+- **No request.** Linux now holds a systemd-logind `idle:sleep` **block** lock for the recording,
+  through a `systemd-inhibit … cat` child that closing its stdin releases. The lock is a file
+  descriptor, and receiving one over D-Bus would need a client library for PyInstaller to bundle;
+  `kde-inhibit` was ruled out because it doesn't forward stdin. What honours the lock depends on the
+  desktop:
+  - *KDE Plasma* (mirroring code checked in 5.27.12 and 6.7.5): PowerDevil copies logind block locks
+    into its own policy. `sleep` becomes InterruptSession — the only thing its idle auto-suspend
+    checks — and `idle` becomes ChangeScreenSettings, which only stops dim and screen-off, so `idle`
+    alone would **not** keep KDE awake. 6.7 enforces a new inhibition only after a 5 s grace period;
+    a probe that let go at 3 s read as "not honoured" and briefly sent the diagnosis the wrong way.
+  - *GNOME* (gnome-settings-daemon and gnome-session source, not run): gsd-power consults only
+    gnome-session's `InhibitedActions`, which counts `org.gnome.SessionManager.Inhibit` callers and
+    not logind locks, so it still attempts the idle suspend. It asks logind non-interactively
+    (`Suspend(false)`), and a `block` — not `block-weak` — lock makes logind demand
+    `org.freedesktop.login1.suspend-ignore-inhibit`, which systemd's polkit policy gives only to an
+    authenticated admin (`auth_admin_keep`). The suspend is refused, unless a distro rule grants that
+    action to desktop users.
+  - *logind's own `IdleAction`* (bare window-manager setups) honours the `idle` lock directly.
+  - *No systemd*: without `systemd-inhibit` on PATH it logs a warning and records unprotected.
+- **No detection.** The stall warning timed each iteration with `time.monotonic()`, which stops during
+  a suspend — on the Fedora laptop it had missed 46 h of suspend since boot — so a suspend read as *no
+  stall at all*. Iterations are now also timed on `CLOCK_BOOTTIME`, and the difference is logged as
+  `machine suspended N s mid-recording`. Windows is unchanged: Python has no boottime clock there, so
+  the suspend reads 0 and the plain stall warning stays.
+
+**Verified on Fedora 44 KDE, Plasma 6.7.5 (2026-09-14)** — the lock's mechanics, not yet an
+unattended race:
+
+| | result |
+|---|---|
+| CLI recorder takes the lock | `f1telemetry … sleep:idle … block`, 0.2 s after start |
+| PowerDevil honours it | InterruptSession and ChangeScreenSettings set 4.9 s after the lock (5 s grace) |
+| Ctrl-C releases it | exit 0; lock and child gone immediately; a concurrent GUI lock untouched |
+| GUI recording | `RecorderWorker` holds the same lock, enforced by PowerDevil |
+| detector (clocks shifted in-process) | 10 s suspend → `machine suspended 10.0s`; 10 s stall → stall warning only; no boottime clock → stall warning only |
+| failure paths | `systemd-inhibit` missing or refusing → warning, recording continues |
+
+**Still to verify:** an untouched Linux recording that outlasts the idle timeout (shorten the AC
+suspend to a minute rather than waiting 15), and GNOME — Ubuntu first, where a desktop polkit rule
+granting `suspend-ignore-inhibit` would let gsd-power override the lock. If GNOME still sleeps, also
+register with `org.gnome.SessionManager.Inhibit` (flags suspend | idle), which gsd-power does check.
+Non-systemd distros could fall back to `elogind-inhibit`.
 
 ## Storage & analysis
 - **Reconstructed-race points — accept / edit / store (Option 3, deferred).** Option 2 shipped:

@@ -19,6 +19,31 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Fixed
+- **Recording on Linux no longer stops when the computer goes to sleep.** While you drive on the
+  console the recording is often the only thing the laptop is doing, and receiving the game's data
+  doesn't count as using it — so after a while without a key press the desktop put the laptop to
+  sleep, and nothing was recorded until you woke it. Fedora's KDE desktop does this after 15
+  minutes, even when plugged in. The app now asks Linux to stay awake for as long as a recording
+  runs, as it already did on Windows, and lets it sleep again the moment you stop. The screen may
+  still dim or switch off; that is harmless, and the recording carries on. If the computer does
+  sleep during a recording anyway, the log now says so — *machine suspended … mid-recording* —
+  instead of the gap going unnoticed.
+
+**Re-ingest needed: no**
+
+Nothing about how captures are read has changed; this release only changes how a recording is made.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows**, or **before v0.11.1 on Linux**, may be missing
+  stretches of telemetry, and with them the final classification, if the machine slept
+  mid-session. Nothing can recover that — the data never reached the app — so re-reading those
+  captures won't bring it back. Sessions with a missing classification show a reconstructed result
+  instead.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.11.0 — 2026-09-13
 
 ### Added

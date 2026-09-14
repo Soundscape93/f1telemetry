@@ -37,6 +37,24 @@ _RCVBUF_TARGET = 8 * 1024 * 1024
 # fault from the game not sending, and the one that loses packets.
 _STALL_WARN_SECONDS = 2.0
 
+# A suspend is not a stall and must not be reported as one: the machine was off, the NIC was
+# down, and nothing was buffered anywhere.
+_SUSPEND_WARN_SECONDS = 2.0
+
+# CLOCK_MONOTONIC stops while the machine is suspended, so timing a stall with time.monotonic()
+# is blind to exactly the failure that costs the most data: on Linux a suspend reads as no stall
+# at all. CLOCK_BOOTTIME keeps counting across suspend. Where it doesn't exist (Windows), this
+# falls back to the monotonic clock, "suspended" reads 0, and the stall warning behaves exactly
+# as before.
+_CLOCK_BOOTTIME = getattr(time, "CLOCK_BOOTTIME", None)
+
+
+def _since_boot() -> float:
+    """Seconds on a clock that keeps counting while the machine is suspended, where there is one."""
+    if _CLOCK_BOOTTIME is None:
+        return time.monotonic()
+    return time.clock_gettime(_CLOCK_BOOTTIME)
+
 
 class PacketSource(ABC):
     """Abstract base class for sources; yields raw UDP datagrams, one per iteration."""
@@ -78,14 +96,24 @@ class LiveUDPSource(PacketSource):
                 if self._stop_event is not None and self._stop_event.is_set():
                     return
                 cycle_start = time.monotonic()
+                cycle_start_boot = _since_boot()
                 try:
                     data, _addr = sock.recvfrom(_RECV_BUFFER)
                 except socket.timeout:
                     data = None
-                stalled = time.monotonic() - cycle_start
-                if stalled > _STALL_WARN_SECONDS:
+                # The two clocks differ only by time spent suspended: monotonic stops while the
+                # machine sleeps, boottime keeps counting.
+                awake = time.monotonic() - cycle_start
+                stalled = _since_boot() - cycle_start_boot
+                suspended = stalled - awake
+                if suspended > _SUSPEND_WARN_SECONDS:
+                    log.warning(
+                        "machine suspended %.1fs mid-recording - the NIC was down, so those "
+                        "datagrams never reached the receive buffer and are unrecoverable. "
+                        "Check the stay-awake inhibitor: systemd-inhibit --list", suspended)
+                elif stalled > _STALL_WARN_SECONDS:
                     # We were descheduled: the socket timeout should have returned long ago.
-                    # Anything the kernel buffered its limit is already lost.
+                    # Anything the kernel buffered past its limit is already lost.
                     log.warning(
                         "recorder stalled %.1fs (socket timeout is %.1fs) - datagrams beyond the "
                         "%.1f KB receive buffer were dropped by the OS",
