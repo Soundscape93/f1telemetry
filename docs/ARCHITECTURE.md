@@ -579,9 +579,11 @@ wrap the capture loop in `keep_awake()` (`src/keep_awake.py`) so the machine can
 mid-recording — a recorder is often the only thing a machine is doing, and a slept machine receives
 nothing at all because the NIC goes down with it. On Windows the request is
 `SetThreadExecutionState`, which is per-thread, so it has to be made on the thread that records. On
-Linux it is a systemd-logind `idle:sleep` **block** lock held by a `systemd-inhibit` child whose
-stdin is a pipe: closing the pipe releases the lock, and so does the app dying. If the lock can't be
-had, it logs why and records anyway (ROADMAP → *Linux recorder sleeps*).
+Linux it is a systemd-logind `sleep` **block** lock, plus a GNOME session `suspend` inhibitor under
+GNOME, held by `systemd-inhibit` (and `gnome-session-inhibit`) chained into a child whose stdin is a
+pipe: closing the pipe releases everything, and so does the app dying. Idle is never inhibited, so
+the screen still dims and turns off. If the combined request is refused it retries with the logind
+lock alone; if that fails too, it logs why and records anyway (ROADMAP → *Linux recorder sleeps*).
 
 **`ReingestWorker`** (packaging Phase 2) follows the same shape for the guided rebuild: its four
 stores (session, lap, capture, meta) are built on its own thread and disposed in one `finally`, it
