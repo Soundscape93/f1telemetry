@@ -24,6 +24,7 @@ import time
 from typing import BinaryIO
 from collections.abc import Callable
 
+from ..keep_awake import keep_awake
 from .recording import write_header, write_packet
 from .sources import LiveUDPSource, PacketSource
 
@@ -83,7 +84,8 @@ class SessionRecorder:
         print(f"Listening for telemetry, writing to {self.output_path}")
         print("Drive a session, then press Ctrl-c or stop.\n")
         try:
-            self.record(on_status=self._print_status, status_interval=status_interval)
+            with keep_awake():
+                self.record(on_status=self._print_status, status_interval=status_interval)
         except KeyboardInterrupt:
             pass
         print(f"\nSaved {self.packet_count} packets to {self.output_path}")

@@ -570,11 +570,20 @@ the GUI thread — both pointing at the same database file. The recorder's coope
 That cycle is also the recorder's own health check: `LiveUDPSource` asks for a large `SO_RCVBUF`
 (the OS default — 64 KB on Windows — holds only ~0.3 s of stream, so a descheduled process loses
 everything past it) and warns when one iteration runs far longer than the socket timeout, which
-distinguishes *we weren't running* from *the game wasn't sending*. `RecorderWorker.run` wraps the
-capture loop in `keep_awake()` (`src/keep_awake.py`) so the machine can't sleep mid-recording — a
-recorder is often the only thing a machine is doing, and a slept machine receives nothing at all
-because the NIC goes down with it. The request lives on the worker thread because
-`SetThreadExecutionState` is per-thread; it is a no-op off Windows.
+distinguishes *we weren't running* from *the game wasn't sending*. Each iteration is timed on two
+clocks, because `time.monotonic()` stops while the machine is suspended: its difference from
+`CLOCK_BOOTTIME`, which keeps counting, *is* the suspend, so a suspend is logged as one instead of
+reading as no stall at all. Python exposes `CLOCK_BOOTTIME` only on Linux; elsewhere the plain
+stall warning is unchanged. `RecorderWorker.run` — and the CLI's `SessionRecorder.record_forever` —
+wrap the capture loop in `keep_awake()` (`src/keep_awake.py`) so the machine can't sleep
+mid-recording — a recorder is often the only thing a machine is doing, and a slept machine receives
+nothing at all because the NIC goes down with it. On Windows the request is
+`SetThreadExecutionState`, which is per-thread, so it has to be made on the thread that records. On
+Linux it is a systemd-logind `sleep` **block** lock, plus a GNOME session `suspend` inhibitor under
+GNOME, held by `systemd-inhibit` (and `gnome-session-inhibit`) chained into a child whose stdin is a
+pipe: closing the pipe releases everything, and so does the app dying. Idle is never inhibited, so
+the screen still dims and turns off. If the combined request is refused it retries with the logind
+lock alone; if that fails too, it logs why and records anyway (ROADMAP → *Linux recorder sleeps*).
 
 **`ReingestWorker`** (packaging Phase 2) follows the same shape for the guided rebuild: its four
 stores (session, lap, capture, meta) are built on its own thread and disposed in one `finally`, it
