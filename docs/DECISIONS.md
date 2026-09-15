@@ -84,7 +84,9 @@ what would trigger revisiting it.
   *The three link identifiers*, over all 72 sessions in all 33 captures. Two rules came out of it,
   and both end in a confirmation the user can decline rather than in a write. They live in
   `ui/sessions/assignment.py` — Qt-free, with unit tests, because what to propose is a rule and
-  not a widget.
+  not a widget. **One case is written instead** — a career's newly stored sessions, once one of that
+  career's sessions has been placed in a season by hand (E1e, the next bullet). Everything here
+  still holds for every other case, and is that case's fallback.
   - **Weekend propagation — every mode.** Assigning one session to `(season, round)` offers every
     other stored session sharing its `weekend_link_identifier` for the same round. Licensed by the
     data: all 13 weekends have exactly one `track_id`, and all 7 rounds assigned by hand in this
@@ -158,6 +160,59 @@ what would trigger revisiting it.
     as written, on real data. The **repeated-track rule** is still where Pending slot rows are: no
     calendar here repeats a track, so it has **no live example** and its unit tests are the only
     cover it has.
+- **Automatic assignment *is* written for one case: newly stored sessions of a career already
+  placed in a season by hand** *(E1e, decided 2026-09-15, v0.12.0)*. It reverses the bullet above
+  for that case alone. The proposal, the picker and its *suggested* marks are unchanged, and they
+  are the fallback whenever any condition below fails.
+  - **No new table.** "This career id belongs to this season" is derived from `season_assignments`
+    and the stored sessions' `season_link_id`, as the proposal's season inference already derives
+    it. Unassigning every session of a career drops the link; a second season holding one of them
+    makes the id ambiguous, which stops the automation for that career on its own.
+  - **A write needs all of**, checked in this order: (1) an allow-listed career `game_mode`; (2) the
+    session not already placed; (3) exactly one season holding a session with its
+    `season_link_id`; (4) that season in the mode its `game_mode` pairs with; (5) a weekend index
+    `(weekend_link_id − season_link_id) / 100` that is a whole number, zero or more; (6) the
+    calendar holding its track exactly once; (7) that round equal to the index + 1; (8) that round
+    holding no other weekend; (9) a single stored attempt at its slot. **Failing 1–5 is silent** —
+    the session is not in a career placed in a season, so nothing was expected of it. **Failing 6–9
+    holds the session and says why.**
+  - **The allow-list is `27` / `79` My Team and `28` / `78` Driver Career, each paired with its
+    season mode.** Raw ids (invariant #9), never the display names. `78` and `79` are measured;
+    `27` and `28` are the same two modes on the 2025 cars, included on that basis with no capture of
+    either in this database. The pairing keeps a session out of a season of the *other* career mode:
+    a misfiled career is left to the picker rather than extended.
+  - **Keyed on `game_mode`, not on the season id differing from the weekend id.** A career's first
+    weekend reports its own id as the season id (TELEMETRY_NOTES → *The three link identifiers*),
+    which is exactly what the proposal reads as an online mode. Reusing that check would refuse the
+    rest of the very weekend a career is usually started from; the index needs no special case for
+    it, since index 0 is round 1.
+  - **The weekend index is a cross-check, never the source.** The round comes from the track, as in
+    the proposal, and the index has to agree with it. It rests on two careers and no skipped weekend
+    (TELEMETRY_NOTES → *Hypothesis*), so **a disagreement refuses the write and is reported** —
+    neither round is ever corrected towards the other. Whichever way that measurement goes, no
+    wrong round is written: if the index counts weekends driven, the weekend after a skip disagrees
+    and is left to the user.
+  - **Only sessions stored for the first time, by a fresh recording or an import.** "First time" is
+    a uid absent from `stored_uids()` read on the worker's thread just before that ingest, and
+    returned by it — exact, because `MainWindow._busy()` allows one store-owning worker at a time and
+    the GUI thread never saves a session. **Never inside `ingest_capture`**, which `reingest_all`
+    and restore share: a `PIPELINE_VERSION` bump would re-assign what the user unassigned on
+    purpose, the resurrection problem tombstones solved for deletes. **Never on restore:**
+    `delete_session` refuses an assigned session, so every tombstone was unassigned when it was
+    deleted, and a restore puts back what was deleted. The uid comparison alone would get restore
+    wrong — a restored uid is absent from `stored_uids()` as well — which is why the boundary is the
+    operation and not the data. **Never on a page reload**, which would make looking at a page a
+    write. One edge is accepted: a session whose tombstone was *forgotten* and whose recording is
+    later imported counts as new, and its write is reported.
+  - **Several attempts stay manual.** An attempt arriving while another is already assigned at its
+    slot is held, and the assigned one stays where it is; two attempts in one recording are both
+    held. Nothing is ever unassigned automatically.
+  - **Every write and every hold is reported** once the recording or import finishes — a dialog the
+    user cannot miss, because the status line is overwritten by the next thing they do. The result
+    travels from the worker as plain values and is worded on the GUI thread (core invariant #10).
+  - **A skipped weekend is not repaired.** It emits no session at all (TELEMETRY_NOTES), so a
+    career's standings lack that race whatever this does; entering or importing its Final
+    Classification by hand is PRIORITIES → E21.
 - **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
   single recording often holds several attempts of the same session (a crash/restart, or a
   re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.

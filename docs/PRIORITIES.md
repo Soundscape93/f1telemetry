@@ -211,7 +211,8 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 |---|---|---|---|
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
-| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export, and — tentatively — **E1e** | `minor` | no — and **must not cause one**; an *optional* re-read corrects one misspelt driver name (2026-09-13) |
+| **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export | `minor` | no — and **must not cause one**; an *optional* re-read corrects one misspelt driver name (2026-09-13) |
+| **v0.12.0** | **E1e** — automatic assignment for career sessions (branch 1, `feature/career-auto-assignment`, planned 2026-09-15; moved here from a tentative branch 8 of v0.11.0); later branches are named when they are planned | `minor` | no — and **must not cause one** |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
 and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
@@ -243,8 +244,8 @@ without caveats. Revisit it then, not at a view rework.
 
 **E16 is not in this table on purpose.** It needs no bump — `game_mode` is stored as a raw int
 (invariant #9), so it is a `GAME_MODE_NAMES` lookup entry and nothing more — and its code half is
-already done and already in `## Unreleased` (`78: "Driver Career '26"`). Its open remainder, My Team
-'26, is not code: it is waiting for a capture from that mode to exist.
+already done and already in `## Unreleased` (`78: "Driver Career '26"`). Its remainder, My Team '26,
+closed the same way on 2026-09-14, once a capture from that mode existed: `79: "My Team Career '26"`.
 
 **Cycle 5 (likely) — localization.** The new G block, below. Deliberately after the E-block
 surfaces: translating a UI that is still growing means translating it twice.
@@ -285,11 +286,11 @@ re-run under WAL on 2026-08-05 and passes.
 | E5 | Bug report page | open — **last of the E-block** | ROADMAP → Other surfaces |
 | E14 | Mixed dry/wet weather on a session | **done 2026-08-31** — the last open item for v0.9.0; the shape was settled against all 33 captures first, which changed the rule | the note below |
 | E15 | Ingest Event packets — overtakes + penalty detail | **in progress** — the whole of **v0.10.0**; shape settled against all 33 captures 2026-09-01, four branches, `PIPELINE_VERSION` 4 → 5. The 2026-08-24 "bundle with E14" plan is superseded: E14 shipped in v0.9.0 and E15 pays its own prompt | the note below |
-| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **done 2026-09-11** — **branch 5 of v0.11.0**: the round-centric page is deleted with no caller left, and Session detail now goes back to the page that opened it. Planned 2026-09-01 as the whole of v0.11.0 in **seven branches**, order forced (see the note below); v0.11.0 continues with **E19** (branches 6–7) and, tentatively, **E1e** (branch 8) | **`E1_E2_PLAN.md`**; the note below |
+| E1d | Seasons routes into a weekend-filtered Sessions overview — **the Seasons rework**; the round-centric weekend page is retired at the end of it | **done 2026-09-11** — **branch 5 of v0.11.0**: the round-centric page is deleted with no caller left, and Session detail now goes back to the page that opened it. Planned 2026-09-01 as the whole of v0.11.0 in **seven branches**, order forced (see the note below); v0.11.0 continued with **E19** (branches 6–7); **E1e**, once a tentative branch 8, moved to **v0.12.0** on 2026-09-15 | **`E1_E2_PLAN.md`**; the note below |
 | A8 | `weekend_slots` silently drops a re-driven session's second attempt | **in progress** — **branch 2 of v0.11.0**; found 2026-09-01 while measuring the link identifiers, reproduced against the live database | the note below; DECISIONS → UI |
 | E19 | Share / export a session's result to the league chat | **done 2026-09-13** — **branch 6** 2026-09-12 (the shared model, renderer and delivery, plus Session detail's **Share ▾**); **branch 7** 2026-09-13 (standings from the season page; a round's standings and its whole weekend from the weekend page). New 2026-09-01; PNG the app renders itself, format prototyped before it was chosen, scope changed 2026-09-11 | DECISIONS → UI; the note below |
 | E20 | Season page restructure — calendar \| results matrix \| standings, with the detail area below | **proposed 2026-09-11**, not scheduled — surfaced by E19's scope change: sharing standings needs them readable on the season page first. **After branch 7**, its own release (v0.12.0 or later) | the note below |
-| E16 | Game-mode ids for the 2026 modes | open — **`78` observed 2026-08-24**; My Team '26 still unknown | the note below |
+| E16 | Game-mode ids for the 2026 modes | **done 2026-09-14** — **`78` Driver Career '26** observed 2026-08-24, **`79` My Team '26** observed 2026-09-14; both named in `GAME_MODE_NAMES` | the note below |
 | E17 | Store `driver_status` / `pit_status` from Lap Data, and classify every lap from it | **done 2026-08-30** — grew to cover the banked Laps-box indicators and Safety Car / Red Flag, which needed no extra packet; the red-flag rules were corrected on manual check | the note below |
 | F6 | Carry the CHANGELOG known-issues list forward every release | **closed by F8, 2026-08-07** — was process, now a gate | see the Cycle 3 plan above |
 | F8 | `bump_version --check` reads the instruction comment, so its gates can never fail | **done 2026-08-07** — shipped in v0.7.0 | see the Cycle 3 plan above |
@@ -487,7 +488,7 @@ the unit tests are its only cover.
 | 5 | `feature/retire-weekend-page` | **E1d** — the round-centric page goes — **done 2026-09-11** |
 | 6 | `feature/share-session-results` | **E19** — the shared document model, renderer and delivery, proved on **one session** — **done 2026-09-12** |
 | 7 | `feature/share-weekend-results` | **E19** — a whole weekend **plus the standings as of that round**, and standings on their own from the season page; reuses branch 6's machinery, adding one layout block — **done 2026-09-13** |
-| 8 | *tentative — named when it is planned* | **E1e** — added 2026-09-11; only if both in-game measurements are in before release, v0.12.0 otherwise (the E1e note below) |
+| 8 | *not taken* | **E1e** — added 2026-09-11 as a tentative branch 8; **moved to v0.12.0 on 2026-09-15**, where it is branch 1, `feature/career-auto-assignment` (the E1e note below) |
 
 **Branch 1 is done, and what it measured is worth not re-deriving.** `SeasonStore.assigned_seasons()`
 (the bulk uid → season read), `ui/sessions/league_names.py` (`SessionRosters`, Qt-free) and the
@@ -602,7 +603,7 @@ weekend id counts its rounds*); a round that is empty or already holds this week
 attempt; and a session stored for the first time. Anything short of that falls back to today's
 proposal, picker and *suggested* marks. One case the branch must decide explicitly: an attempt
 arriving in a *later* capture than the one already assigned at its slot — assign neither, unassign
-nothing, and report it.
+nothing, and report it. *The allow-list and that case were settled 2026-09-15, below.*
 
 **What it waits on — checked against EA's specification first (2026-09-10).** The spec says only
 "Identifier for season - persists across saves" (TELEMETRY_NOTES → *What EA's specification says
@@ -616,6 +617,37 @@ requiring index and track to agree refuses the write; it can be recorded when th
 new-season capture arrives. If the measurements have to wait, the conservative version needs none
 of them: after ingest, *propose* with the same guards — one confirmation per recording, and no
 decision reversed.
+
+**Moved to v0.12.0 on 2026-09-15, as its first branch** (`feature/career-auto-assignment`). v0.11.0
+shipped without it, and neither measurement blocks it any more:
+
+- **My Team on 2026 cars is `game_mode 79`** — the first My Team '26 recording (`20260914_184305`)
+  reports it on both of its sessions, and it is named in `GAME_MODE_NAMES` (E16).
+- **A skipped weekend emits nothing to ingest.** `20260914_190909`, recorded across a skipped My
+  Team weekend, holds 544 packets and no session. So even a confirmed index could not keep a
+  career's standings right across a skip — that race has no result to store (**E21**). The weekend
+  after the skip has not been driven yet, so the hypothesis is still open (*Needs verification*);
+  the agreement guard stays, and a disagreement refuses the write and is reported, never corrected.
+- **A career's first weekend reports its own id as the season id** (TELEMETRY_NOTES → *The three
+  link identifiers*), which `suggested_placement` reads as an online mode. So E1e keys on
+  `game_mode`, not on the two ids differing — otherwise it would refuse the rest of the very weekend
+  a career is usually started from. The picker keeps that blind spot for now (**A9**).
+
+**Decided 2026-09-15** (DECISIONS → Storage has the full entry). The allow-list is **`27` / `79` My
+Team and `28` / `78` Driver Career**, each paired with its season mode — `78` and `79` are measured,
+`27` and `28` are the same modes on the 2025 cars. "Stored for the first time" is a uid absent from
+`stored_uids()` just before the ingest of a **fresh recording or an import** — never `reingest_all`,
+and never restore, because every tombstone was unassigned when it was deleted. A later attempt at an
+assigned slot is held and nothing is unassigned. A track the calendar has no single round for,
+disagreeing rounds, a round holding another weekend and a repeated attempt are all **held and
+reported** once the recording or import finishes, in a dialog worded on the GUI thread.
+
+**Planned in five steps**, one reviewable change each: move the shared rules (attempt counts,
+weekend-mates, the season a career id names, which weekend a round holds) unchanged out of
+`ui/sessions/assignment.py` into a Qt-free `domain/placement.py`; add the career rule there, pure;
+wire it into `archive_and_ingest` and `import_captures` through a new
+`pipeline.assign_career_sessions`; report it from the workers on the GUI thread; then the docs,
+changelog and guide.
 
 **E19 — Share a result to the league chat.** *New 2026-09-01, requested alongside the Seasons
 rework.* Today a result reaches the league WhatsApp group as a hand-taken screenshot. The
@@ -736,9 +768,10 @@ the database against the session detail view. It is **not in the UDP specificati
 documented the '26 mode ids — so `GAME_MODE_NAMES` renders it `Unknown game mode (78)` today.
 Add it, labelled as observed rather than specified.
 
-**Still unknown: My Team '26**, because there is no My Team '26 recording yet. Add that id the
-same way once one exists. For contrast, Grand Prix Multiplayer "Championship" (the league, also on
-2026 cars) already reports `Online Custom` correctly — so only the *career* modes shifted.
+**My Team '26 is `game_mode 79`** — unknown until 2026-09-14, when the first My Team '26 recording
+(`20260914_184305`) reported it on both of its sessions; added the same way, labelled as observed.
+For contrast, Grand Prix Multiplayer "Championship" (the league, also on 2026 cars) already reports
+`Online Custom` correctly — so only the *career* modes shifted.
 
 Shaped exactly like the `ai_difficulty` branch: assembler → `SessionResult` → `SessionRow` → both
 mappings → **`PIPELINE_VERSION` 3→4**. **Before the release**: `## Unreleased` already says
@@ -756,7 +789,9 @@ costs users a second one.
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **in progress** — **branch 1 of v0.11.0**; saved roster file only, no seeding (DECISIONS → UI); the E1d note in P2 |
 | E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **done 2026-09-07** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
-| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **proposed 2026-09-10; tentative branch 8 of v0.11.0 (2026-09-11)** — the last v0.11.0 item if both in-game measurements (My Team on 2026 cars; a skipped weekend) are in before release, v0.12.0 otherwise; must not cause a re-ingest; the E1e note in P2 |
+| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **in progress — branch 1 of v0.12.0** (`feature/career-auto-assignment`, planned 2026-09-15); moved from a tentative branch 8 of v0.11.0, and neither in-game measurement blocks it any more; must not cause a re-ingest; the E1e note in P2 |
+| A9 | The picker never suggests a round for a career's first-weekend sessions | **banked 2026-09-15**, not scheduled — `suggested_placement` reads `season_link_id == weekend_link_id` as an online mode, and a career's first weekend reports exactly that; E1e keys on `game_mode` and is unaffected; the E1e note in P2, TELEMETRY_NOTES → *The three link identifiers* |
+| E21 | Enter or import a skipped career weekend's Final Classification, so career standings can match the game's | **proposed 2026-09-15**, not scheduled — a skipped weekend emits no session, so no ingest can supply that race; out of E1e's scope; ROADMAP → Storage & analysis |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
 | C7 | pyqtgraph bloat trim (`pyqtgraph.examples`) | **done 2026-08-06** — Cycle 3; PACKAGING → Phase 1 known issues |
@@ -949,6 +984,14 @@ up opportunistically rather than scheduled.
 - **A5 — `ES_DISPLAY_REQUIRED`.** Never isolated from `ES_SYSTEM_REQUIRED`; dropping it is a
   one-line experiment that would stop the screen staying lit. Also untested against a
   policy-managed machine, where a *lock* cannot be prevented (only sleep can).
+- **Does a career's weekend id count calendar rounds, or weekends driven? (E1e)** A My Team '26
+  weekend was skipped on 2026-09-14 (`20260914_190909`, no session), and the weekend after it has not
+  been driven yet. **Plan:** record a session of that next weekend and read its Session packets:
+  `(weekend_link_id − season_link_id) / 100 + 1` either equals the track's calendar round, or falls
+  short of it by the weekends skipped. Once E1e ships the answer also shows up unprompted — the
+  session is assigned, or held with the two rounds reported as disagreeing. Record it in
+  TELEMETRY_NOTES → *Hypothesis: a career's weekend id counts its rounds*; until then the index is
+  only a cross-check (DECISIONS → Storage).
 ## Recently closed
 
 - **E14 — a session that ran both dry and wet.** Closed 2026-08-31 on `feature/mixed-weather`,

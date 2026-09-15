@@ -488,6 +488,15 @@ fallback would be the obvious next step there.
   **re-including** the confirmed values in `compute_standings` / `compute_constructor_standings`.
   Needs a points-source distinction on the entry and belongs with **league-management** (per-league
   scoring tables) — until then estimates never reach a championship.
+- **A skipped career weekend's Final Classification, entered or imported by hand (PRIORITIES →
+  E21, proposed 2026-09-15, not scheduled).** Skipping a whole race weekend in Driver Career or My
+  Team emits no session at all (TELEMETRY_NOTES → *Hypothesis: a career's weekend id counts its
+  rounds*), so no ingest can supply that race and the app's career standings fall behind the game's
+  for good. Automatic career assignment (E1e) deliberately does not try to repair it. What would: a
+  way to enter that race's Final Classification — or import it from a file — against a round with
+  nothing assigned, stored as user-entered and distinct from anything captured. It shares Option 3's
+  need for a points-source distinction on the entry, so the two belong together. Only needed if
+  standings that stay right across a skipped weekend are ever wanted.
 - **Dense-trace persistence (in progress — lap-view iteration 1a).** Store `LapTrace`s as
   **Parquet** files referenced by the lap row (~5,400 samples/lap at 60 Hz — not SQLite rows; npz
   was the alternative, Parquet chosen — see DECISIONS), plus an ingest entry point that writes

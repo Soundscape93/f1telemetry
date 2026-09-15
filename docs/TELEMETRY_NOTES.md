@@ -221,6 +221,7 @@ app is required not to guess.
 | `game_mode` | weekends | `season_link == weekend_link` | what the id is worth |
 |---|---|---|---|
 | 78 — Driver Career '26 | 5 | **1 of 5** (the first weekend, whose id the career then keeps) | one id spans the whole career: a real season identifier |
+| 79 — My Team '26 *(added 2026-09-15)* | 1 | **1 of 1** (its first weekend, like 78's) | the same shape so far; one weekend cannot show the id being kept |
 | 7 — Online Custom / League Racing | 3 | **3 of 3** | equal to the weekend id: carries no season information |
 | 4 | 5 | **5 of 5** | same |
 
@@ -228,6 +229,14 @@ So for the online modes the accurate statement is not "the season identifier cha
 weekend" but **"there is no season identifier — the game reports the weekend's id in that field"**,
 in 8 of 8 observed weekends. Grouping online sessions by `season_link_identifier` is grouping them
 by weekend, and nothing more.
+
+**Equal ids do not mean an online mode on their own** *(added 2026-09-15)*. A career's *first*
+weekend reports its own id as the season id too — 78's first weekend and 79's only one both do, and
+78's four later weekends all carry that first id. So `season_link == weekend_link` means "online, or
+a career's first weekend", and only `game_mode` tells the two apart. `assignment.suggested_placement`
+reads the equality as online, so the picker never suggests a round for a career's first-weekend
+sessions (PRIORITIES → A9); E1e's automatic assignment keys on `game_mode` instead (DECISIONS →
+Storage).
 
 ### What EA's specification says about these fields — and what it does not (checked 2026-09-10)
 
@@ -251,8 +260,8 @@ What it does **not** say — so this app has it from measurement alone, or not a
   stride below, appear nowhere in it.
 
 It is also demonstrably **incomplete for exactly these modes**: the 2026 Season Pack's game-mode
-appendix does not list the `78` that Driver Career '26 actually reports, and the code for My Team
-on 2026 cars is in neither the appendix nor any capture here.
+appendix lists neither the `78` that Driver Career '26 actually reports nor the `79` that My Team on
+2026 cars reports (first captured 2026-09-14).
 
 Nothing outside the spec fills the gap. GitHub code search finds the field in about 30
 repositories covering F1 2021–2026 — all parsers, type definitions or copies of the spec, and the
@@ -280,12 +289,25 @@ Storage's "no identifier carries a round number" is wrong for careers. What woul
 (PRIORITIES → E1e):
 
 - **a skipped weekend** — simulate one mid-season, drive the next: does the index still equal the
-  calendar round, or does it count weekends *driven*?
+  calendar round, or does it count weekends *driven*? **Half done, 2026-09-14.** A My Team '26
+  weekend was skipped while recording (`20260914_190909`): 544 packets, and the assembler emitted no
+  session at all — a skipped weekend leaves nothing to ingest, not even a stub. The weekend *after*
+  it, whose id is the actual evidence, has not been driven yet (PRIORITIES → *Needs verification*).
 - **My Team on 2026 cars** — which `game_mode` it reports, and whether its ids behave the same.
-  One My Team career driven *drive a session, skip a weekend, drive a session* answers both.
+  **Answered 2026-09-14** (`20260914_184305`, read packet by packet): `game_mode 79`. Its one
+  weekend so far sits at index 0 = round 1, Melbourne, the round its three sessions were assigned to
+  by hand; the link ids never moved across the 1,036 Session packets of the capture's two sessions;
+  and the slot index is exact (Short Qualifying at 3 and Race at 4 of `[P1, P2, P3, Short
+  Qualifying, Race]`). Consistent, but **index 0 cannot tell calendar rounds from weekends driven**.
 - **a season boundary** — not needed first. A carried-over id would put the index past the
   calendar's end, so a rule that requires the index and the track to agree refuses the write; it
   can simply be recorded when the first new-season capture arrives.
+
+**Status 2026-09-15: a safety cross-check, not a prerequisite.** E1e takes the round from the track
+and writes only when the index agrees; a disagreement refuses the write and is reported, never
+corrected (DECISIONS → Storage). Settling the question would not change what E1e may do after a skip
+anyway: the skipped race has no result to store, so a career's standings stay short of the game's
+until one can be entered by hand (PRIORITIES → E21).
 
 ### The weekend id is a reliable grouping in every mode
 
@@ -706,15 +728,19 @@ contradiction. `ui/components/weather.py` already records why the observed field
 
 ## Game mode ids: the 2026 career modes are undocumented
 
-*Observed 2026-08-24.* `game_mode 78` is **Driver Career '26** — every "Driver Career with the 2026
-cars" recording carries it, confirmed in the database against the session detail view. It is **not
-in the UDP specification**; EA has not published the '26 mode ids, and `GAME_MODE_NAMES` stops at
-30/75/127, so it currently renders `Unknown game mode (78)`.
+*Observed 2026-08-24 and 2026-09-14.* Neither id is **in the UDP specification** — EA has not
+published the '26 mode ids — so both are named in `GAME_MODE_NAMES` as observed:
 
-- **My Team '26 is still unknown** — no My Team '26 recording exists yet. Capture one, read the
-  value, add it.
+- **`78` is Driver Career '26** — every "Driver Career with the 2026 cars" recording carries it,
+  confirmed in the database against the session detail view.
+- **`79` is My Team '26** — the first My Team '26 recording (`20260914_184305`) carries it on both
+  of its sessions. As with every mode, a session's opening Session packets can still read `0` (the
+  first 3 of 681 here); the settled value is the one stored.
 - **Grand Prix Multiplayer "Championship"** (league racing, also on 2026 cars) reports
   `Online Custom` correctly, so only the *career* mode ids shifted.
+- **The 2025-car careers keep `27` (My Team) and `28` (Driver Career)**, the ids `GAME_MODE_NAMES`
+  already carries for them; no capture of either exists here. E1e treats them as the same two modes
+  as `79` / `78` (DECISIONS → Storage).
 
 Record these as **observed**, not specified — see PRIORITIES → E16.
 
