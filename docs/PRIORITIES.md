@@ -603,7 +603,8 @@ weekend id counts its rounds*); a round that is empty or already holds this week
 attempt; and a session stored for the first time. Anything short of that falls back to today's
 proposal, picker and *suggested* marks. One case the branch must decide explicitly: an attempt
 arriving in a *later* capture than the one already assigned at its slot — assign neither, unassign
-nothing, and report it. *The allow-list and that case were settled 2026-09-15, below.*
+nothing, and report it. *The allow-list and that case were settled 2026-09-15, below, and that case
+amended 2026-09-17.*
 
 **What it waits on — checked against EA's specification first (2026-09-10).** The spec says only
 "Identifier for season - persists across saves" (TELEMETRY_NOTES → *What EA's specification says
@@ -637,10 +638,13 @@ shipped without it, and neither measurement blocks it any more:
 Team and `28` / `78` Driver Career**, each paired with its season mode — `78` and `79` are measured,
 `27` and `28` are the same modes on the 2025 cars. "Stored for the first time" is a uid absent from
 `stored_uids()` just before the ingest of a **fresh recording or an import** — never `reingest_all`,
-and never restore, because every tombstone was unassigned when it was deleted. A later attempt at an
-assigned slot is held and nothing is unassigned. A track the calendar has no single round for,
-disagreeing rounds, a round holding another weekend and a repeated attempt are all **held and
-reported** once the recording or import finishes, in a dialog worded on the GUI thread.
+and never restore, because every tombstone was unassigned when it was deleted. A track the calendar
+has no single round for, disagreeing rounds, a round holding another weekend and an attempt with a
+later one stored are all **held and reported** once the recording or import finishes, in a dialog
+worded on the GUI thread. **Amended 2026-09-17, before the career rule was committed:** the latest
+attempt at a slot is the one written, and writing it unassigns an earlier attempt at that slot in
+the same round (also reported) — the reverse of "hold the later attempt, unassign nothing", because
+a slot is re-driven when the earlier run went wrong.
 
 **Planned in five steps**, one reviewable change each: move the shared rules (attempt counts,
 weekend-mates, the season a career id names, which weekend a round holds) unchanged out of

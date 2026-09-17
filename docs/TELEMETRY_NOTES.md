@@ -214,7 +214,8 @@ A restarted or re-driven session reports **the same season, weekend and session 
 `session_type` and the same track** as the attempt it replaces. Only `session_uid` and
 `recorded_at` differ. **10 of the 13 weekends hold at least one slot with 2, 3 or even 4 attempts.**
 Nothing in the telemetry says which attempt is the one that counts — see DECISIONS → UI, where the
-app is required not to guess.
+app is required not to guess. E1e's automatic career assignment is the one exception: it writes the
+latest attempt, because a slot is re-driven when the earlier run went wrong (DECISIONS → Storage).
 
 ### `season_link_identifier` is only a *season* identifier in the career modes
 

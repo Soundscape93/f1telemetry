@@ -173,9 +173,9 @@ what would trigger revisiting it.
     `season_link_id`; (4) that season in the mode its `game_mode` pairs with; (5) a weekend index
     `(weekend_link_id − season_link_id) / 100` that is a whole number, zero or more; (6) the
     calendar holding its track exactly once; (7) that round equal to the index + 1; (8) that round
-    holding no other weekend; (9) a single stored attempt at its slot. **Failing 1–5 is silent** —
-    the session is not in a career placed in a season, so nothing was expected of it. **Failing 6–9
-    holds the session and says why.**
+    holding no other weekend; (9) it being the latest stored attempt at its slot. **Failing 1–5 is
+    silent** — the session is not in a career placed in a season, so nothing was expected of it.
+    **Failing 6–9 holds the session and says why.**
   - **The allow-list is `27` / `79` My Team and `28` / `78` Driver Career, each paired with its
     season mode.** Raw ids (invariant #9), never the display names. `78` and `79` are measured;
     `27` and `28` are the same two modes on the 2025 cars, included on that basis with no capture of
@@ -204,12 +204,26 @@ what would trigger revisiting it.
     operation and not the data. **Never on a page reload**, which would make looking at a page a
     write. One edge is accepted: a session whose tombstone was *forgotten* and whose recording is
     later imported counts as new, and its write is reported.
-  - **Several attempts stay manual.** An attempt arriving while another is already assigned at its
-    slot is held, and the assigned one stays where it is; two attempts in one recording are both
-    held. Nothing is ever unassigned automatically.
-  - **Every write and every hold is reported** once the recording or import finishes — a dialog the
-    user cannot miss, because the status line is overwritten by the next thing they do. The result
-    travels from the worker as plain values and is worded on the GUI thread (core invariant #10).
+  - **The latest attempt at a slot is the one written** *(amended 2026-09-17, before the rule was
+    committed; first agreed the other way round)*. A slot is re-driven because the earlier run went
+    wrong, so the attempt recorded last is the keeper — as `recorded_at` already assumes
+    (→ *`recorded_at` is the session's earliest capture packet time*). An attempt with a later one
+    stored is held and reported, wherever that later one came from: the same recording, a separate
+    one, or an import. An older attempt therefore never displaces a newer one, and two attempts
+    recorded at the same moment have no latest one and are both held. **Writing the latest
+    unassigns every earlier attempt at its slot placed in the same round**, including one placed by
+    hand, since nothing records who placed a session. Leaving it assigned is not an option:
+    standings sum every assigned race, so a race driven twice would score twice. An earlier attempt
+    placed in any other round is left alone. Recording the attempts separately — the usual case,
+    where the aborted attempt is assigned as soon as its own recording is stored — therefore ends in
+    the same placements as recording them together. Checked on a copy of this database: Jeddah's
+    Practice 2 was driven at 11:59 and 12:07, both in capture `20260823_135951`, and the 12:07
+    attempt was kept by hand; replaying the career one session or one capture at a time ends in
+    exactly the hand placements.
+  - **Every write, every attempt it unassigns and every hold is reported** once the recording or
+    import finishes — a dialog the user cannot miss, because the status line is overwritten by the
+    next thing they do. The result travels from the worker as plain values and is worded on the GUI
+    thread (core invariant #10).
   - **A skipped weekend is not repaired.** It emits no session at all (TELEMETRY_NOTES), so a
     career's standings lack that race whatever this does; entering or importing its Final
     Classification by hand is PRIORITIES → E21.
@@ -1441,7 +1455,10 @@ what would trigger revisiting it.
   - **Assignment stays explicit, and never replaces.** Assigning a later attempt to a round does
     not unassign an earlier one; the user unassigns the other attempts themselves, and may then
     delete them through the shared guarded delete. The automatic proposal in → Storage skips
-    multi-attempt slots for the same reason.
+    multi-attempt slots for the same reason. **E1e is the one exception** *(v0.12.0)*: for the
+    career sessions it writes itself, it takes the latest attempt and unassigns an earlier one in
+    the same round — reported, not silent (→ Storage, *The latest attempt at a slot is the one
+    written*).
   - **Only the unassigned pool is ambiguous.** `rounds_with_results` returns the sessions actually
     assigned to a round, so once the user has chosen, `grand_prix_session` and the calendar's
     Results column see one attempt and nothing downstream has to think about this at all.
