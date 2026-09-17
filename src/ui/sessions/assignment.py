@@ -63,6 +63,7 @@ from ...domain.season import Season, weekend_slots
 from ...protocol.reference import track_name
 from ..formatting import recorded_label, slot_label
 
+
 @dataclass(frozen=True)
 class ProposedSession:
     """One session the automatic offer would assign, with what assigning it would undo."""
