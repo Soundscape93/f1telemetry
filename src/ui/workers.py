@@ -95,7 +95,7 @@ class IngestWorker(QThread):
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
             event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
-            sessions, archive_path, archive_error = archive_and_ingest(
+            sessions, archive_path, archive_error, _career = archive_and_ingest(
                 self._capture_path, store, lap_store=lap_store,
                 event_store=event_store, capture_store=capture_store
             )
