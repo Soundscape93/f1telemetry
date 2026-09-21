@@ -212,7 +212,7 @@ the **re-ingest prompt**, not by what feels finished, and that is not obvious fr
 | **v0.9.0** | E1/E2 complete (branches 3 + 4) **+ E14** (mixed dry/wet) **+ E17** (lap context) | `minor` | **yes** — one prompt, `PIPELINE_VERSION` 2 → **4** (E17 bumped 3 → 4; see PACKAGING → history) |
 | **v0.10.0** | **E15** — Event packets: penalty detail + overtakes | `minor` | **yes** — `PIPELINE_VERSION` 4 → **5** (corrected 2026-09-01; the row said 3 → 4, written 2026-08-25 before E17 took 4) |
 | **v0.11.0** | **E1c** → **A8** → weekend-filtered overview → **E1b** → **E1d** (the Seasons rework), plus **E19** Share/export | `minor` | no — and **must not cause one**; an *optional* re-read corrects one misspelt driver name (2026-09-13) |
-| **v0.12.0** | **E1e** — automatic assignment for career sessions (branch 1, `feature/career-auto-assignment`, planned 2026-09-15; moved here from a tentative branch 8 of v0.11.0); later branches are named when they are planned | `minor` | no — and **must not cause one** |
+| **v0.12.0** | **E1e** — automatic assignment for career sessions (branch 1, `feature/career-auto-assignment`, planned 2026-09-15, **shipped 2026-09-20**; moved here from a tentative branch 8 of v0.11.0); later branches are named when they are planned | `minor` | no — and **did not cause one**: `PIPELINE_VERSION` stayed 5, no new table, no migration |
 
 **The bump is already paid for, and that is the whole argument.** `PIPELINE_VERSION` is already 3
 and `## Unreleased` already states the 2 → 3 prompt, earned by `ai_difficulty` (branch 0). The gate
@@ -653,6 +653,20 @@ wire it into `archive_and_ingest` and `import_captures` through a new
 `pipeline.assign_career_sessions`; report it from the workers on the GUI thread; then the docs,
 changelog and guide.
 
+**Shipped 2026-09-20, in those five steps, and nothing was learned that changed the design.** Two
+things worth carrying forward. **The rule must see stored rows, not the ingest's own objects:** a
+stored `recorded_at` reads back naive while a fresh one is aware, and the restated recorded-order
+keys compare `.timestamp()`, which reads naive as *local* time — measured 2.0 h apart under
+Europe/Zurich and 0 under UTC, so CI could never have caught it, and it is enough to make an older
+attempt look like the latest. `assign_career_sessions` therefore takes uids and re-reads them, and
+the shared UTC-correct key is banked as **A10**. **The two halves of a write belong in one
+transaction:** writing the later attempt and unassigning the earlier one is
+`SeasonStore.apply_placements`, all of it or none, because a failure in between would leave both
+attempts scoring or neither placed. Cover: the rule's own tests, a replay of the
+real database (leave-one-out reproduces every hand placement it is given the chance to make,
+refusing only the two Practice 2 attempts), and an offscreen harness driving the real window
+through a recording, a re-read, an import, a moved calendar and a failed write.
+
 **E19 — Share a result to the league chat.** *New 2026-09-01, requested alongside the Seasons
 rework.* Today a result reaches the league WhatsApp group as a hand-taken screenshot. The
 **minimum** is the session detail page exporting one session with its Final Classification and its
@@ -793,8 +807,9 @@ costs users a second one.
 | B6 | One roster shared across seasons (`roster_path`) | DECISIONS → Identity & rosters |
 | E1c | League display names in the Sessions surface (`display_name_fn(roster)`) | **in progress** — **branch 1 of v0.11.0**; saved roster file only, no seeding (DECISIONS → UI); the E1d note in P2 |
 | E1b | Session-centric round assignment, so the weekend page stops being the only writer of `season_assignments` | **done 2026-09-07** — **branch 4 of v0.11.0**, carrying the automatic proposal (DECISIONS → Storage); the E1d note in P2 |
-| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **in progress — branch 1 of v0.12.0** (`feature/career-auto-assignment`, planned 2026-09-15); moved from a tentative branch 8 of v0.11.0, and neither in-game measurement blocks it any more; must not cause a re-ingest; the E1e note in P2 |
+| E1e | Automatic assignment for career sessions, once the user has anchored the career to a season by hand | **done 2026-09-20** — **branch 1 of v0.12.0** (`feature/career-auto-assignment`), in five commits: the shared rules to a Qt-free `domain/placement`, the career rule there, the pipeline wiring, the workers and the report, the docs. No re-ingest, no new table; the E1e note in P2, DECISIONS → Storage |
 | A9 | The picker never suggests a round for a career's first-weekend sessions | **banked 2026-09-15**, not scheduled — `suggested_placement` reads `season_link_id == weekend_link_id` as an online mode, and a career's first weekend reports exactly that; E1e keys on `game_mode` and is unaffected; the E1e note in P2, TELEMETRY_NOTES → *The three link identifiers* |
+| A10 | One shared, UTC-correct recorded-order key | **banked 2026-09-20**, not scheduled — four modules restate the key (`season._recorded_order`, `assignment` / `weekend_view` / `placement._recorded_key`). All four avoid the naive-vs-aware `TypeError` by comparing `.timestamp()`, which reads a naive stored value as *local* time, so a fresh session and a stored one sort a UTC offset apart (measured 2.0 h under Europe/Zurich, 0 under UTC). Harmless while every caller compares stored rows only — which E1e's `assign_career_sessions` guarantees by re-reading uids — but worth one shared key; DECISIONS → Storage, the E1e note in P2 |
 | E21 | Enter or import a skipped career weekend's Final Classification, so career standings can match the game's | **proposed 2026-09-15**, not scheduled — a skipped weekend emits no session, so no ingest can supply that race; out of E1e's scope; ROADMAP → Storage & analysis |
 | C5 | `threading.excepthook` for worker threads | **done 2026-08-05** — Cycle 3; PACKAGING → Phase 0 |
 | C6 | Startup capability self-check (degraded pyqtgraph/zstandard) | **done 2026-08-05** — Cycle 3; PACKAGING → Risks |
@@ -992,8 +1007,10 @@ up opportunistically rather than scheduled.
   weekend was skipped on 2026-09-14 (`20260914_190909`, no session), and the weekend after it has not
   been driven yet. **Plan:** record a session of that next weekend and read its Session packets:
   `(weekend_link_id − season_link_id) / 100 + 1` either equals the track's calendar round, or falls
-  short of it by the weekends skipped. Once E1e ships the answer also shows up unprompted — the
-  session is assigned, or held with the two rounds reported as disagreeing. Record it in
+  short of it by the weekends skipped. **E1e shipped 2026-09-20, so the answer now shows up
+  unprompted**: record that weekend and the app either assigns it — the index agrees with the
+  track's round — or reports it as held with both rounds named, which is the index counting
+  weekends driven. Either way no wrong round is written. Record it in
   TELEMETRY_NOTES → *Hypothesis: a career's weekend id counts its rounds*; until then the index is
   only a cross-check (DECISIONS → Storage).
 ## Recently closed

@@ -161,8 +161,8 @@ what would trigger revisiting it.
     calendar here repeats a track, so it has **no live example** and its unit tests are the only
     cover it has.
 - **Automatic assignment *is* written for one case: newly stored sessions of a career already
-  placed in a season by hand** *(E1e, decided 2026-09-15, v0.12.0)*. It reverses the bullet above
-  for that case alone. The proposal, the picker and its *suggested* marks are unchanged, and they
+  placed in a season by hand** *(E1e, decided 2026-09-15, shipped 2026-09-20 in v0.12.0)*. It
+  reverses the bullet above for that case alone. The proposal, the picker and its *suggested* marks are unchanged, and they
   are the fallback whenever any condition below fails.
   - **No new table.** "This career id belongs to this season" is derived from `season_assignments`
     and the stored sessions' `season_link_id`, as the proposal's season inference already derives
@@ -227,6 +227,30 @@ what would trigger revisiting it.
   - **A skipped weekend is not repaired.** It emits no session at all (TELEMETRY_NOTES), so a
     career's standings lack that race whatever this does; entering or importing its Final
     Classification by hand is PRIORITIES → E21.
+  - **Where it lives, as shipped.** The rule is pure and Qt-free in `domain/placement`
+    (`plan_career_placements` → a `CareerPlan` of `assigned` / `unassigned` / `held`, uids and
+    placements only, no store and no `SessionResult` in the answer); the I/O is
+    `pipeline.assign_career_sessions`, which reads, plans, writes and **never raises** — any failure
+    is logged and returned as an error with nothing written; the write is one
+    `SeasonStore.apply_placements(assign, unassign)` transaction, so an earlier attempt leaves its
+    round in the same commit as the later one enters it, and an unassign removes a row only while it
+    still names the placement that was planned. `archive_and_ingest` and `import_captures` take an
+    optional `season_store` and pass it on for a fresh recording or an import only; `reingest_all`
+    and `restore_session` have no such parameter, so the boundary cannot be crossed by accident.
+    The wording is a Qt-free `ui/sessions/assignment.career_assignment_message`, and the workers
+    build their own `SeasonStore` in-thread like every other store they own.
+  - **The rule is handed stored rows, never the objects the ingest just returned.** A stored
+    `recorded_at` reads back naive from SQLite while a freshly assembled one is tz-aware, and the
+    restated recorded-order keys compare `.timestamp()`, which reads a naive value as *local* time.
+    Fresh and stored keys therefore sit a UTC offset apart — measured 2.0 h under Europe/Zurich and
+    0 under UTC, so CI would never have shown it — which is enough to make an older attempt look
+    like the latest one and displace the keeper. `assign_career_sessions` takes **uids** and
+    re-reads them through the session store for exactly that reason (PRIORITIES has the shared
+    UTC-correct key as later work).
+  - **A failed assignment is a warning, never an "Error:".** The sessions were stored before the
+    assignment ran, so the status line keeps saying what was stored and a separate dialog carries
+    the failure, naming it and saying that nothing was assigned. The same is true of a held
+    session: the recording succeeded, and what is left is a choice, not a fault.
 - **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
   single recording often holds several attempts of the same session (a crash/restart, or a
   re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.

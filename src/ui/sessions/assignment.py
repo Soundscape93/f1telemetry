@@ -286,7 +286,7 @@ def _hold_phrase(hold, season_name: str) -> str:
     Both rounds are named for ``ROUNDS_DISAGREE`` because neither is corrected towards the other:
     the calendar and the weekend index disagree, and which one is wrong is the user's to say.
     """
-    if hold.reason == HoldReason.NO_TRACK_ROUND:
+    if hold.reason is HoldReason.NO_TRACK_ROUND:
         return f"{season_name} has no round at this track, or has more than one."
     if hold.reason is HoldReason.ROUNDS_DISAGREE:
         return (f"the calendar has this track at round {hold.track_round}, but this is "
