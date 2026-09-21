@@ -19,6 +19,8 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+## v0.12.0 — 2026-09-21
+
 ### Added
 - **Career sessions now file themselves into their round.** In a Driver Career or My Team season,
   once you have put one session of that career into a round by hand, every session you record or
