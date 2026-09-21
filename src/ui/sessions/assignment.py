@@ -6,6 +6,17 @@ that decides *what to offer* - never what to write. Both rules end in a confirma
 decline (DECISIONS -> Storage), so nothing here touches a store and nothing here needs a
 ``QApplication``: a rule that did would be in the wrong file.
 
+The primitives under both rules - attempt counts, weekend-mates, the season a career id names and
+which weekend a round already holds - live in ``domain/placement``, so the pipeline can build E1e's
+automatic career assignment on the same ones without importing ``ui/``. What stays here is what
+only a surface needs: labels, running order and the picker's sort.
+
+**E1e's report is worded here too** (``career_assignment_message``), for the same reason the rules
+are: it needs the slot labels and the running order, and a report the window builds inline could
+not be asserted without a ``QApplication``. It describes writes that already happened - the
+automatic assignment is the one path that does not ask first - so the season names are injected
+rather than looked up, keeping this module free of both Qt and the stores.
+
 **Weekend propagation - every mode.** Assigning one session to a round offers every other stored
 session recorded in the same weekend. Licensed by the data rather than assumed: all 13 weekends
 in this database hold exactly one ``track_id``, and every round assigned by hand holds exactly one
@@ -42,16 +53,22 @@ and its unit tests are the only cover it has.
 """
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 from typing import Sequence
 
 from ...domain.models import SessionResult
+from ...domain.placement import (
+    HoldReason,
+    Placement,
+    attempt_counts,
+    career_season,
+    repeated_links,
+    weekend_mates,
+    weekends_by_round,
+)
 from ...domain.season import Season, weekend_slots
 from ...protocol.reference import track_name
 from ..formatting import recorded_label, slot_label
-
-Placement = tuple[int, int]     # (season_id, round_number)
 
 
 @dataclass(frozen=True)
@@ -101,28 +118,6 @@ def _recorded_key(session: SessionResult) -> tuple[bool, float]:
     return (recorded is not None, recorded.timestamp() if recorded is not None else 0.0)
 
 
-def _attempt_count(sessions: Sequence[SessionResult]) -> Counter[int]:
-    """How many attempts share each ``session_link_id`` in one weekend.
-
-    The link id rather than the ``WeekendSlot``, deliberately. A retry keeps the whole identifier
-    and changes only ``session_uid`` / ``recorded_at`` (TELEMETRY_NOTES), so this is exact in all
-    72 measured sessions - while ``weekend_slots`` falls back to one slot per session on a row with
-    no stored ``weekend_structure``, which would split a repeat attempt into two single-session
-    slots and silently defeat the rule that exists to catch it.
-    """
-    return Counter(session.session_link_id for session in sessions)
-
-
-def _repeated_links(sessions: Sequence[SessionResult]) -> set[int]:
-    """The ``session_link_id``s this weekend holds more than one attempt at."""
-    return {link for link, held in _attempt_count(sessions).items() if held > 1}
-
-
-def _weekend_mates(session: SessionResult, all_sessions: Sequence[SessionResult]) -> list[SessionResult]:
-    """Every stored session recorded in the same weekend, the session itself included."""
-    return [s for s in all_sessions if s.weekend_link_id == session.weekend_link_id]
-
-
 def _running_order(sessions: Sequence[SessionResult]) -> list[tuple[SessionResult, object]]:
     """One weekend's sessions paired with their slots, in the order the weekend ran.
 
@@ -156,8 +151,8 @@ def weekend_proposal(anchor: SessionResult, all_sessions: Sequence[SessionResult
     is what makes "this weekend was filed under the wrong round" one pick and one confirmation
     rather than a session at a time; the confirmation names the moves, and the user can decline.
     """
-    weekend = _weekend_mates(anchor, all_sessions)
-    repeated = _repeated_links(weekend)
+    weekend = weekend_mates(anchor, all_sessions)
+    repeated = repeated_links(weekend)
     offered: list[ProposedSession] = []
     held_back: list[str] = []
     for slot in weekend_slots(weekend):
@@ -176,31 +171,6 @@ def weekend_proposal(anchor: SessionResult, all_sessions: Sequence[SessionResult
     return WeekendProposal(sessions=tuple(offered), held_back=tuple(held_back))
 
 
-def _career_season(session: SessionResult, all_sessions: Sequence[SessionResult],
-                   placements: dict[int, Placement]) -> int | None:
-    """The season this session's career identifier already names, or None if it names none.
-
-    Seasons are user-authored and carry no link id, so the only bridge from a career identifier to
-    a season is a session already placed in one. Two seasons sharing the identifier is ambiguous
-    and answers None - ask rather than guess.
-    """
-    named = {placements[s.session_uid][0] for s in all_sessions
-             if s.season_link_id == session.season_link_id and s.session_uid in placements}
-    return next(iter(named)) if len(named) == 1 else None
-
-
-def _weekends_by_round(season_id: int, all_sessions: Sequence[SessionResult],
-                       placements: dict[int, Placement]) -> dict[int, set[int]]:
-    """Which weekends each round of one season already holds."""
-    weekend_of_uid = {s.session_uid: s.weekend_link_id for s in all_sessions}
-    holders: dict[int, set[int]] = {}
-    for uid, (placed_season, round_number) in placements.items():
-        if placed_season != season_id or uid not in weekend_of_uid:
-            continue
-        holders.setdefault(round_number, set()).add(weekend_of_uid[uid])
-    return holders
-
-
 def suggested_placement(session: SessionResult, all_sessions: Sequence[SessionResult],
                         seasons: Sequence[Season], placements: dict[int, Placement]) -> Placement | None:
     """Where this session's own identifiers say it belongs, or None where they say nothing.
@@ -217,14 +187,14 @@ def suggested_placement(session: SessionResult, all_sessions: Sequence[SessionRe
     """
     if session.season_link_id == session.weekend_link_id:
         return None
-    weekend = _weekend_mates(session, all_sessions)
-    if session.session_link_id in _repeated_links(weekend):
+    weekend = weekend_mates(session, all_sessions)
+    if session.session_link_id in repeated_links(weekend):
         return None
-    season_id = _career_season(session, all_sessions, placements)
+    season_id = career_season(session, all_sessions, placements)
     season = next((s for s in seasons if s.season_id == season_id), None)
     if season is None:
         return None
-    holders = _weekends_by_round(season_id, all_sessions, placements)
+    holders = weekends_by_round(season_id, all_sessions, placements)
     matching = [round for round in sorted(season.rounds, key=lambda r: r.round_number)
                 if round.track_id == session.track_id]
     for round in matching:
@@ -262,7 +232,7 @@ def picker_rows(all_sessions: Sequence[SessionResult], seasons: Sequence[Season]
 
     keyed: list[tuple[tuple[bool, bool, float, int], AssignRow]] = []
     for sessions in by_weekend.values():
-        attempts = _attempt_count(sessions)
+        attempts = attempt_counts(sessions)
         summary = _weekend_summary(sessions)
         start = _recorded_key(min(sessions, key=_recorded_key))[1]
         for order, (session, slot) in enumerate(_running_order(sessions)):
@@ -284,3 +254,100 @@ def picker_rows(all_sessions: Sequence[SessionResult], seasons: Sequence[Season]
             )))
     keyed.sort(key=lambda pair: pair[0])
     return [row for _key, row in keyed]
+
+
+# --- E1e's report -----------------------------------------------------------------------------
+#
+# What the automatic career assignment did, once it has done it. Every other rule in this module
+# offers; this one only describes. Two attempts at one slot are indistinguishable in the telemetry,
+# so every line carries the recorded time as well as the slot - without it, "an earlier attempt was
+# taken out of its round" names a session the user cannot pick out from its twin.
+
+
+def _session_label(session_uid: int, all_sessions: Sequence[SessionResult]) -> str:
+    """'Race  ·  Melbourne  ·  14 Sep 2026 19:10' - enough to tell two attempts apart."""
+    session = next((s for s in all_sessions if s.session_uid == int(session_uid)), None)
+    if session is None:                 # deleted between the write and the report
+        return f"session {session_uid}"
+    slot = next((slot for mate, slot in _running_order(weekend_mates(session, all_sessions))
+                 if mate.session_uid == session.session_uid), None)
+    label = slot_label(slot.session_type, slot.is_sprint_race) if slot is not None else "Session"
+    return f"{label}  ·  {track_name(session.track_id)}  ·  {recorded_label(session.recorded_at)}"
+
+
+def _season_name(season_names: dict[int, str], season_id: int) -> str:
+    """The season as the report names it, or its id where the name has gone."""
+    return season_names.get(season_id) or f"season {season_id}"
+
+
+def _hold_phrase(hold, season_name: str) -> str:
+    """Why one session was left to the user - one clause per ``HoldReason``, in its own words.
+
+    Both rounds are named for ``ROUNDS_DISAGREE`` because neither is corrected towards the other:
+    the calendar and the weekend index disagree, and which one is wrong is the user's to say.
+    """
+    if hold.reason is HoldReason.NO_TRACK_ROUND:
+        return f"{season_name} has no round at this track, or has more than one."
+    if hold.reason is HoldReason.ROUNDS_DISAGREE:
+        return (f"the calendar has this track at round {hold.track_round}, but this is "
+                f"weekend {hold.index_round} of the career.")
+    if hold.reason is HoldReason.ROUND_TAKEN:
+        return f"round {hold.index_round} of {season_name} already holds a different race weekend."
+    return "a later attempt at the same session is stored, and that one was assigned."
+
+
+def career_assignment_message(career, all_sessions: Sequence[SessionResult],
+                              season_names: dict[int, str]) -> str:
+    """What the automatic assignment did for one recording or import, or "" when it did nothing.
+
+    ``career`` is a ``pipeline.CareerAssignment``, ``all_sessions`` every stored session read after
+    the write, and ``season_names`` maps a season id to the phrase that names it (the window passes
+    ``season_phrase``, which lives beside a ``QMessageBox`` import and so cannot come in here).
+
+    Silence is the common case - most recordings are not a career weekend at all - and an empty
+    string means the window shows no dialog. ``unassigned`` is never reported on its own: an
+    earlier attempt only leaves a round because a later one was written into it.
+
+    A failure is reported in full and instead of everything else: ``CareerAssignment`` leaves the
+    plan empty when it sets ``error``, so there is no write to name, and saying which round a
+    session went into when none did would be worse than saying nothing.
+    """
+    if career.error:
+        return ("The sessions were stored, but they could not be assigned to a round "
+                "automatically:\n\n"
+                f"    {career.error}\n\n"
+                "Nothing was assigned. You can still assign them by hand on the Sessions page.")
+    plan = career.plan
+    if not plan.assigned and not plan.held:
+        return ""
+
+    parts: list[str] = []
+    if plan.assigned:
+        count = len(plan.assigned)
+        parts.append(f"{count} new session{'' if count == 1 else 's'} "
+                     f"{'was' if count == 1 else 'were'} assigned automatically:")
+        parts.append("\n".join(
+            f"    {_session_label(uid, all_sessions)}  →  "
+            f"{_season_name(season_names, season_id)}, round {round_number}"
+            for uid, (season_id, round_number) in plan.assigned))
+    if plan.unassigned:
+        count = len(plan.unassigned)
+        parts.append("An earlier attempt was taken out of its round, because only the latest one "
+                     "counts:" if count == 1 else
+                     "Earlier attempts were taken out of their rounds, because only the latest one "
+                     "counts:")
+        parts.append("\n".join(
+            f"    {_session_label(uid, all_sessions)}  "
+            f"(was in {_season_name(season_names, season_id)}, round {round_number})"
+            for uid, (season_id, round_number) in plan.unassigned))
+    if plan.held:
+        count = len(plan.held)
+        parts.append(f"{count} session{'' if count == 1 else 's'} "
+                     f"{'was' if count == 1 else 'were'} left for you to assign:")
+        parts.append("\n".join(
+            f"    {_session_label(hold.session_uid, all_sessions)}  —  "
+            f"{_hold_phrase(hold, _season_name(season_names, hold.season_id))}"
+            for hold in plan.held))
+        parts.append(f"You can assign {'it' if count == 1 else 'them'} on the Sessions page; "
+                     "nothing else was changed.")
+    return "\n\n".join(parts)

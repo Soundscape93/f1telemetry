@@ -58,7 +58,8 @@ class RecorderWorker(QThread):
 class IngestWorker(QThread):
     """Parses a capture, assembles its sessions, and persists each to the store."""
 
-    done = Signal(list, str, str)  # list[str] human readable session descriptions, archive path, archive error
+    done = Signal(list, str, str, object)   # session descriptions, archive path, archive error,
+                                            # pipeline.CareerAssignment
     failed = Signal(str)    # error message
 
     def __init__(self, capture_path: str, db_url: str, trace_dir: str = "lap_traces",
@@ -73,37 +74,45 @@ class IngestWorker(QThread):
         self._capture_path = capture_path
         self._db_url = db_url
         self._trace_dir = trace_dir
-    
+
     def run(self) -> None:
         """Archive, ingest, and persist the capture on this thread (see pipeline.archive_and_ingest).
 
         Each store owns its connection on THIS thread - SQLite dislikes a connection shared across
         threads, and the LapStore writes each lap's Parquet trace under trace_dir. Heavy imports
         live here so the app starts quickly and only pulls them in when a capture is processed.
+
+        The SeasonStore is what makes E1e's automatic assignment run: with it, the career sessions
+        this capture stored for the first time are placed in their rounds, and the plan rides the
+        ``done`` signal to the GUI thread as plain values (DECISIONS -> Storage).
         """
         from ..pipeline import archive_and_ingest
         from ..storage.captures import CaptureStore
         from ..storage.events import EventStore
         from ..storage.laps import LapStore
+        from ..storage.seasons import SeasonStore
         from ..storage.sessions import SessionStore
 
-        # Each store owns its own engine on THIS thread; a single finally disposes all three,
+        # Each store owns its own engine on THIS thread; a single finally disposes all of them,
         # wether ingest succeeded, failed, or a later store failed to construct (None = never built).
-        store = lap_store = capture_store = event_store = None
+        store = lap_store = capture_store = event_store = season_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
             event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
-            sessions, archive_path, archive_error = archive_and_ingest(
+            season_store = SeasonStore(self._db_url)
+            sessions, archive_path, archive_error, career = archive_and_ingest(
                 self._capture_path, store, lap_store=lap_store,
-                event_store=event_store, capture_store=capture_store
+                event_store=event_store, capture_store=capture_store,
+                season_store=season_store
             )
-            self.done.emit([self._describe(s) for s in sessions], archive_path, archive_error)
+            self.done.emit([self._describe(s) for s in sessions], archive_path, archive_error,
+                           career)
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (capture_store, lap_store, event_store, store):
+            for s in (season_store, capture_store, lap_store, event_store, store):
                 if s is not None:
                     s.close()
 
@@ -318,6 +327,10 @@ class ImportWorker(QThread):
     pipeline imports live inside ``run``, and cancellation is cooperative and polled between
     captures. This is the longest-running job in the app - a league weekend is hundreds of
     megabytes to copy *and* to parse - so it is the one that least belongs on the GUI thread.
+
+    Its SeasonStore does for an import what :class:`IngestWorker`'s does for a recording: the
+    career sessions the pass stored for the first time are placed in their rounds, and what
+    happened travels back inside ``ImportSummary.career``.
     """
 
     progress = Signal(int, int, str)        # captures index (1-based), total, capture file name
@@ -343,20 +356,23 @@ class ImportWorker(QThread):
         from ..storage.captures import CaptureStore
         from ..storage.events import EventStore
         from ..storage.laps import LapStore
+        from ..storage.seasons import SeasonStore
         from ..storage.sessions import SessionStore
 
-        store = lap_store = event_store = capture_store = None
+        store = lap_store = event_store = capture_store = season_store = None
         try:
             store = SessionStore(self._db_url)
             lap_store = LapStore(self._db_url, trace_dir=self._trace_dir)
             event_store = EventStore(self._db_url)
             capture_store = CaptureStore(self._db_url)
+            season_store = SeasonStore(self._db_url)
             summary = import_captures(
                 self._candidates, capture_store, store,
                 captures_dir=self._captures_dir,
                 lap_store=lap_store,
                 event_store=event_store,
                 recorded_by=self._recorded_by,
+                season_store=season_store,
                 on_progress=self.progress.emit,
                 cancelled=self.stop_event.is_set,
             )
@@ -364,6 +380,6 @@ class ImportWorker(QThread):
         except Exception as exc:            # surface any failure to the UI rather than dying silently
             self.failed.emit(str(exc))
         finally:
-            for s in (capture_store, lap_store, event_store, store):
+            for s in (season_store, capture_store, lap_store, event_store, store):
                 if s is not None:
                     s.close()

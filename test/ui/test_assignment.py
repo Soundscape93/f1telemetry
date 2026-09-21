@@ -10,6 +10,11 @@ names the round that session is already in - so with everything assigned no pick
 Its one live check (2026-09-10, the Jeddah weekend unassigned and re-assigned by hand) marked the
 weekend's sessions suggested and left both Practice 2 attempts unmarked. No calendar here repeats
 a track, so the repeated-track cases below are that rule's only cover.
+
+``CareerMessageTest`` covers E1e's report instead of a rule: the automatic assignment writes
+without asking, so that dialog is the only place the user is told what happened to their sessions.
+Every line it is asserted on carries the recorded time, because two attempts at one slot differ in
+nothing else.
 """
 from __future__ import annotations
 
@@ -17,9 +22,12 @@ import unittest
 from datetime import datetime
 
 from f1telemetry.src.domain.models import SessionResult
+from f1telemetry.src.domain.placement import CareerHold, CareerPlan, HoldReason
 from f1telemetry.src.domain.season import Season, SeasonMode, SeasonRound
+from f1telemetry.src.pipeline import CareerAssignment
 from f1telemetry.src.protocol.enums import Formula, SessionType, Weather
 from f1telemetry.src.ui.sessions.assignment import (
+    career_assignment_message,
     picker_rows,
     suggested_placement,
     weekend_proposal,
@@ -335,6 +343,114 @@ class PickerRowsTest(unittest.TestCase):
 
     def test_nothing_stored_offers_nothing(self):
         self.assertEqual([], picker_rows([], self.seasons, {}, self.target, track_id=_SUZUKA))
+
+
+class CareerMessageTest(unittest.TestCase):
+    """What E1e's report says about writes that already happened, and about ones that did not."""
+
+    def setUp(self):
+        self.sessions = weekend(_JEDDAH_WEEKEND, season_link=_CAREER)
+        self.names = {_SEASON: "Season 1 (“test”)"}
+
+    def message(self, plan=CareerPlan(), error=""):
+        """The report for one plan, as the window builds it after a recording or an import."""
+        return career_assignment_message(
+            CareerAssignment(plan=plan, error=error), self.sessions, self.names)
+
+    def test_a_plan_that_wrote_and_held_nothing_says_nothing(self):
+        self.assertEqual("", self.message())
+
+    def test_an_assigned_session_is_named_with_its_slot_track_time_and_round(self):
+        race = self.sessions[-1]
+        plan = CareerPlan(assigned=((race.session_uid, (_SEASON, _ROUND)),))
+        message = self.message(plan)
+        self.assertIn("1 new session was assigned automatically", message)
+        self.assertIn("Race  ·  Jeddah  ·  2026-08-23 16:00", message)
+        self.assertIn("Season 1 (“test”), round 5", message)
+
+    def test_several_assigned_sessions_are_counted_together(self):
+        plan = CareerPlan(assigned=tuple((s.session_uid, (_SEASON, _ROUND))
+                                         for s in self.sessions[:3]))
+        message = self.message(plan)
+        self.assertIn("3 new sessions were assigned automatically", message)
+        self.assertEqual(3, message.count("round 5"))
+
+    def test_an_earlier_attempt_is_named_with_its_time_and_the_round_it_left(self):
+        """Both attempts are "Practice 2" at one track: only the recorded time tells them apart."""
+        retry = make(SessionType.PRACTICE_2, _JEDDAH_WEEKEND + 10, weekend=_JEDDAH_WEEKEND,
+                     season_link=_CAREER, uid=8_448_489_651_239_998_166,
+                     recorded_at=datetime(2026, 8, 23, 11, 59))
+        self.sessions.append(retry)
+        plan = CareerPlan(assigned=((retry.session_uid, (_SEASON, _ROUND)),),
+                          unassigned=((self.sessions[1].session_uid, (_SEASON, _ROUND)),))
+        message = self.message(plan)
+        self.assertIn("An earlier attempt was taken out of its round", message)
+        self.assertIn("Practice 2  ·  Jeddah  ·  2026-08-23 11:59  →", message)
+        self.assertIn("Practice 2  ·  Jeddah  ·  2026-08-23 11:00  "
+                      "(was in Season 1 (“test”), round 5)", message)
+
+    def test_several_earlier_attempts_are_reported_in_the_plural(self):
+        plan = CareerPlan(assigned=((self.sessions[0].session_uid, (_SEASON, _ROUND)),),
+                          unassigned=((self.sessions[1].session_uid, (_SEASON, _ROUND)),
+                                      (self.sessions[2].session_uid, (_SEASON, _ROUND))))
+        self.assertIn("Earlier attempts were taken out of their rounds", self.message(plan))
+
+    def test_a_held_session_is_reported_even_though_nothing_was_written(self):
+        hold = CareerHold(session_uid=self.sessions[-1].session_uid, season_id=_SEASON,
+                          reason=HoldReason.ROUNDS_DISAGREE, track_round=3, index_round=2)
+        message = self.message(CareerPlan(held=(hold,)))
+        self.assertIn("1 session was left for you to assign", message)
+        self.assertIn("Race  ·  Jeddah  ·  2026-08-23 16:00", message)
+        self.assertIn("You can assign it on the Sessions page", message)
+        self.assertNotIn("assigned automatically", message)
+
+    def test_several_held_sessions_are_reported_in_the_plural(self):
+        held = tuple(CareerHold(session_uid=s.session_uid, season_id=_SEASON,
+                                reason=HoldReason.SUPERSEDED, track_round=5, index_round=5)
+                     for s in self.sessions[:2])
+        message = self.message(CareerPlan(held=held))
+        self.assertIn("2 sessions were left for you to assign", message)
+        self.assertIn("You can assign them on the Sessions page", message)
+
+    def test_each_hold_reason_says_why_in_its_own_words(self):
+        expected = {
+            HoldReason.NO_TRACK_ROUND:
+                "Season 1 (“test”) has no round at this track, or has more than one.",
+            HoldReason.ROUNDS_DISAGREE:
+                "the calendar has this track at round 3, but this is weekend 2 of the career.",
+            HoldReason.ROUND_TAKEN:
+                "round 2 of Season 1 (“test”) already holds a different race weekend.",
+            HoldReason.SUPERSEDED:
+                "a later attempt at the same session is stored, and that one was assigned.",
+        }
+        for reason, phrase in expected.items():
+            with self.subTest(reason=reason.name):
+                hold = CareerHold(
+                    session_uid=self.sessions[-1].session_uid, season_id=_SEASON, reason=reason,
+                    track_round=None if reason is HoldReason.NO_TRACK_ROUND else 3, index_round=2)
+                self.assertIn(phrase, self.message(CareerPlan(held=(hold,))))
+
+    def test_a_failure_is_reported_in_full_and_names_no_write(self):
+        message = self.message(error="database is locked")
+        self.assertIn("could not be assigned to a round automatically", message)
+        self.assertIn("database is locked", message)
+        self.assertIn("Nothing was assigned", message)
+        self.assertNotIn("round 5", message)
+
+    def test_a_failure_is_reported_even_where_a_plan_somehow_came_with_it(self):
+        """``CareerAssignment`` empties the plan when it errors; nothing here relies on that."""
+        plan = CareerPlan(assigned=((self.sessions[0].session_uid, (_SEASON, _ROUND)),))
+        message = self.message(plan, error="disk full")
+        self.assertIn("disk full", message)
+        self.assertNotIn("assigned automatically", message)
+
+    def test_a_season_whose_name_has_gone_is_named_by_its_id(self):
+        plan = CareerPlan(assigned=((self.sessions[0].session_uid, (99, 1)),))
+        self.assertIn("season 99, round 1", self.message(plan))
+
+    def test_a_session_deleted_before_the_report_is_named_by_its_uid(self):
+        plan = CareerPlan(assigned=((4_711, (_SEASON, _ROUND)),))
+        self.assertIn("session 4711", self.message(plan))
 
 
 if __name__ == "__main__":

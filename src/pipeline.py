@@ -18,6 +18,7 @@ from enum import Enum, auto
 
 from .domain.captures import CaptureMeta
 from .domain.models import SessionResult
+from .domain.placement import CareerPlan, plan_career_placements
 from .ingest.archive import (CAPTURE_SUFFIXES, HashingReader, archive_capture, capture_codec, hash_capture,
                                 is_capture_file, is_compressed_capture, open_capture)
 from .ingest.recording import read_header, read_packet
@@ -151,7 +152,9 @@ def ingest_capture(capture_path: str, store: SessionStore, lap_store=None, event
 
 
 def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None, event_store=None,
-                     capture_store = None, recorded_by: str | None = None) -> list[SessionResult]:
+                     capture_store = None, recorded_by: str | None = None, *,
+                     season_store=None, ingest: Callable[..., list[SessionResult]] = ingest_capture
+                     ) -> tuple[list[SessionResult], str, str, CareerAssignment]:
     """Archive a raw capture, ingest it, and delete the raw only once ingest succeeds.
      
     The Qt-free orchestration behind ``IngestWorker`` (which is a thin wrapper over this, as it
@@ -171,9 +174,16 @@ def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None, e
     is re-compressed, and nothing is deleted. Archiving is non-fatal - if it fails, the raw is
     ingested directly and kept.
 
-    Returns ``(sessions, archive_path, archive_error)``: ``archive_path`` is the new archive that
-    was written ("" when none was - a re-ingest, or an archive failure), and ``archive_error`` a
-    message when archiving failed.
+    ``season_store`` is passed for a fresh recording only: the career sessions it stored for the
+    first time are then placed in their rounds (E1e, :func:`assign_career_sessions`) once the raw
+    is gone. Placing them can fail without failing the recording - the sessions are stored by then,
+    and the failure is reported in ``career``. ``ingest`` is injectable purely so the tests can
+    drive that without a real capture.
+
+    Returns ``(sessions, archive_path, archive_error, career)``: ``archive_path`` is the new archive
+    that was written ("" when none was - a re-ingest, or an archive failure), ``archive_error`` a
+    message when archiving failed, and ``career`` what was placed - an empty
+    :class:`CareerAssignment` without a ``season_store``.
     """
     archive_path = ""
     archive_error = ""
@@ -191,7 +201,9 @@ def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None, e
             archive_error = str(exc)           # non-fatal: fall back to ingesting the raw
             ingest_path = capture_path
     
-    sessions = ingest_capture(
+    # Read before the ingest: a uid it stores that is missing here is stored for the first time.
+    stored_before = store.stored_uids() if season_store is not None else set()
+    sessions = ingest(
         ingest_path, store, lap_store=lap_store, event_store=event_store,
         capture_store=capture_store, recorded_by=recorded_by
     )
@@ -200,7 +212,77 @@ def archive_and_ingest(capture_path: str, store: SessionStore, lap_store=None, e
     if raw_to_delete is not None and os.path.exists(raw_to_delete):
         os.remove(raw_to_delete)
     
-    return sessions, archive_path, archive_error
+    career = CareerAssignment()
+    if season_store is not None:
+        career = assign_career_sessions(
+            [s.session_uid for s in sessions if s.session_uid not in stored_before],
+            store, season_store)
+    return sessions, archive_path, archive_error, career
+
+
+# --- automatic career assignment ------------------------------------------------------------------
+#
+# The I/O half of the career rule: ``domain/placement`` decides where each new career session goes
+# and which it holds, and this reads what the rule needs, writes the plan in one transaction and
+# keeps any failure away from the recording or import that stored the sessions (DECISIONS ->
+# Storage). Only ``archive_and_ingest`` and ``import_captures`` call it, for the sessions they
+# stored for the first time - never ``reingest_all`` or ``restore_session``.
+
+@dataclass(frozen=True)
+class CareerAssignment:
+    """What the automatic assignment did for one recording or import, or why it did nothing.
+
+    ``plan`` is what was written, all of it. ``error`` is set when nothing was, and the plan is then
+    empty, so a report built on this cannot name a write that did not happen.
+    """
+
+    plan: CareerPlan = CareerPlan()
+    error: str = ""
+
+
+def assign_career_sessions(new_uids: Iterable[int], session_store: SessionStore,
+                            season_store) -> CareerAssignment:
+    """Place the career sessions a recording or an import stored for the first time. Never raises.
+
+    ``new_uids`` are the uids that were missing from ``stored_uids()`` before the ingest and that it
+    stored - the caller's to work out, since only it read the store beforehand. The rule is handed
+    the stored rows for them, never the sessions the ingest returned: a stored ``recorded_at`` reads
+    back naive while a fresh one is aware, and the recorded order would put the two a UTC offset
+    apart - enough to make an older attempt look like the latest one.
+
+    The plan is written with ``SeasonStore.apply_placements``, so an earlier attempt leaves its
+    round in the same transaction as the later one enters it. A failure anywhere - reading,
+    planning or writing - is logged and returned as ``error`` with nothing written. The sessions
+    are stored either way, and the user can still place them by hand.
+    """
+    wanted = {int(uid) for uid in new_uids}
+    if not wanted:
+        return CareerAssignment()
+    try:
+        all_sessions = session_store.list_sessions()
+        seasons = season_store.list_seasons()
+        placements: dict[int, tuple[int, int]] = {}
+        for season in seasons:
+            for round_number, uid in season_store.assignments_for_season(season.season_id):
+                placements[uid] = (season.season_id, round_number)
+        new = [s for s in all_sessions if s.session_uid in wanted]
+        plan = plan_career_placements(new, all_sessions, seasons, placements)
+        season_store.apply_placements(plan.assigned, plan.unassigned)
+    except Exception as exc:            # a stored recording must not turn into an error here
+        log.exception("Career assignment failed; nothing was assigned")
+        return CareerAssignment(error=str(exc))
+
+    for uid, (season_id, round_number) in plan.unassigned:
+        log.info("Career assignment: took earlier attempt %s out of season %s round %s",
+                 uid, season_id, round_number)
+    for uid, (season_id, round_number) in plan.assigned:
+        log.info("Career assignment: session %s -> season %s round %s",
+                 uid, season_id, round_number)
+    for hold in plan.held:
+        log.info("Career assignment: held session %s for season %s: %s "
+                 "(track round %s, index round %s)", hold.session_uid, hold.season_id,
+                 hold.reason.name, hold.track_round, hold.index_round)
+    return CareerAssignment(plan=plan)
 
 
 # --- pipeline version gate & guieded re-ingest -------------------------------------------------------------
@@ -609,6 +691,7 @@ class ImportSummary:
     skipped: tuple[str, ...] = ()                   # already imported and still present; nothing to do
     errors: tuple[str, ...] = ()                    # "<file name>: <error>", one per capture that failed
     cancelled: bool = False
+    career: CareerAssignment = CareerAssignment()   # E1e: the new career sessions is placed
 
 
 def find_importable_captures(source_dir: str | os.PathLike, capture_store: CaptureStore) -> list[ImportCandidate]:
@@ -718,6 +801,7 @@ def _copy_capture(candidate: ImportCandidate, captures_dir: str) -> str:
 def import_captures(candidates: Iterable[ImportCandidate], capture_store: CaptureStore, 
                     session_store: SessionStore, *, captures_dir: str | os.PathLike,
                     lap_store=None, event_store=None, recorded_by: str | None = None,
+                    season_store=None,
                     on_progress: Callable[[int, int, str], None] | None = None,
                     cancelled: Callable[[], bool] | None = None,
                     hash_file: Callable[[str], str] = hash_capture,
@@ -749,6 +833,11 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
     shared folder is untouched either way - and a capture that won't parse is precisely the one
     the admin wants a local copy of to look at.
 
+    ``season_store`` is optional, as in ``archive_and_ingest``: with one, the career sessions the
+    new captures stored for the first time are placed in their rounds (E1e,
+    :func:`assign_career_sessions`) once, after the pass - after a cancel too, for what was imported
+    before it. A recovered or updated capture is not ingested, so it places nothing.
+
     ``cancelled`` is polled *between* captures, so a copy or an ingest is never interrupted
     half-way. ``hash_file`` and ``ingest`` are injectable purely so the tests can drive the
     decision table without multi-hundred-megabyte archives.
@@ -764,7 +853,10 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
     skipped: list[str] = []
     errors: list[str] = []
     sessions_stored = 0
+    new_uids: list[int] = []
     was_cancelled = False
+    # Read before the pass: a uid it stores that is missing here is stored for the first time.
+    stored_before = session_store.stored_uids() if season_store is not None else set()
 
     log.info("Import starting: %d candidate(s) into %s", total, captures_dir)
     for index, candidate in enumerate(candidates, start=1):
@@ -821,9 +913,13 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
             errors.append(f"{candidate.file_name}: {exc}")
             continue
         sessions_stored += len(sessions)
+        new_uids.extend(s.session_uid for s in sessions if s.session_uid not in stored_before)
         log.info("Import: %s -> %s (%d session(s))", candidate.file_name, destination, len(sessions))
         imported.append(os.path.basename(destination))
 
+    career = CareerAssignment()
+    if season_store is not None:
+        career = assign_career_sessions(new_uids, session_store, season_store)
     summary = ImportSummary(
         imported=tuple(imported),
         sessions_stored=sessions_stored,
@@ -832,6 +928,7 @@ def import_captures(candidates: Iterable[ImportCandidate], capture_store: Captur
         skipped=tuple(skipped),
         errors=tuple(errors),
         cancelled=was_cancelled,
+        career=career,
     )
     log.info("Import finished: %s", summary)
     return summary

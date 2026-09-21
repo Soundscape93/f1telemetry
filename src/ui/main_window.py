@@ -49,8 +49,10 @@ from ..storage.sessions import SessionStore
 from ..storage.events import EventStore
 from ..storage.laps import LapStore
 from ..storage.captures import CaptureStore
+from .components import season_phrase
 from .seasons import SeasonsView
 from .sessions import SessionsView
+from .sessions.assignment import career_assignment_message
 from .laps import LapsView
 from .help_page import HelpPage
 from .style import MUTED_TEXT_QSS, apply_heading
@@ -334,7 +336,8 @@ class MainWindow(QMainWindow):
         self._ingest.failed.connect(self._on_failed)
         self._ingest.start()
 
-    def _on_ingest_done(self, descriptions: list, archive_path: str, archive_error: str) -> None:
+    def _on_ingest_done(self, descriptions: list, archive_path: str, archive_error: str,
+                        career) -> None:
         """Handle the IngestWorker's done signal; update the status and refresh the seasons view."""
         worker, self._ingest = self._ingest, None
         if worker is not None:
@@ -351,6 +354,32 @@ class MainWindow(QMainWindow):
             message += f"Capture kept uncompressed: {archive_error}"
         self._status.setText(message)
         self._refresh_current_view()
+        # Last, and after the refresh: the modal sits in front of a page that already shows the
+        # rounds it is talking about.
+        self._report_career(career)
+
+    def _report_career(self, career) -> None:
+        """Report what E1e's automatic assignment did - the one place both ingest paths say it.
+
+        A recording or an import that placed or held nothing says nothing: most recordings are not
+        a career weekend at all, and a modal announcing that would be noise. The stores are read
+        only once there is something to name, so the common case costs nothing.
+
+        A failure is a warning here rather than "Error:" in the status line: the sessions were
+        stored before the assignment ran, and the recording did not fail (DECISIONS -> Storage).
+        """
+        plan = career.plan
+        if not (career.error or plan.assigned or plan.held):
+            return
+        message = career_assignment_message(
+            career, self._session_store.list_sessions(),
+            {s.season_id: season_phrase(s) for s in self._season_store.list_seasons()})
+        if not message:
+            return
+        if career.error:
+            QMessageBox.warning(self, "Sessions were not assigned", message)
+        else:
+            QMessageBox.information(self, "Sessions assigned automatically", message)
 
     def _on_failed(self, message: str) -> None:
         """Handle a failure from any worker; reset the button and show the error."""
@@ -668,6 +697,7 @@ class MainWindow(QMainWindow):
         # Unlike the prune and the search, this one really did store sessions.
         self._refresh_current_view(
         )
+        self._report_career(summary.career)
     
     def _close_import_dialog(self) -> None:
         if self._import_dialog is not None:
