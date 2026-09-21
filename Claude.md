@@ -233,7 +233,15 @@ Each of these has caused or prevented a real bug — treat them as load-bearing:
   (v0.11.0): assign, unassign and move, plus the automatic weekend proposal, with a session picker
   as the way into a round that has nothing assigned yet. The round-centric `ui/seasons/weekend_page`
   was retired in v0.11.0 (branch 5), and Session detail goes back to the page that opened it — the
-  weekend, when a round's weekend opened it. LEAGUE displays prefer captured
+  weekend, when a round's weekend opened it. **Career sessions assign themselves since v0.12.0**
+  (E1e): once one session of a Driver Career / My Team career sits in a season by hand, every
+  session a recording or an import stores for it *for the first time* is placed automatically —
+  the season from the career id, the round from the track, cross-checked against the weekend index
+  — and the window reports every write, every earlier attempt it unassigned and every session it
+  held, with the reason. The rule is pure in `domain/placement`, the I/O in
+  `pipeline.assign_career_sessions` (one `SeasonStore.apply_placements` transaction, never raises),
+  the wording Qt-free in `ui/sessions/assignment`. Re-ingest and restore never assign, and the
+  picker and weekend proposal are unchanged as the fallback. LEAGUE displays prefer captured
   public online names, falling back to the first
   roster `online_names` alias when captures only say `"Player"`/blank. Reusable widgets (the
   session classification table, table primitives) live in `ui/components/`, ready for the

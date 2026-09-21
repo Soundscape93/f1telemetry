@@ -19,6 +19,44 @@ Every release must say whether a **re-ingest** is needed — that is "yes" whene
      **Known issues** - carry the list forward; `None` is a valid answer.
      Merging a PR labelled major/minor/patch turns this section into a release. -->
 
+### Added
+- **Career sessions now file themselves into their round.** In a Driver Career or My Team season,
+  once you have put one session of that career into a round by hand, every session you record or
+  import for it afterwards is assigned on its own — a whole weekend lands in its round the moment
+  the recording is stored, with nothing to confirm. The app tells you what it did each time, naming
+  every session it assigned and the round it went into. It only writes where it is certain: the
+  season's calendar must hold that track at exactly one round, and that round has to be the one the
+  game's own weekend count points at. Anything else — a track the calendar doesn't have, a round
+  already holding a different race weekend, two rounds disagreeing — is left for you, and the same
+  message says which session and why. A session you drove twice is assigned as the later attempt,
+  and the earlier one is taken out of that round so one race can't score twice. Nothing else
+  changed: league and online sessions are still assigned by hand, and so is any career the app
+  isn't sure about.
+
+**Re-ingest needed: no**
+
+Nothing about how captures are read has changed. Sessions already stored keep the rounds you put
+them in — the automatic assignment only ever looks at sessions stored for the first time, so
+re-reading your captures assigns nothing.
+
+**Known issues**
+
+- Recordings made **before v0.4.2 on Windows**, or **before v0.11.1 on Linux**, may be missing
+  stretches of telemetry, and with them the final classification, if the machine slept
+  mid-session. Nothing can recover that — the data never reached the app — so re-reading those
+  captures won't bring it back. Sessions with a missing classification show a reconstructed result
+  instead.
+- On Linux desktops **other than KDE and GNOME** (Cinnamon, MATE, XFCE), staying awake depends on how
+  new the system is and hasn't been tried: it should work with systemd 257 or newer (Fedora 42,
+  Debian 13 — check with `systemctl --version`), but on older systems such as Linux Mint 22 the
+  computer may still fall asleep during a recording. The log says so when it does.
+- **A career weekend you skipped in the game leaves a gap in that season's standings.** A skipped
+  weekend is never driven, so there is no result to store and nothing to assign; the race after it
+  may also be left for you to assign by hand, because its round and the game's weekend count no
+  longer agree. The app says so rather than guessing.
+- Dashboard, Analytics and Bug report pages are placeholders.
+- The build is unsigned: SmartScreen shows "Windows protected your PC" → **More info → Run anyway**.
+
 ## v0.11.1 — 2026-09-14
 
 ### Fixed
