@@ -157,7 +157,8 @@ A blank template (`roster_template.csv`) is included in the release zip, and can
 
 A recorded session doesn't belong to a season until you say so. Open **Seasons → a season** and
 double-click a round: that opens the round's weekend on the **Sessions** page, which is where
-assigning happens.
+assigning happens. In a **Driver Career or My Team season you only do this once** — after that the
+app files the rest of the career in for you (*Career seasons fill themselves in*, below).
 
 - **A round with nothing in it yet** says so and offers **Assign sessions…**. That lists your
   stored sessions, starting with the ones recorded at this round's track — tick *Show sessions from
@@ -178,6 +179,29 @@ assigning happens.
 
 A session assigned to a round can't be deleted until it's unassigned; the app says so rather than
 quietly dropping its result from your standings.
+
+### Career seasons fill themselves in
+
+In a **Driver Career** or **My Team** season, assign one of that career's sessions to a round by
+hand as above. That is how the app learns which season the career belongs to — nothing the game
+sends says it. From then on every session you record or import for that career is assigned by
+itself, and a message says what happened as soon as the recording is stored:
+
+- **Assigned** — the session and the round it went into. There is nothing to confirm; it is already
+  done, and the round shows it.
+- **Taken out of its round** — you drove that session twice, so the later attempt was assigned and
+  the earlier one removed from the round, because a race that counted twice would count twice in
+  the standings. Both attempts are still stored and listed with the time you recorded them, so you
+  can put the other one back by hand if the later run was the bad one.
+- **Left for you to assign** — the app wasn't certain, and says why: the season's calendar has no
+  round at that track, or more than one; the round the track gives isn't the one the game's own
+  weekend count points at; or that round already holds a different race weekend. Those sessions are
+  stored like any other — assign them as above.
+
+If no message appears, nothing was assigned automatically: league and online sessions are always
+assigned by hand, and so is the first session of a new career. The app never moves a session you
+already placed, and never assigns anything when you re-read your captures or restore a deleted
+session.
 
 ### Sharing results
 

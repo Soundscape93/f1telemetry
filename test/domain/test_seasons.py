@@ -241,6 +241,37 @@ class AssignmentTest(StoreTestBase):
         self.assertEqual(bulk[1014], self.seasons.assignment_for(1014)[0])
 
 
+class ApplyPlacementsTest(StoreTestBase):
+    """E1e's write: a plan's unassignments and assignments in one transaction, or none of them."""
+
+    def setUp(self):
+        super().setUp()
+        self.season_id = self.seasons.create_season(SeasonMode.DRIVER_CAREER, 1, 2025,
+                                                    rounds=official_calendar(2025)).season_id
+
+    def test_the_earlier_attempt_leaves_as_the_later_one_enters(self):
+        self.seasons.assign_session(2001, self.season_id, 3)       # the earlier attempt
+        self.seasons.assign_session(2002, self.season_id, 3)       # another session of the round
+        self.seasons.apply_placements([(2003, (self.season_id, 3))], [(2001, (self.season_id, 3))])
+        self.assertEqual(sorted(self.seasons.assignments_for_season(self.season_id)),
+                         [(3, 2002), (3, 2003)])
+
+    def test_an_unassign_leaves_a_session_placed_elsewhere_where_it_is(self):
+        """Moved by hand since the plan was read: the plan's premise no longer holds for it."""
+        self.seasons.assign_session(2001, self.season_id, 4)
+        self.seasons.apply_placements([(2003, (self.season_id, 3))], [(2001, (self.season_id, 3))])
+        self.assertEqual(self.seasons.assignment_for(2001), (self.season_id, 4))
+        self.assertEqual(self.seasons.assignment_for(2003), (self.season_id, 3))
+
+    def test_a_failing_write_writes_nothing(self):
+        self.seasons.assign_session(2001, self.season_id, 3)
+        with self.assertRaises(ValueError):
+            self.seasons.apply_placements(
+                [(2003, (self.season_id, 3)), (2004, (self.season_id, 99))],    # no round 99
+                [(2001, (self.season_id, 3))])
+        self.assertEqual(self.seasons.assignments_for_season(self.season_id), [(3, 2001)])
+
+
 class RosterSeasonModesTest(unittest.TestCase):
     """Which season modes offer the roster workflow (online-name + race-number standings).
 

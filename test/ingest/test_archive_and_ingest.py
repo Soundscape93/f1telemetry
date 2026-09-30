@@ -39,9 +39,9 @@ class ArchiveAndIngestTest(unittest.TestCase):
                 write_packet(f, float(i), bytes(24))        # too short to parse -> None, no session
         return path
     
-    def test_raw_capture_arhcived_to_zst_and_raw_deleted(self):
+    def test_raw_capture_archived_to_zst_and_raw_deleted(self):
         raw = self._write_raw()
-        _, archive_path, archive_error = archive_and_ingest(
+        _, archive_path, archive_error, _ = archive_and_ingest(
             raw, self.store, capture_store=self.capture_store)
         
         self.assertEqual(archive_error, "")
@@ -49,11 +49,12 @@ class ArchiveAndIngestTest(unittest.TestCase):
         self.assertTrue(os.path.exists(archive_path), "the .zst archive should be written")
         self.assertFalse(os.path.exists(raw), "the raw capture should be deleted after a succesfull ingest")
 
+
     def test_existing_gz_ingested_in_place_not_rewritten(self):
         gz = str(archive_capture(self._write_raw(), codec="gzip"))      # a pre-existing .gz archive
         self.assertTrue(gz.endswith(".f1cap.gz"))
 
-        _, archive_path, archive_error = archive_and_ingest(
+        _, archive_path, archive_error, _ = archive_and_ingest(
             gz, self.store, capture_store=self.capture_store)
         
         self.assertEqual(archive_path, "", "re-ingesting an archive should not report a new archive")
@@ -78,7 +79,7 @@ class ArchiveAndIngestTest(unittest.TestCase):
 
     def test_capture_metadata_records_the_archive(self):
         raw = self._write_raw()
-        _, archive_path, _ = archive_and_ingest(
+        _, archive_path, _, _ = archive_and_ingest(
             raw, self.store, capture_store=self.capture_store)
         
         captures = self.capture_store.list_captures()

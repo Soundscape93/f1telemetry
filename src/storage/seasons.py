@@ -9,6 +9,7 @@ re-ingested capture keeps its manual placement.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -120,24 +121,29 @@ class SeasonStore:
     def assign_session(self, session_uid: int, season_id: int, round_number: int) -> None:
         """Place a captured session into a round. moving it if already assigned elsewhere."""
         with self._Session.begin() as db:
-            season = db.get(SeasonRow, season_id)
-            if season is None:
-                raise KeyError(f"no season {season_id}")
-            if round_number not in {r.round_number for r in season.rounds}:
-                raise ValueError(f"season {season_id} has no round {round_number}")
-            existing = db.scalar(
-                select(SeasonAssignmentRow).where(
-                    SeasonAssignmentRow.session_uid == str(session_uid)
-                )
+            self._assign(db, session_uid, season_id, round_number)
+
+    @staticmethod
+    def _assign(db, session_uid: int, season_id: int, round_number: int) -> None:
+        """``assign_session``'s write, inside a transaction the caller owns."""
+        season = db.get(SeasonRow, season_id)
+        if season is None:
+            raise KeyError(f"no season {season_id}")
+        if round_number not in {r.round_number for r in season.rounds}:
+            raise ValueError(f"season {season_id} has no round {round_number}")
+        existing = db.scalar(
+            select(SeasonAssignmentRow).where(
+                SeasonAssignmentRow.session_uid == str(session_uid)
             )
-            if existing is not None:
-                existing.season_id = season_id
-                existing.round_number = round_number
-            else:
-                db.add(SeasonAssignmentRow(
-                    season_id=season_id, round_number=round_number,
-                    session_uid=str(session_uid),
-                ))
+        )
+        if existing is not None:
+            existing.season_id = season_id
+            existing.round_number = round_number
+        else:
+            db.add(SeasonAssignmentRow(
+                season_id=season_id, round_number=round_number,
+                session_uid=str(session_uid),
+            ))
 
     def unassign_session(self, session_uid: int) -> None:
         """Remove a session from its assigned round, if any."""
@@ -149,6 +155,34 @@ class SeasonStore:
             )
             if existing is not None:
                 db.delete(existing)
+
+    def apply_placements(self, assign: Iterable[tuple[int, tuple[int, int]]],
+                         unassign: Iterable[tuple[int, tuple[int, int]]] = ()) -> None:
+        """Unassign and assign several sessions in one transaction: all of it is written, or none.
+
+        Each pair is ``(session_uid, (season_id, round_number))``. E1e's automatic assignment writes
+        this way (DECISIONS -> Storage) because its two halves only make sense together - a later
+        attempt goes in as the earlier one comes out - and one call at a time, a failure in between
+        would leave both attempts counting towards the standings, or neither.
+
+        An ``unassign`` pair takes the session out of the round it names and nowhere else, so an
+        attempt moved by hand since the plan was read stays where it was put. An ``assign`` pair is
+        placed as ``assign_session`` places it and raises as it does, and a raise rolls back the
+        whole call.
+        """
+        with self._Session.begin() as db:
+            for session_uid, (season_id, round_number) in unassign:
+                existing = db.scalar(
+                    select(SeasonAssignmentRow).where(
+                        SeasonAssignmentRow.session_uid == str(session_uid),
+                        SeasonAssignmentRow.season_id == season_id,
+                        SeasonAssignmentRow.round_number == round_number,
+                    )
+                )
+                if existing is not None:
+                    db.delete(existing)
+            for session_uid, (season_id, round_number) in assign:
+                self._assign(db, session_uid, season_id, round_number)
 
     def assignments_for_season(self, season_id: int) -> list[tuple[int, int]]:
         """(round_number, session_uid) pairs for a season, ordered by round."""

@@ -71,6 +71,18 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   GRAND_PRIX / LEAGUE — *our* categorisation, not the game's `m_gameMode`), `Season`,
   `SeasonRound`, `RoundResults`.
 - **`calendars.py`** — `official_calendar(year)` preset track-id orders for 2025 / 2026.
+- **`placement.py`** — which round a stored session belongs in, Qt-free and store-free, so both
+  the UI and the pipeline can use it without either importing the other. The shared primitives
+  (`attempt_counts`, `repeated_links`, `weekend_mates`, `career_season`, `weekends_by_round`) moved
+  here unchanged from `ui/sessions/assignment`, which still builds the picker's *suggested* marks
+  and the weekend proposal on them. On top of them sits **E1e's career rule**,
+  `plan_career_placements(new, all_sessions, seasons, placements) -> CareerPlan` — the one rule in
+  the app that writes without asking, so it is the strict one: nine conditions in order, the first
+  five failing silently and the last four producing a `CareerHold` with its `HoldReason`
+  (`NO_TRACK_ROUND`, `ROUNDS_DISAGREE`, `ROUND_TAKEN`, `SUPERSEDED`). The plan is plain values —
+  uids and `(season_id, round)` pairs in `assigned` / `unassigned`, holds in `held` — so a worker
+  can hand it to the GUI thread as it is. `CAREER_GAME_MODES` is the allow-list, raw ids paired
+  with the season mode each may be written into. See DECISIONS → Storage.
 - **`roster.py`** — `LeagueMember`, `LeagueRoster.member_for(entry)` / `member_of(entry)` /
   `member_key(entry)` (online-name-first, race-number fallback **for human cars only**) and
   `session_keys(entries)` — the classification-wide resolver standings use, which guarantees two
@@ -141,7 +153,10 @@ a future format = a new struct submodule + registry entries; nothing downstream 
 - **`seasons.py`** — `SeasonStore`: create/get/list/delete seasons, `set_calendar` (which
   **refuses** an edit that would move, re-point or drop a round holding an assigned session —
   raises `CalendarConflictError`; the rule lives in `domain/calendars`, see DECISIONS),
-  `assign_session` / `unassign_session`, `assignments_for_season`,
+  `assign_session` / `unassign_session`, `apply_placements(assign, unassign)` — several
+  placements in **one** transaction, all of it or none, which is what E1e's automatic assignment
+  writes through, because a later attempt entering a round and an earlier one leaving it only make
+  sense together — `assignments_for_season`,
   `rounds_with_results(season_id, session_store)`. Two reverse lookups answer "where does this
   session live?": `assignment_for(uid)` for one session, and `assigned_seasons()` — every assigned
   uid mapped to its season id, in **one** query — for a whole list at once, which is what the
@@ -396,7 +411,11 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   (where a career session's own identifiers say it belongs — the season from `season_link_id`, the
   round from a track match against that season's calendar — or `None` where they say nothing) and
   `picker_rows` (the picker's rows: suggestions first, then the unassigned, then whole weekends
-  newest first). Every rule is asserted without a `QApplication` (DECISIONS → Storage).
+  newest first). It also words **E1e's report** — `career_assignment_message(career, sessions,
+  season_names)`, the only thing here that describes writes instead of offering them: what was
+  assigned, which earlier attempts left their round, and each held session with its reason. The
+  season names are injected rather than looked up, so the module still touches no store and no Qt.
+  Every rule is asserted without a `QApplication` (DECISIONS → Storage).
   **`session_share.py`** (Qt-free) turns one session into a `components.share_document`
   `ShareDocument` — the surface-specific half of E19, which a whole weekend reuses unchanged. It
   arranges the page's own helpers and re-derives nothing: `slot_label` for the
@@ -486,12 +505,18 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   through signals as `str` (uint64-safe). Track-country flags are deferred (no `track_id → country`
   map exists yet).
 - **`workers.py`** — `RecorderWorker` / `IngestWorker` (`QThread`s). `IngestWorker` builds its own
-  `SessionStore`, `LapStore`, `EventStore` **and** `CaptureStore` in-thread (SQLite dislikes
-  cross-thread connections) and calls `pipeline.archive_and_ingest`, so app-side ingest archives the
+  `SessionStore`, `LapStore`, `EventStore`, `CaptureStore` **and** `SeasonStore` in-thread (SQLite
+  dislikes cross-thread connections) and calls `pipeline.archive_and_ingest`, so app-side ingest
+  archives the
   capture, writes laps + Parquet traces (under an injectable `trace_dir`, which the app supplies from
   `paths.trace_dir()`), writes the session's penalties and passes,
-  and records capture metadata — not just the classification. All four stores are disposed in a
+  records capture metadata — not just the classification — and places the career sessions it stored
+  for the first time (E1e). All five stores are disposed in a
   single `finally`. It's a thin wrapper: the archive/ingest/delete ordering lives in the pipeline.
+  Its `done` signal carries the `CareerAssignment` as a fourth, `object` argument, and
+  `ImportWorker`'s travels inside `ImportSummary.career`: plain values across the thread boundary,
+  worded on the GUI thread (invariant #10). `MainWindow._report_career` is the single place both
+  paths report it — one dialog, and only when something was assigned or held.
 - **`formatting.py`** — Qt-free presentation helpers (winner time / gap / +laps / status;
   best-lap-or-status; `is_race`, `slot_label`), unit-testable without importing PySide6.
 - **`pipeline.py`** (`src/pipeline.py`) — the Qt-free ingest orchestration, extracted so it's
@@ -508,6 +533,17 @@ a future format = a new struct submodule + registry entries; nothing downstream 
   predicate **between** captures so a session is never left half-written. Idempotent and resumable:
   replace-by-uid + replace-by-hash, and the no-FK invariants mean rebuilding derived rows never
   touches standings, round placements or rosters.
+  It also owns **E1e's automatic career assignment**, the only write in the app that is not asked
+  for first: `assign_career_sessions(new_uids, session_store, season_store)` → `CareerAssignment`
+  (the `CareerPlan` that was written, or an `error` with nothing written — it never raises, because
+  a stored recording must not turn into a failure here). It re-reads the new uids through the
+  session store rather than taking the ingest's own objects — a stored `recorded_at` comes back
+  naive and a fresh one is aware, which sorts the two a UTC offset apart — plans with
+  `domain.placement.plan_career_placements`, and commits the whole plan through
+  `SeasonStore.apply_placements`. `archive_and_ingest` and `import_captures` call it for the
+  sessions they stored for the first time, each taking an optional `season_store` and comparing
+  `stored_uids()` read just before the ingest; `reingest_all` and `restore_session` take no season
+  store at all, so a re-ingest or a restore cannot re-place what the user unassigned.
   It also owns the **missing-capture prune**, split read-from-write so the user confirms a list
   before anything is forgotten: `find_missing_captures(...)` → the `CaptureMeta`s
   `resolve_capture_path` can no longer find (the same definition of "missing" `reingest_all`
@@ -565,8 +601,8 @@ Key properties:
 
 Recording and ingest run on `QThread`s so the UI stays responsive. SQLite dislikes a connection
 shared across threads, so the **`IngestWorker` creates its own stores in-thread** (session, lap,
-capture — disposed in a `finally`), while the UI reads through stores owned by the main window on
-the GUI thread — both pointing at the same database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
+event, capture, season — disposed in a `finally`), while the UI reads through stores owned by the
+main window on the GUI thread — both pointing at the same database file. The recorder's cooperative stop is an `Event` checked each socket-timeout cycle.
 That cycle is also the recorder's own health check: `LiveUDPSource` asks for a large `SO_RCVBUF`
 (the OS default — 64 KB on Windows — holds only ~0.3 s of stream, so a descheduled process loses
 everything past it) and warns when one iteration runs far longer than the socket timeout, which

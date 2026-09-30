@@ -84,7 +84,9 @@ what would trigger revisiting it.
   *The three link identifiers*, over all 72 sessions in all 33 captures. Two rules came out of it,
   and both end in a confirmation the user can decline rather than in a write. They live in
   `ui/sessions/assignment.py` — Qt-free, with unit tests, because what to propose is a rule and
-  not a widget.
+  not a widget. **One case is written instead** — a career's newly stored sessions, once one of that
+  career's sessions has been placed in a season by hand (E1e, the next bullet). Everything here
+  still holds for every other case, and is that case's fallback.
   - **Weekend propagation — every mode.** Assigning one session to `(season, round)` offers every
     other stored session sharing its `weekend_link_identifier` for the same round. Licensed by the
     data: all 13 weekends have exactly one `track_id`, and all 7 rounds assigned by hand in this
@@ -158,6 +160,97 @@ what would trigger revisiting it.
     as written, on real data. The **repeated-track rule** is still where Pending slot rows are: no
     calendar here repeats a track, so it has **no live example** and its unit tests are the only
     cover it has.
+- **Automatic assignment *is* written for one case: newly stored sessions of a career already
+  placed in a season by hand** *(E1e, decided 2026-09-15, shipped 2026-09-20 in v0.12.0)*. It
+  reverses the bullet above for that case alone. The proposal, the picker and its *suggested* marks are unchanged, and they
+  are the fallback whenever any condition below fails.
+  - **No new table.** "This career id belongs to this season" is derived from `season_assignments`
+    and the stored sessions' `season_link_id`, as the proposal's season inference already derives
+    it. Unassigning every session of a career drops the link; a second season holding one of them
+    makes the id ambiguous, which stops the automation for that career on its own.
+  - **A write needs all of**, checked in this order: (1) an allow-listed career `game_mode`; (2) the
+    session not already placed; (3) exactly one season holding a session with its
+    `season_link_id`; (4) that season in the mode its `game_mode` pairs with; (5) a weekend index
+    `(weekend_link_id − season_link_id) / 100` that is a whole number, zero or more; (6) the
+    calendar holding its track exactly once; (7) that round equal to the index + 1; (8) that round
+    holding no other weekend; (9) it being the latest stored attempt at its slot. **Failing 1–5 is
+    silent** — the session is not in a career placed in a season, so nothing was expected of it.
+    **Failing 6–9 holds the session and says why.**
+  - **The allow-list is `27` / `79` My Team and `28` / `78` Driver Career, each paired with its
+    season mode.** Raw ids (invariant #9), never the display names. `78` and `79` are measured;
+    `27` and `28` are the same two modes on the 2025 cars, included on that basis with no capture of
+    either in this database. The pairing keeps a session out of a season of the *other* career mode:
+    a misfiled career is left to the picker rather than extended.
+  - **Keyed on `game_mode`, not on the season id differing from the weekend id.** A career's first
+    weekend reports its own id as the season id (TELEMETRY_NOTES → *The three link identifiers*),
+    which is exactly what the proposal reads as an online mode. Reusing that check would refuse the
+    rest of the very weekend a career is usually started from; the index needs no special case for
+    it, since index 0 is round 1.
+  - **The weekend index is a cross-check, never the source.** The round comes from the track, as in
+    the proposal, and the index has to agree with it. It rests on two careers and no skipped weekend
+    (TELEMETRY_NOTES → *Hypothesis*), so **a disagreement refuses the write and is reported** —
+    neither round is ever corrected towards the other. Whichever way that measurement goes, no
+    wrong round is written: if the index counts weekends driven, the weekend after a skip disagrees
+    and is left to the user.
+  - **Only sessions stored for the first time, by a fresh recording or an import.** "First time" is
+    a uid absent from `stored_uids()` read on the worker's thread just before that ingest, and
+    returned by it — exact, because `MainWindow._busy()` allows one store-owning worker at a time and
+    the GUI thread never saves a session. **Never inside `ingest_capture`**, which `reingest_all`
+    and restore share: a `PIPELINE_VERSION` bump would re-assign what the user unassigned on
+    purpose, the resurrection problem tombstones solved for deletes. **Never on restore:**
+    `delete_session` refuses an assigned session, so every tombstone was unassigned when it was
+    deleted, and a restore puts back what was deleted. The uid comparison alone would get restore
+    wrong — a restored uid is absent from `stored_uids()` as well — which is why the boundary is the
+    operation and not the data. **Never on a page reload**, which would make looking at a page a
+    write. One edge is accepted: a session whose tombstone was *forgotten* and whose recording is
+    later imported counts as new, and its write is reported.
+  - **The latest attempt at a slot is the one written** *(amended 2026-09-17, before the rule was
+    committed; first agreed the other way round)*. A slot is re-driven because the earlier run went
+    wrong, so the attempt recorded last is the keeper — as `recorded_at` already assumes
+    (→ *`recorded_at` is the session's earliest capture packet time*). An attempt with a later one
+    stored is held and reported, wherever that later one came from: the same recording, a separate
+    one, or an import. An older attempt therefore never displaces a newer one, and two attempts
+    recorded at the same moment have no latest one and are both held. **Writing the latest
+    unassigns every earlier attempt at its slot placed in the same round**, including one placed by
+    hand, since nothing records who placed a session. Leaving it assigned is not an option:
+    standings sum every assigned race, so a race driven twice would score twice. An earlier attempt
+    placed in any other round is left alone. Recording the attempts separately — the usual case,
+    where the aborted attempt is assigned as soon as its own recording is stored — therefore ends in
+    the same placements as recording them together. Checked on a copy of this database: Jeddah's
+    Practice 2 was driven at 11:59 and 12:07, both in capture `20260823_135951`, and the 12:07
+    attempt was kept by hand; replaying the career one session or one capture at a time ends in
+    exactly the hand placements.
+  - **Every write, every attempt it unassigns and every hold is reported** once the recording or
+    import finishes — a dialog the user cannot miss, because the status line is overwritten by the
+    next thing they do. The result travels from the worker as plain values and is worded on the GUI
+    thread (core invariant #10).
+  - **A skipped weekend is not repaired.** It emits no session at all (TELEMETRY_NOTES), so a
+    career's standings lack that race whatever this does; entering or importing its Final
+    Classification by hand is PRIORITIES → E21.
+  - **Where it lives, as shipped.** The rule is pure and Qt-free in `domain/placement`
+    (`plan_career_placements` → a `CareerPlan` of `assigned` / `unassigned` / `held`, uids and
+    placements only, no store and no `SessionResult` in the answer); the I/O is
+    `pipeline.assign_career_sessions`, which reads, plans, writes and **never raises** — any failure
+    is logged and returned as an error with nothing written; the write is one
+    `SeasonStore.apply_placements(assign, unassign)` transaction, so an earlier attempt leaves its
+    round in the same commit as the later one enters it, and an unassign removes a row only while it
+    still names the placement that was planned. `archive_and_ingest` and `import_captures` take an
+    optional `season_store` and pass it on for a fresh recording or an import only; `reingest_all`
+    and `restore_session` have no such parameter, so the boundary cannot be crossed by accident.
+    The wording is a Qt-free `ui/sessions/assignment.career_assignment_message`, and the workers
+    build their own `SeasonStore` in-thread like every other store they own.
+  - **The rule is handed stored rows, never the objects the ingest just returned.** A stored
+    `recorded_at` reads back naive from SQLite while a freshly assembled one is tz-aware, and the
+    restated recorded-order keys compare `.timestamp()`, which reads a naive value as *local* time.
+    Fresh and stored keys therefore sit a UTC offset apart — measured 2.0 h under Europe/Zurich and
+    0 under UTC, so CI would never have shown it — which is enough to make an older attempt look
+    like the latest one and displace the keeper. `assign_career_sessions` takes **uids** and
+    re-reads them through the session store for exactly that reason (PRIORITIES has the shared
+    UTC-correct key as later work).
+  - **A failed assignment is a warning, never an "Error:".** The sessions were stored before the
+    assignment ran, so the status line keeps saying what was stored and a separate dialog carries
+    the failure, naming it and saying that nothing was assigned. The same is true of a held
+    session: the recording succeeded, and what is left is a choice, not a fault.
 - **`recorded_at` is the session's *earliest capture packet time*, not the ingest time.** A
   single recording often holds several attempts of the same session (a crash/restart, or a
   re-driven quali), and they need distinct, chronological timestamps to be told apart in the UI.
@@ -1386,7 +1479,10 @@ what would trigger revisiting it.
   - **Assignment stays explicit, and never replaces.** Assigning a later attempt to a round does
     not unassign an earlier one; the user unassigns the other attempts themselves, and may then
     delete them through the shared guarded delete. The automatic proposal in → Storage skips
-    multi-attempt slots for the same reason.
+    multi-attempt slots for the same reason. **E1e is the one exception** *(v0.12.0)*: for the
+    career sessions it writes itself, it takes the latest attempt and unassigns an earlier one in
+    the same round — reported, not silent (→ Storage, *The latest attempt at a slot is the one
+    written*).
   - **Only the unassigned pool is ambiguous.** `rounds_with_results` returns the sessions actually
     assigned to a round, so once the user has chosen, `grand_prix_session` and the calendar's
     Results column see one attempt and nothing downstream has to think about this at all.
